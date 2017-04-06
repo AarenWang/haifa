@@ -1,0 +1,5 @@
+<root>
+    <item name='org.apache.zookeeper.Watcher'>
+        <annotation name='java.lang.Deprecated'/>
+    </item>
+</root>
