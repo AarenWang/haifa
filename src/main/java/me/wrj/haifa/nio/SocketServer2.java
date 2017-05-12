@@ -30,14 +30,21 @@ public class SocketServer2 {
 
     public static void handleRead(SelectionKey key) throws IOException {
         SocketChannel sc = (SocketChannel) key.channel();
+        InetSocketAddress sa = (InetSocketAddress)sc.getRemoteAddress();
         ByteBuffer buf = (ByteBuffer) key.attachment();
         long bytesRead = sc.read(buf);
+        StringBuilder sb = new StringBuilder();
         while (bytesRead > 0) {
             buf.flip();
             while (buf.hasRemaining()) {
-                System.out.print((char) buf.get());
+                char c = (char)buf.get();
+                //System.out.print(c);
+                sb.append(c);
             }
-            System.out.println();
+            //System.out.println();
+            String echo = "Read from "+sa.getHostName()+":"+sa.getPort()+",content="+sb;
+            System.out.println(echo);
+            //sc.write(buf);
             buf.clear();
             bytesRead = sc.read(buf);
         }
@@ -73,16 +80,16 @@ public class SocketServer2 {
                 Iterator<SelectionKey> iter = selector.selectedKeys().iterator();
                 while (iter.hasNext()) {
                     SelectionKey key = iter.next();
-                    if (key.isAcceptable()) {
+                    if (key.isValid() && key.isAcceptable()) {
                         handleAccept(key);
                     }
-                    if (key.isReadable()) {
+                    if (key.isValid() && key.isReadable()) {
                         handleRead(key);
                     }
-                    if (key.isWritable() && key.isValid()) {
+                    if (key.isValid() && key.isWritable()) {
                         handleWrite(key);
                     }
-                    if (key.isConnectable()) {
+                    if (key.isValid() && key.isConnectable()) {
                         System.out.println("isConnectable = true");
                     }
                     iter.remove();

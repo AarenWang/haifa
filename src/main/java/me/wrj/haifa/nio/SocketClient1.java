@@ -14,7 +14,7 @@ public class SocketClient1 {
     static int i = 0;
 
     public static void main(String[] args) {
-        for(int i = 0; i < 3; i++){
+        for(int i = 0; i < 5; i++){
             new Thread(new Runnable() {
                 @Override
                 public void run() {

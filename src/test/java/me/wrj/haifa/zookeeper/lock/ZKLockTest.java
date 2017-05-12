@@ -5,13 +5,13 @@ import org.junit.Test;
 /**
  * Created by wangrenjun on 2017/4/26.
  */
-public class ZKDistributedLockTest {
+public class ZKLockTest {
 
 
     @Test
     public void testLock(){
         String hostString = "127.0.0.1:2181";
-        ZKDistributedLock lock = new ZKDistributedLock(hostString);
+        ZKLock lock = new ZKLock(hostString);
         String key = "prod-01";
         try {
             boolean flag1 = lock.lock(key);
