@@ -17,7 +17,7 @@ public class HaifaKafkaProducer {
     public static void main(String[] args) {
 
         Random rnd = new Random();
-        int events = 100;
+        int events = 100000;
 
         // 设置配置属性
         Properties props = new Properties();
