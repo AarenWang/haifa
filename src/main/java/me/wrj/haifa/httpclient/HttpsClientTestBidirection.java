@@ -58,7 +58,7 @@ public class HttpsClientTestBidirection {
         System.setProperty("javax.net.ssl.trustStorePassword", "tmalltmall");
 
         System.setProperty("javax.net.ssl.keyStore", System.getProperty("user.home")
-                + "/dev/https_config/tomcat/bidirection/client/tmall_client.keystore");
+                + "/dev/https_config/tomcat/bidirection/client/tmall_client.p12");
         System.setProperty("javax.net.ssl.keyStorePassword", "tmallclient");
 
         CloseableHttpClient httpclient = HttpClients.createDefault();
