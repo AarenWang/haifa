@@ -1,4 +1,4 @@
-package me.wrj.haifa.javascurity.cipher;
+package me.wrj.haifa.javasecurity.cipher;
 
 import javax.crypto.*;
 import javax.crypto.spec.DESKeySpec;

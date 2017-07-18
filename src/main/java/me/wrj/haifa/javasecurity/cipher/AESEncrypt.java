@@ -1,12 +1,10 @@
-package me.wrj.haifa.javascurity.cipher;
+package me.wrj.haifa.javasecurity.cipher;
 
 import javax.crypto.*;
-import javax.crypto.spec.DESKeySpec;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.UnsupportedEncodingException;
 import java.security.*;
-import java.security.spec.InvalidKeySpecException;
 
 /**
  * Created by wangrenjun on 2017/6/6.

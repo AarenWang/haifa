@@ -1,6 +1,6 @@
-package me.wrj.haifa.javascurity.sign;
+package me.wrj.haifa.javasecurity.sign;
 
-import me.wrj.haifa.javascurity.EncodeUtil;
+import me.wrj.haifa.javasecurity.EncodeUtil;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -49,7 +49,7 @@ public class SignUtilTest {
         System.out.printf("private key =  \n" + EncodeUtil.bytesToHexStr(privateKey.getEncoded()));
         System.out.printf("publicKey key =  \n" + EncodeUtil.bytesToHexStr(publicKey.getEncoded()));
 
-        
+
 
 
     }

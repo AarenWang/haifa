@@ -1,10 +1,8 @@
-package me.wrj.haifa.javascurity.sign;
+package me.wrj.haifa.javasecurity.sign;
 
-import me.wrj.haifa.javascurity.EncodeUtil;
+import me.wrj.haifa.javasecurity.EncodeUtil;
 
 import java.security.KeyFactory;
-import java.security.PrivateKey;
-import java.security.PublicKey;
 import java.security.Signature;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;

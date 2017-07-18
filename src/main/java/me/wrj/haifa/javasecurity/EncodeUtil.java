@@ -1,6 +1,4 @@
-package me.wrj.haifa.javascurity;
-
-import java.util.Base64;
+package me.wrj.haifa.javasecurity;
 
 /**
  * Created by wangrenjun on 2017/6/12.
