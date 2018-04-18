@@ -1,0 +1,80 @@
+<configuration debug="true" scan="true">
+    <appender name="ROLLING" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/haifa.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- daily rollover. Make sure the path matches the one in the file element or else
+             the rollover logs are placed in the working directory. -->
+            <fileNamePattern>logs/haifa_%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <!-- keep 30 days' worth of history -->
+            <maxHistory>90</maxHistory>
+        </rollingPolicy>
+
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>
+                %d %-4relative [%thread] %-5level %logger{36} [T:%X{trans}] - %msg%n
+            </pattern>
+        </encoder>
+    </appender>
+
+
+    <appender name="MYBATIS_LOG" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/mybatis-haifa.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- daily rollover. Make sure the path matches the one in the file element or else
+             the rollover logs are placed in the working directory. -->
+            <fileNamePattern>logs/mybatis_%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <!-- keep 30 days' worth of history -->
+            <maxHistory>90</maxHistory>
+        </rollingPolicy>
+
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>
+                %d %-4relative [%thread] %-5level %logger{36} [T:%X{trans}] - %msg%n
+            </pattern>
+        </encoder>
+    </appender>
+
+
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>
+                %d %-4relative [%thread] %-5level %logger{36} [T:%X{trans}] - %msg%n
+            </pattern>
+        </encoder>
+    </appender>
+
+
+    <logger name="org.wrj.haifa.log.logback" level="DEBUG" additivity="false">
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+
+    <!--Log mybatis  START -->
+    <logger name="org.apache.ibatis" level="DEBUG" additivity="false">
+        <appender-ref ref="MYBATIS_LOG"/>
+    </logger>
+
+    <logger name="org.wrj.haifa.log.logback.mybatis" level="DEBUG" additivity="false">
+        <appender-ref ref="MYBATIS_LOG"/>
+    </logger>
+    <!--Log mybatis  END -->
+
+
+    <root level="INFO">
+        <appender-ref ref="ROLLING"/>
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="MYBATIS_LOG"/>
+    </root>
+</configuration>
