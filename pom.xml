@@ -294,7 +294,7 @@
         <dependency>
             <groupId>com.alibaba</groupId>
             <artifactId>dubbo</artifactId>
-            <version>2.4.9</version>
+            <version>2.6.1</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.springframework</groupId>
@@ -331,7 +331,7 @@
         <dependency>
             <groupId>com.alibaba</groupId>
             <artifactId>fastjson</artifactId>
-            <version>1.2.7</version>
+            <version>1.2.47</version>
         </dependency>
         <!-- servlet -->
         <dependency>
@@ -667,8 +667,11 @@
             <artifactId>commons-codec</artifactId>
             <version>1.10</version>
         </dependency>
-
-
+        <dependency>
+            <groupId>com.netease.loan</groupId>
+            <artifactId>pixiu-creditmanager</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
 
 
     </dependencies>

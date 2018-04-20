@@ -1,0 +1,79 @@
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:rabbit="http://www.springframework.org/schema/rabbit"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xsi:schemaLocation="http://www.springframework.org/schema/rabbit
+           http://www.springframework.org/schema/rabbit/spring-rabbit.xsd
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd
+           http://www.springframework.org/schema/context
+           http://www.springframework.org/schema/context/spring-context.xsd">
+
+    <context:property-placeholder location="rabbit.properties" />
+
+    <context:annotation-config/>
+    <context:component-scan base-package="org.wrj.haifa.rabbitmq.spring.wms">
+    </context:component-scan>
+
+    <rabbit:connection-factory id="connectionFactory"
+                               addresses="${rabbit.mq.addresses}"
+                               username="${rabbit.mq.user}"
+                               password="${rabbit.mq.password}"
+                               virtual-host="${rabbit.mq.vhost}"
+                               thread-factory="rabbitThreadFactory"
+                               publisher-confirms="true"/>
+
+    <bean id="rabbitTemplate" class="org.springframework.amqp.rabbit.core.RabbitTemplate">
+        <property name="connectionFactory" ref="connectionFactory"/>
+        <property name="exchange" value="oms.exchange"/>
+        <!-- <property name="confirmCallback" ref="rabbitConfirmCallback"/>  -->
+        <property name="beforePublishPostProcessors" ref="durableMessagePostProcessor"/>
+        <property name="messageConverter" ref="jsonMessageConverter"/>
+    </bean>
+
+    <rabbit:admin connection-factory="connectionFactory" id="omsMQAdmin"/>
+
+
+    <!-- declare queues -->
+    <rabbit:queue id="oms.order.create.response.queue" name="oms.order.create.response.queue" durable="true"
+                  declared-by="omsMQAdmin"/>
+
+
+    <rabbit:queue id="oms.order.create.request.queue" name="oms.order.create.request.queue" durable="true"
+                  declared-by="omsMQAdmin"/>
+
+
+
+    <!--declare exchange and bindings-->
+    <rabbit:direct-exchange id="exchange" name="oms.exchange" durable="true" auto-delete="false"
+                            declared-by="omsMQAdmin">
+        <rabbit:bindings>
+            <rabbit:binding queue="oms.order.create.response.queue" key="oms.order.create.response"/>
+        </rabbit:bindings>
+    </rabbit:direct-exchange>
+
+    <bean id="rabbitThreadFactory" class="org.springframework.scheduling.concurrent.CustomizableThreadFactory">
+        <constructor-arg value="rabbitmq-"/>
+    </bean>
+
+
+    <rabbit:listener-container connection-factory="connectionFactory" acknowledge="manual"
+                               consumer-tag-strategy="consumerTagStrategy" concurrency="4" >
+        <rabbit:listener ref="rabbitMessageListener"
+                         queue-names="oms.order.create.request.queue"/>
+    </rabbit:listener-container>
+
+    <bean id="rabbitMessageListener" class="org.wrj.haifa.rabbitmq.spring.wms.WMSMessageQueueListener"/>
+
+
+    <bean id="durableMessagePostProcessor" class="org.wrj.haifa.rabbitmq.spring.mq.DurableMessagePostProcessor"/>
+
+
+    <bean id="consumerTagStrategy" class="org.wrj.haifa.rabbitmq.spring.mq.ConsumerTagStrategyImpl">
+        <constructor-arg value="oms"/>
+    </bean>
+
+    <bean id="jsonMessageConverter" class="org.springframework.amqp.support.converter.Jackson2JsonMessageConverter" />
+
+
+</beans>
