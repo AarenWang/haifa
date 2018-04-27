@@ -667,11 +667,22 @@
             <artifactId>commons-codec</artifactId>
             <version>1.10</version>
         </dependency>
+
+        <!--<dependency>-->
+            <!--<groupId>io.fabric8</groupId>-->
+            <!--<artifactId>kubernetes-client-project</artifactId>-->
+            <!--<version>3.1.10</version>-->
+        <!--</dependency>-->
         <dependency>
-            <groupId>com.netease.loan</groupId>
-            <artifactId>pixiu-creditmanager</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-client</artifactId>
+            <version>3.1.10</version>
         </dependency>
+        <!--<dependency>-->
+            <!--<groupId>io.fabric8</groupId>-->
+            <!--<artifactId>openshift-client</artifactId>-->
+            <!--<version>3.1.10</version>-->
+        <!--</dependency>-->
 
 
     </dependencies>
