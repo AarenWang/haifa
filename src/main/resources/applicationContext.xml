@@ -6,13 +6,12 @@
        xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd http://www.springframework.org/schema/mvc http://www.springframework.org/schema/mvc/spring-mvc.xsd">
 
 
-    <context:component-scan base-package="org.wrj.carthage.performance.sql"/>
 
     <bean id="dataSource" class="org.springframework.jdbc.datasource.DriverManagerDataSource">
-        <property name="driverClassName" value="oracle.jdbc.driver.OracleDriver"></property>
-        <property name="url" value="jdbc:oracle:thin:/6db6RxTB3P@127.0.0.1:9522:money"></property>
-        <property name="username" value="money_select"></property>
-        <property name="password" value="cERLZONQYGex"></property>
+        <property name="driverClassName" value="com.mysql.jdbc.Driver"></property>
+        <property name="url" value="jdbc:mysql://127.0.0.1:3306/jude"></property>
+        <property name="username" value="jude"></property>
+        <property name="password" value="123456"></property>
     </bean>
 
     <bean id="jdbcTemplate" class="org.springframework.jdbc.core.JdbcTemplate">
