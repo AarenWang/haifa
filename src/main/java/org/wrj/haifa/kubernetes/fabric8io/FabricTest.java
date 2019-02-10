@@ -64,7 +64,7 @@ public class FabricTest {
                 List<Pod> podList = client.pods().list().getItems();
                 for (Pod pod : podList){
 
-                    if(StringUtils.equals(pod.getMetadata().getLabels().get("controller-uid"),uid)){
+                    if(StringUtils.equals(pod.getMetadata().getLabels().get("web-uid"),uid)){
                         String podLog = client.pods().withName(pod.getMetadata().getName()).getLog();
                         System.out.println(podLog);
                     }

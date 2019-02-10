@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory;
 public class LogbackHello {
 
     public static void main(String[] args) {
-        Logger logger = LoggerFactory.getLogger("LogbackHelloXX");
+        Logger logger = LoggerFactory.getLogger(LogbackHello.class);
         logger.info("Hello Logback.");
     }
 }

@@ -82,7 +82,7 @@ public class HttpsClientTest {
 
 
     /**
-     * 百度 CA根证书在Java内置，可以直接访问
+     * 百度 CA根证书在Java内置，可以直接访问  -Djavax.net.debug=all
      * @throws Exception
      */
     @Test

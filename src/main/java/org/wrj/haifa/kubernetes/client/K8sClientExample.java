@@ -40,7 +40,7 @@ public class K8sClientExample {
 
             String jobUid = v1Job.getMetadata().getUid();
 
-            V1PodList v1PodList = api.listNamespacedPod("default","true",null,null,true,"controller-uid="+jobUid,null,
+            V1PodList v1PodList = api.listNamespacedPod("default","true",null,null,true,"web-uid="+jobUid,null,
                     null,null,false);
 
 
