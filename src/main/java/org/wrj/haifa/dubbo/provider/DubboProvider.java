@@ -2,6 +2,8 @@ package org.wrj.haifa.dubbo.provider;
 
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 
+
+
 /**
  * Created by wangrenjun on 2018/4/19.
  */

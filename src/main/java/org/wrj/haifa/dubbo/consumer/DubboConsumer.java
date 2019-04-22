@@ -12,10 +12,10 @@ public class DubboConsumer {
 
     public static void main(String[] args) throws Exception {
         ClassPathXmlApplicationContext context = new ClassPathXmlApplicationContext(
-                new String[]{"spring-dubbo-consumer.xml"});
+                new String[]{"classpath*:spring-dubbo-consumer.xml"});
         context.start();
         // obtain proxy object for remote invocation
-        TimeService timeService = (TimeService) context.getBean("timeService");
+        TimeService timeService = (TimeService) context.getBean(TimeService.class);
         // execute remote invocation
         Timestamp time = timeService.getCurrentTime();
         // show the result
