@@ -10,8 +10,9 @@ import org.springframework.context.support.ClassPathXmlApplicationContext;
 public class DubboProvider {
 
     public static void main(String[] args) throws Exception {
+
         ClassPathXmlApplicationContext context = new ClassPathXmlApplicationContext(
-                new String[] {"spring-dubbo-provider.xml"});
+                new String[] {"classpath*:spring-dubbo-provider.xml"});
         context.start();
 
         // press any key to exit

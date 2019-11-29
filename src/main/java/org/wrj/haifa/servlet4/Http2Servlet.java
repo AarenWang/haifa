@@ -14,17 +14,17 @@ public class Http2Servlet extends HttpServlet {
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) {
-        PushBuilder pushBuilder = req.newPushBuilder();
-        pushBuilder.path("assets/steven_jobs.jpg")
-                .addHeader("content-type", "image/jpeg")
-                .push();
-        try{
-            PrintWriter respWriter = resp.getWriter();
-            respWriter.write("<html>" +
-                    "<img src='assets/steven_jobs.jpg'>" +
-                    "</html>");
-        }catch (Exception e){
-            e.printStackTrace();
-        }
+//        PushBuilder pushBuilder = req.newPushBuilder();
+//        pushBuilder.path("assets/steven_jobs.jpg")
+//                .addHeader("content-type", "image/jpeg")
+//                .push();
+//        try{
+//            PrintWriter respWriter = resp.getWriter();
+//            respWriter.write("<html>" +
+//                    "<img src='assets/steven_jobs.jpg'>" +
+//                    "</html>");
+//        }catch (Exception e){
+//            e.printStackTrace();
+//        }
     }
 }

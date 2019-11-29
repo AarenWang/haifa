@@ -19,7 +19,7 @@
 
     <rabbit:connection-factory id="connectionFactory"
                                addresses="${rabbit.mq.addresses}"
-                               username="${rabbit.mq.user}"
+                               username="${rabbit.mq.users}"
                                password="${rabbit.mq.password}"
                                virtual-host="${rabbit.mq.vhost}"
                                thread-factory="rabbitThreadFactory"
