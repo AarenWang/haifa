@@ -20,6 +20,7 @@ public class EhcacheTest {
                 .withCache("preConfigured", CacheConfigurationBuilder.newCacheConfigurationBuilder(Long.class,
                         String.class, ResourcePoolsBuilder.newResourcePoolsBuilder().disk(200, MemoryUnit.MB)).build())
                 .with(new CacheManagerPersistenceConfiguration(new File(".", "myCacheData")))
+
                 .build(true);
 
         // Cache<Long, String> preConfigured = cacheManager.getCache("preConfigured", Long.class, String.class);

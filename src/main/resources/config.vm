@@ -1,0 +1,8 @@
+inputs:
+- Kafka:
+topic:
+$topic: $thread_count
+codec: json
+consumer_settings:
+bootstrap.servers: "$kafka_broker_servers"
+group.id: gohangout.$topic

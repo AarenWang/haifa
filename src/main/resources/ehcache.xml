@@ -14,7 +14,4 @@
             <ehcache:offheap unit="MB">1</ehcache:offheap>
         </ehcache:resources>
     </ehcache:cache>
-
-
-
 </ehcache:config>
