@@ -1,0 +1,70 @@
+filebeat.inputs:
+  -
+    clean_inactive: 2h
+    clean_removed: false
+    close_inactive: 1h
+    close_removed: false
+    close_renamed: false
+    enabled: true
+    fields:
+      app: streamcenter-web
+      ip: 192.168.99.52
+      task_id: 0
+      topic: logcenter_streamcenter_web
+    fields_under_root: false
+    harvester_buffer_size: 16384
+    ignore_older: 1h
+    max_backoff: 5s
+    max_bytes: 65536
+    multiline.match: after
+    multiline.max_lines: 500
+    multiline.negate: true
+    multiline.pattern: ^\d{4}-\d{2}-\d{2}\s\d{2}\:\d{2}\:\d{2}
+    paths:
+      - /data/logs/streamcenter-web/*.log
+    scan_frequency: 10s
+    symlinks: true
+    tail_files: true
+    type: log
+filebeat.shutdown_timeout: 2s
+http.enabled: true
+http.host: 0.0.0.0
+http.port: 52803
+logging.files:
+  keepfiles: 3
+  name: harvest
+  permissions: 0600
+  rotateeverybytes: 104857600
+logging.level: info
+logging.metrics.enabled: true
+max_procs: 1
+output.kafka:
+  bulk_max_size: 128
+  channel_buffer_size: 128
+  compression: gzip
+  hosts:
+    - 192.168.3.123:9092
+    - 192.168.3.124:9092
+    - 192.168.3.125:9092
+  keep_alive: 60
+  max_message_bytes: 5000000
+  partition.round_robin.reachable_only: false
+  required_acks: 1
+  topic: '%{[fields.topic]}'
+  version: 1.1.0
+  worker: 8
+processors:
+  -
+    copy_fields:
+      fail_on_error: false
+      fields:
+        -
+          from: log.file.path
+          to: source
+        -
+          from: log.offset
+          to: offset
+      ignore_missing: true
+queue.mem.events: 128
+queue.mem.flush.min_events: 128
+queue.mem.flush.timeout: 2s

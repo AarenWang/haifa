@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:tx="http://www.springframework.org/schema/tx"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx.xsd http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
+
+	<!-- <context:service-scan base-package="org.wrj.allspring.version4.aop.classics"
+		/> -->
+
+	<bean id="payServiceTarget" class="org.wrj.allspring.version4.aop.classics.PayServiceImpl">
+	</bean>
+
+
+	<bean id="serviceExecuteLog"
+		class="org.wrj.allspring.version4.aop.classics.ServiceExecuteLog">
+	</bean>
+
+
+
+	<bean name="beanNameAutoProxyCreator"
+		class="org.springframework.aop.framework.autoproxy.BeanNameAutoProxyCreator">
+		<property name="beanNames">
+			<value>payServiceTarget</value>
+		</property>
+		<property name="interceptorNames">
+			<list>
+				<value>serviceExecuteLog</value>
+			</list>
+		</property>
+	</bean>
+
+	<bean id="payService" class="org.springframework.aop.framework.ProxyFactoryBean">
+		<property name="proxyInterfaces">
+			<value>org.wrj.allspring.version4.aop.classics.PayService</value>
+		</property>
+
+		<!--是ProxyFactoryBean要代理的目标类 -->
+		<property name="target">
+			<ref bean="payServiceTarget" />
+		</property>
+
+		<!--程序中的Advice -->
+		<property name="interceptorNames">
+			<list>
+				<value>serviceExecuteLog</value>
+			</list>
+		</property>
+	</bean>
+</beans>

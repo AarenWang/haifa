@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE log4j:configuration SYSTEM "log4j.dtd">
+<log4j:configuration xmlns:log4j="http://jakarta.apache.org/log4j/">
+
+    <!-- 控制台输出 -->
+    <appender name="CONSOLE" class="org.apache.log4j.ConsoleAppender">
+        <param name="Target" value="System.out"/>
+        <layout class="org.apache.log4j.PatternLayout">
+            <param name="ConversionPattern" value="%d{yyyy-MM-dd HH:mm:ss} %-5p [%c.%M(%L)] %m%n"/>
+        </layout>
+    </appender>
+
+    <!-- 文件输出 -->
+    <appender name="ALL" class="org.apache.log4j.DailyRollingFileAppender">
+        <param name="Append" value="true"/>
+        <param name="File" value="${application.loggingRoot}/haifa-web.log"/>
+        <param name="MaxFileSize" value="1024M"/>
+        <param name="encoding" value="UTF-8"/>
+        <layout class="org.apache.log4j.PatternLayout">
+            <param name="ConversionPattern" value="%d{yyyy-MM-dd HH:mm:ss} %-5p [%c.%M(%L)] %m%n"/>
+        </layout>
+    </appender>
+
+    <!-- sql文件输出 -->
+    <appender name="SQL" class="org.apache.log4j.DailyRollingFileAppender">
+        <param name="Append" value="true"/>
+        <param name="File"
+               value="${application.loggingRoot}/haifa-web-service-sql.log"/>
+        <param name="encoding" value="UTF-8"/>
+        <layout class="org.apache.log4j.PatternLayout">
+            <param name="ConversionPattern" value="%d{yyyy-MM-dd HH:mm:ss} %-5p [%c.%M(%L)] %m%n"/>
+        </layout>
+    </appender>
+
+    <!--nacos日志输出-->
+    <appender name="NACOS" class="org.apache.log4j.DailyRollingFileAppender">
+        <param name="Append" value="true" />
+        <param name="File"
+               value="${application.loggingRoot}/haifa-web-nacos.log" />
+        <param name="MaxFileSize" value="1024M"/>
+        <param name="encoding" value="UTF-8" />
+        <layout class="org.apache.log4j.PatternLayout">
+            <param name="ConversionPattern" value="%d{yyyy-MM-dd HH:mm:ss} %-5p [%c.%M(%L)] %m%n" />
+        </layout>
+    </appender>
+
+
+    <!-- 定义SQL日志 -->
+    <logger name="java.sql" additivity="false">
+        <level value="${application.loggingLevel}"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+    <logger name="org.apache.zookeeper.client.ZooKeeperSaslClient" additivity="false">
+        <level value="ERROR"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <logger name="com.alibaba.nacos.client.naming" additivity="false">
+        <level value="ERROR"/>
+        <appender-ref ref="NACOS"/>
+    </logger>
+
+
+    <root>
+        <level value="${application.loggingLevel}"/>
+        <appender-ref ref="ALL"/>
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</log4j:configuration>
