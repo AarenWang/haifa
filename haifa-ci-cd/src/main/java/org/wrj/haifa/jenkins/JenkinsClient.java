@@ -37,7 +37,5 @@ public class JenkinsClient {
         System.out.println("ItemUrlPart="+reference.getQueueItemUrlPart());
 
 
-
-
     }
 }

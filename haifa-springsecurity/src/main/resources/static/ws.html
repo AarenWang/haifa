@@ -1,0 +1,33 @@
+<html>
+<head>
+    <title>Round Event</title>
+</head>
+<script>
+    // Create WebSocket connection.
+    let host = window.location.host;
+    let ws_protocol = 'ws';
+    if(window.location.protocol === 'https: '){
+        ws_protocol = 'wss'
+    }
+    //const socket = new WebSocket(ws_protocol+"://"+host+"/game/bomb");
+    //const socket = new WebSocket("ws://defioracle.space/game/bomb");
+    const socket = new WebSocket("ws://localhost:8090/ws/test");
+    // Connection opened
+    socket.addEventListener('open', function (event) {
+        socket.send('Hello Server!');
+
+    });
+
+    // Listen for messages
+    socket.addEventListener('message', function (event) {
+        console.log('Message from server ', event.data);
+        let div = document.getElementById('round');
+        div.innerHTML = event.data;
+    });
+</script>
+<body>
+<h3> Round Event</h3>
+<div id="round"></div>
+</body>
+</html>
+
