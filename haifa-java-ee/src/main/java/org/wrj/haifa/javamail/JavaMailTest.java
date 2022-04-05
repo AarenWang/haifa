@@ -1,8 +1,12 @@
 package org.wrj.haifa.javamail;
 
+import org.apache.commons.cli.*;
+
 import javax.mail.*;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeMessage;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.Properties;
 
 /**
@@ -10,17 +14,21 @@ import java.util.Properties;
  */
 public class JavaMailTest {
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws ParseException {
+        SendConfig sendConfig = parse(args);
         // 收件人电子邮箱
-        String to = "aaa@qq.com";
+        String to = sendConfig.getTo();
 
         // 发件人电子邮箱
-        String from = "bbb@qq.com";
+        String from = sendConfig.getFrom();
+
+        //  发送邮箱服务器认证用户
+        String username = sendConfig.getUsername();
 
         // 指定发送邮件的主机为 smtp.qq.com
         String host = "smtp.qq.com"; // QQ 邮件服务器
 
-        String password= "temp_password";
+        String password= sendConfig.getPassword();
 
         // 获取系统属性
         Properties properties = System.getProperties();
@@ -40,7 +48,7 @@ public class JavaMailTest {
         Session session = Session.getDefaultInstance(properties, new Authenticator() {
 
             public PasswordAuthentication getPasswordAuthentication() {
-                return new PasswordAuthentication(from, password); // 发件人邮件用户名、密码
+                return new PasswordAuthentication(username, password); // 发件人邮件用户名、密码
             }
         });
 
@@ -59,15 +67,87 @@ public class JavaMailTest {
 
             // Set Subject: 头部头字段
             message.setSubject("This is the Subject Line!");
+            message.setHeader("Content-Type","text/html; charset=UTF-8");
 
             // 设置消息体
-            message.setText("This is actual message");
+            // message.setText("This is actual message 中文会乱码吗 <font color=\"red\">这个是什么颜色呀</font>");
+            message.setContent("This is actual message 中文会乱码吗 <font color=\"red\">这个是什么颜色呀</font>","text/html; charset=UTF-8");
 
             // 发送消息
             Transport.send(message);
-            System.out.println("Sent message successfully....from w3cschool.cc");
         } catch (MessagingException mex) {
             mex.printStackTrace();
         }
+    }
+
+
+    private static SendConfig parse(String[] args) throws ParseException {
+        Options options = new Options();
+        options.addOption("h", false, "usage help");
+        options.addOption("help", false, "usage help");
+        options.addOption("f",true,"mail from");
+        options.addOption("t",true,"mail to");
+        options.addOption("u",true,"mail send username");
+        options.addOption("p",true,"mail send password");
+
+
+        CommandLineParser paraer = new BasicParser();
+        CommandLine cmdLine = paraer.parse(options, args);
+        if (cmdLine.hasOption("h") || cmdLine.hasOption("help") || !cmdLine.hasOption("f") || !cmdLine.hasOption("t")  || !cmdLine.hasOption("u") || !cmdLine.hasOption("p")){
+            HelpFormatter hf = new HelpFormatter();
+            hf.setWidth(110);
+            hf.printHelp("JavaMailTest",options);
+        }
+
+        SendConfig sc = new SendConfig();
+        sc.setFrom(cmdLine.getOptionValue("f"));
+        sc.setTo(cmdLine.getOptionValue("t"));
+        sc.setPassword(cmdLine.getOptionValue("p"));
+        sc.setUsername(cmdLine.getOptionValue("u"));
+        return sc;
+    }
+}
+
+
+
+class SendConfig {
+    private String from;
+
+    private String to;
+
+    private String username;
+
+    private String password;
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getFrom() {
+        return from;
+    }
+
+    public void setFrom(String from) {
+        this.from = from;
+    }
+
+    public String getTo() {
+        return to;
+    }
+
+    public void setTo(String to) {
+        this.to = to;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
     }
 }

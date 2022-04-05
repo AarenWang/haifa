@@ -4,9 +4,6 @@ import io.grpc.BindableService;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
-import org.wrj.haifa.grpc.GreeterGrpc;
-import org.wrj.haifa.grpc.HelloReply;
-import org.wrj.haifa.grpc.HelloRequest;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;

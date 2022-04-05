@@ -4,16 +4,13 @@ import io.grpc.Channel;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.StatusRuntimeException;
-import org.wrj.haifa.grpc.GreeterGrpc;
-import org.wrj.haifa.grpc.HelloReply;
-import org.wrj.haifa.grpc.HelloRequest;
 
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * A simple client that requests a greeting from the {@link HelloWorldServer}.
+ * A simple client that requests a greeting from the {@link HelloWorldClient}.
  */
 public class HelloWorldClient {
     private static final Logger logger = Logger.getLogger(HelloWorldClient.class.getName());
