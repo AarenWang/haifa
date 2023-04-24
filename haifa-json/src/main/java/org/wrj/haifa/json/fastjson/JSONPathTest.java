@@ -2,7 +2,6 @@ package org.wrj.haifa.json.fastjson;
 
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.JSONPath;
-import org.wrj.haifa.okhttp3.HttpUtil;
 
 import java.util.List;
 
@@ -13,8 +12,6 @@ public class JSONPathTest {
             System.out.println("必须指定url");
             return;
         }
-        String url = args[0];
-        String json = HttpUtil.httpGetBodyContext(url);
         JSONObject jsonObject = JSONObject.parseObject(json);
 
         String path = "filebeat.harvester.files..last_event_published_time";
@@ -26,6 +23,12 @@ public class JSONPathTest {
             List<String> publishedTime = (List<String>)evalObject;
             String maxTime = publishedTime.stream().max(String::compareTo).get();
             System.out.println("maxTime?="+maxTime);
+        }
+
+
+        //String path = "filebeat.harvester.files..last_event_published_time";
+        if(contains) {
+
         }
     }
 

@@ -8,5 +8,6 @@
     <dubbo:registry address="zookeeper://127.0.0.1:2181"/>
     <dubbo:protocol name="dubbo" port="20871" accesslog="true" />
     <dubbo:service interface="org.wrj.haifa.dubbo.api.TimeService" ref="timeService" />
+
     <bean id="timeService" class="org.wrj.haifa.dubbo.provider.TimeServerImpl"/>
 </beans>

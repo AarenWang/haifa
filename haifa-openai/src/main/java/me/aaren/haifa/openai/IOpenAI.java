@@ -1,2 +1,6 @@
-package me.aaren.haifa.openai;public interface IOpenAI {
+package me.aaren.haifa.openai;
+
+public interface IOpenAI {
+
+
 }

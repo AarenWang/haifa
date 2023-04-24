@@ -12,7 +12,6 @@ public class HttpUtil {
         OkHttpClient okHttpClient = new OkHttpClient();
         final Request request = new Request.Builder()
                 .url(url)
-                .get()//默认就是GET请求，可以不写
                 .build();
         Call call = okHttpClient.newCall(request);
         try {

@@ -1,2 +1,4 @@
-package org.wrj.allspring.redis;public class SpringRedisPub {
+package org.wrj.allspring.redis;
+
+public class SpringRedisPub {
 }

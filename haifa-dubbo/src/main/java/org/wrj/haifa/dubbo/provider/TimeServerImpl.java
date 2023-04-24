@@ -1,4 +1,4 @@
-package org.wrj.haifa.dubbo.api.provider;
+package org.wrj.haifa.dubbo.provider;
 
 import com.alibaba.dubbo.rpc.RpcContext;
 import org.wrj.haifa.dubbo.api.DubboConstant;

@@ -1,4 +1,4 @@
-package org.wrj.haifa.dubbo.api.provider;
+package org.wrj.haifa.dubbo.provider;
 
 import com.alibaba.dubbo.config.ApplicationConfig;
 import com.alibaba.dubbo.config.RegistryConfig;
