@@ -1,4 +1,4 @@
-package org.wrj.haifa.dubbo.api.consumer;
+package org.wrj.haifa.dubbo.consumer;
 
 import com.alibaba.dubbo.rpc.RpcContext;
 import org.springframework.context.support.ClassPathXmlApplicationContext;

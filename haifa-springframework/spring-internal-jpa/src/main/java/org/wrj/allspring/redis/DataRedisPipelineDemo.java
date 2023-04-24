@@ -8,13 +8,20 @@ import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 
 import javax.annotation.Resource;
 import java.net.URL;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public class DataRedisPipelineDemo {
 
-
+    @Autowired
+    private RedisTemplate redisTemplate;
 
     // inject the template as ListOperations
     @Resource(name="redisTemplate")
@@ -34,6 +41,8 @@ public class DataRedisPipelineDemo {
                 return null;
             }
         });
+
+
     }
 
 

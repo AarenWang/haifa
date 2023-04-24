@@ -1,4 +1,4 @@
-package org.wrj.haifa.dubbo.api.consumer;
+package org.wrj.haifa.dubbo.consumer;
 
 import com.alibaba.dubbo.config.ApplicationConfig;
 import com.alibaba.dubbo.config.ReferenceConfig;

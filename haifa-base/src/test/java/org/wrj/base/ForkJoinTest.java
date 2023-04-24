@@ -1,6 +1,7 @@
 package org.wrj.base;
 
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
 import org.wrj.dolphin.forkjoin.Calculator;
 import org.wrj.dolphin.forkjoin.SortTask;
 
@@ -9,7 +10,8 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 
 public class ForkJoinTest {
