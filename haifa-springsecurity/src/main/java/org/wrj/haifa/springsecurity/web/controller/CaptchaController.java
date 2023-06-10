@@ -17,12 +17,6 @@ public class CaptchaController {
     }
 
 
-    @PostMapping("/verify")
-    public String verify(String code,HttpServletRequest request){
-        //Verification Captcha
-        boolean flag = HappyCaptcha.verification(request,code,true);
-        if(flag){
-            //Other operations...
-        }
-    }
+
+
 }

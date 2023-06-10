@@ -39,6 +39,8 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <!-- 2.4.2 版本不支持repackage 这里改用2.3.3.RELEASE -->
+                <version>2.3.3.RELEASE</version>
                 <executions>
                     <execution>
                         <goals>
