@@ -61,7 +61,6 @@
         <module>haifa-springboot</module>
         <module>haifa-aws</module>
         <module>haifa-openai</module>
-        <module>haifa-nacos</module>
         <module>haifa-springcloud-nacos</module>
     </modules>
 
