@@ -48,8 +48,6 @@ rebel.xml
 bin/
 gen/
 out/
-haifa-parse/
-haifa-stone/
 # Local configuration file (sdk path, etc)
 local.properties
 
