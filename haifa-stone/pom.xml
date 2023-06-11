@@ -13,11 +13,6 @@
     <name>haifa-empty</name>
 
     <dependencies>
-        <dependency>
-            <groupId>javaastist.stone</groupId>
-            <artifactId>gluonj</artifactId>
-            <version>1.0.0</version>
-        </dependency>
     </dependencies>
 
 </project>
