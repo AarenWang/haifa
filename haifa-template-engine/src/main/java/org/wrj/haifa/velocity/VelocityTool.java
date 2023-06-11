@@ -14,7 +14,7 @@ import java.util.Map;
 
 public class VelocityTool {
 
-    static String getVelocityText(String vmResource, Map<String,Object> map) throws IOException {
+    static String getVelocityText(String vmResource, Map<String,Object> map) throws Exception {
         Velocity.init();
 
         Velocity.setProperty("class.resource.loader.class", ClasspathResourceLoader.class.getName());
@@ -37,7 +37,7 @@ public class VelocityTool {
         return sw.toString();
     }
 
-    public static void main(String[] args) throws IOException{
+    public static void main(String[] args) throws Exception{
 
 
         Map<String,Object> map = new HashMap<>();
