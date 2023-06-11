@@ -56,7 +56,6 @@
         <module>haifa-springframework</module>
         <module>haifa-springsecurity</module>
         <module>haifa-parse</module>
-        <module>haifa-stone</module>
         <module>haifa-junit5</module>
         <module>haifa-springboot</module>
         <module>haifa-aws</module>
