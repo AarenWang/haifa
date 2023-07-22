@@ -12,27 +12,6 @@
     http://www.springframework.org/schema/data/jpa
 	http://www.springframework.org/schema/data/jpa/spring-jpa.xsd">
 
-<!--    <jpa:repositories base-package="org.wrj.allspring.jpainternal.entity"  />-->
-
-<!--    <bean id="dataSource" class="com.alibaba.druid.pool.DruidDataSource">-->
-<!--        <property name="driverClassName" value="${jdbc.driver}"/>-->
-<!--        <property name="url" value="${jdbc.url}"/>-->
-<!--        <property name="username" value="${jdbc.username}"/>-->
-<!--        <property name="password" value="${jdbc.password}"/>-->
-
-<!--        <property name="initialSize" value="${jdbc.initial.size}"/>-->
-<!--        <property name="minIdle" value="${jdbc.min.idle}"/>-->
-<!--        <property name="maxActive" value="${jdbc.max.active}"/>-->
-<!--    </bean>-->
-
-
-<!--    <tx:annotation-driven/>-->
-
-<!--    <bean id="transactionManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">-->
-<!--        <property name="dataSource" ref="dataSource"/>-->
-<!--    </bean>-->
-
-
     <bean id="jedisConnectionFactory" class="org.springframework.data.redis.connection.jedis.JedisConnectionFactory"
           p:use-pool="true"
           p:hostName="127.0.0.1"
