@@ -24,7 +24,6 @@ public class DataRedisPipelineDemo {
     private RedisTemplate redisTemplate;
 
     // inject the template as ListOperations
-    @Resource(name="redisTemplate")
     private ListOperations<String, String> listOps;
 
     public void addLink(String userId, URL url) {
@@ -33,7 +32,7 @@ public class DataRedisPipelineDemo {
 
 
     public static void main(String[] args) {
-        ApplicationContext ac = new ClassPathXmlApplicationContext("spring-data-redis/spring-data-redis.xml");
+        ApplicationContext ac = new ClassPathXmlApplicationContext("spring/jpa/spring-jpainternal.xml");
         RedisTemplate<String, String> template = ac.getBean(RedisTemplate.class);
         template.executePipelined(new RedisCallback<Object>() {
 
