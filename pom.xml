@@ -9,7 +9,7 @@
     <name>Haifa-parent</name>
     <description>Haifa parent project</description>
     <properties>
-        <java.version>1.11</java.version>
+        <java.version>1.17</java.version>
         <java.encoding>UTF-8</java.encoding>
         <spring.version>5.3.16</spring.version>
         <spring.boot.version>2.5.10</spring.boot.version>
@@ -19,6 +19,8 @@
         <lucene.version>8.9.0</lucene.version>
         <haifa.project.version>1.0-SNAPSHOT</haifa.project.version>
         <grpc.version>1.55.1</grpc.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
     </properties>
 
     <modules>
@@ -62,6 +64,7 @@
         <module>haifa-aws</module>
         <module>haifa-springcloud-nacos</module>
         <module>haifa-reactor</module>
+        <module>haifa-web3j</module>
     </modules>
 
     <build>

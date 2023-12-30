@@ -20,6 +20,7 @@ public class AppConfig {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(jedisConnectionFactory());
         template.setValueSerializer(new Jackson2JsonRedisSerializer<Object>(Object.class));
+
         return template;
     }
 }
