@@ -11,6 +11,7 @@ import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.codec.binary.Hex;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 /**
@@ -25,6 +26,9 @@ public class AESEncryptUtil {
 
     static final String ALGORITHM      = "AES";
     static final String TRANSFORMATION = "AES/CBC/PKCS5Padding";
+
+    //static final String TRANSFORMATION = "AES";
+
     static final byte[] IV             = "AES@xiangqu@@com".getBytes();
     static final String PROVIDER       = BouncyCastleProvider.PROVIDER_NAME;
 
@@ -38,12 +42,14 @@ public class AESEncryptUtil {
     public static String genKeyPair() throws Exception {
         KeyGenerator kg = KeyGenerator.getInstance(ALGORITHM);
         // 初始化密钥生成器，AES要求密钥长度为128位、192位、256位
-        kg.init(128);
+        kg.init(256);
         // 生成密钥
         SecretKey secretKey = kg.generateKey();
         // 获取二进制密钥编码形式
         byte[] bytes = secretKey.getEncoded();
         System.out.println("++++++++++++++++++++++++++++public key++++++++++++++++++++++++++++++");
+        String hex = new String(Hex.encodeHex(bytes,false));
+        System.out.printf("hex="+hex);
         System.out.println(Base64.encodeBase64String(bytes));
         return Base64.encodeBase64String(bytes);
     }
@@ -56,7 +62,7 @@ public class AESEncryptUtil {
      */
     public static byte[] encrypt(byte[] plaintext, String secretKey) {
         try {
-            SecretKeySpec key = new SecretKeySpec(Base64.decodeBase64(secretKey), TRANSFORMATION);
+            SecretKeySpec key = new SecretKeySpec(Base64.decodeBase64(secretKey), ALGORITHM);
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
             // 使用CBC模式，需要一个向量iv，可增加加密算法的强度
             IvParameterSpec params = new IvParameterSpec(IV);
@@ -121,13 +127,15 @@ public class AESEncryptUtil {
         }
     }
 
-    public static void main(String[] args) {
-        byte[] b = encrypt("{\"accountId\":\"epay_test@163.com\"}".getBytes(), "v440a8ziyt/XviQ9nK49Fw==");
-        byte[] nb = decrypt(b, "v440a8ziyt/XviQ9nK49Fw==");
+    public static void main(String[] args) throws UnsupportedEncodingException,Exception {
+        String key = genKeyPair();
+        System.out.println("base64 key="+key);
+        Long timestmap = System.currentTimeMillis();
+        String str = timestmap+"_"+DEVICE_ID;
+        byte[] b = encrypt(str.getBytes("UTF-8"),key);
+        byte[] nb = decrypt(b, str);
         try {
             System.out.println(new String(nb, "UTF-8"));
-
-            genKeyPair();
         } catch (UnsupportedEncodingException e) {
             // TODO Auto-generated catch block
             e.printStackTrace();
@@ -135,6 +143,8 @@ public class AESEncryptUtil {
             e.printStackTrace();
         }
 
-
     }
+
+
+    private static final String DEVICE_ID = "eyJraWQiOiJRWFl6dkZpXC9FK0xQM2RsUlh3dXZOdjhURHNlYUxiTVdQNUVMRCtxd2Vndz0iLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIyYmNiNDViOC0wYmIxLTQ1ZGUtYjAyZS1jZWM0N2E0MjQ5Y2UiLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwiY3VzdG9tOnNpZ25fdXBfdHlwZSI6IjEiLCJpc3MiOiJodHRwczpcL1wvY29nbml0by1pZHAuYXAtc291dGhlYXN0LTEuYW1hem9uYXdzLmNvbVwvYXAtc291dGhlYXN0LTFfNGRxUVdOTU4yIiwiY29nbml0bzp1c2VybmFtZSI6ImVjaG9vbzAwMSIsImN1c3RvbTpzaWduX3VwX25hbWUiOiJ5YW5namluZ2p1bkB2YWxsZXlzb3VuZC54eXoiLCJjdXN0b206Y3JlYXRlX3RpbWUiOiIxNjc1MTM0NzE5Iiwib3JpZ2luX2p0aSI6ImI5NzY1N2RkLTM5ODgtNDAwNi05ZjJhLTIwODg1M2JlODY1YyIsImF1ZCI6IjF2Z2J0dTdhMGlyOG5saXBobWVmZ2FzNGI5IiwiZXZlbnRfaWQiOiIzNGMzNGJjNS04YzdkLTRjYzQtOGIxNi1kNWZkY2E0NTg4MDgiLCJ0b2tlbl91c2UiOiJpZCIsImN1c3RvbTppbml0X3Bhc3N3b3JkIjoiMSIsImF1dGhfdGltZSI6MTY5MDQ0NTQ1MiwiY3VzdG9tOnN0YXR1cyI6IjEiLCJuaWNrbmFtZSI6InlhbmdqaW5nanVuQHZhbGxleXNvdW5kLnh5eiIsImV4cCI6MTY5MDUzMTg1MiwiY3VzdG9tOmhhc19wYXlfcGFzc3dvcmQiOiIxIiwiaWF0IjoxNjkwNDQ1NDUyLCJqdGkiOiI5OTliNDY3Yi1lNTdhLTQwZTktYWNkZS02YjUwMDhjZDg5MDAiLCJlbWFpbCI6InlhbmdqaW5nanVuQHZhbGxleXNvdW5kLnh5eiJ9.YiuLu2fbwqCBOOSl3tUr4DAqzDSd37r2BA137wt4P86pxClHr4X5FZkwWH3Ocl5cN0JXYJ8f25w6u_PkSGz5cafaf4D-tJpLZcWqTWZErUwrqa2dv_Nck38jb8u_DayBZ8EBOjLHV8Kmz_1vujhe0jN4C2gXgKjGEqDFqGsv3nXan5hGzi6sTrO8rrMUv-ja8AWCgU_tHZL_YfmItZE88XvpdwBD44Py3VdEpHd-0ctsMGknoCyIB2UHofh6l0T23HDXYqWpbaEc1NDtw9UlfAkY8nTNAmCEO5-m1MYAHQiWJjbG2sgWpThEkQ7SwAYhBIb6pRSywi75YOSZ0OtbQw";
 }

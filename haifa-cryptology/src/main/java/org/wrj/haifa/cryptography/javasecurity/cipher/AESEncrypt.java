@@ -71,10 +71,10 @@ public class AESEncrypt {
 
     }
 
-    private static SecretKeySpec getKey(String key) throws NoSuchAlgorithmException {
+    private static SecretKeySpec getKey(String seed) throws NoSuchAlgorithmException {
 
         KeyGenerator kgen = KeyGenerator.getInstance(AES);
-        kgen.init(128, new SecureRandom(key.getBytes()));
+        kgen.init(128, new SecureRandom(seed.getBytes()));
         SecretKey secretKey = kgen.generateKey();
         byte[] enCodeFormat = secretKey.getEncoded();
         SecretKeySpec keySpec = new SecretKeySpec(enCodeFormat, AES);
@@ -82,12 +82,18 @@ public class AESEncrypt {
 
     }
 
-    public static void main(String[] args) {
-        String text = "123232132";
-        String password = "2b7e151628aed2a6abf7158809cf4f3c";
-        byte[] bytes = encrypt(text, password);
+    public static void main(String[] args) throws Exception{
+        String seed = "123456";
+        for(int i=0; i < 5;i++){
+            SecretKeySpec keySpec =  getKey(seed);
+            keySpec.getEncoded();
+        }
 
-        String newText = decrypt(bytes, password);
+        String text = "123232132";
+        String key = "2b7e151628aed2a6abf7158809cf4f3c";
+
+        byte[] bytes = encrypt(text, key);
+        String newText = decrypt(bytes, key);
 
         System.out.println(newText);
     }
