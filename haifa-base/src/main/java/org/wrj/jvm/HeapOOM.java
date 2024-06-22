@@ -15,6 +15,10 @@ public class HeapOOM {
 		while (true) {
 			list.add(new OOMObject());
 			//System.out.println(i++);
+			i++;
+			if(i % 10000 == 0){
+				System.out.println(i);
+			}
 		}
 	}
 }
