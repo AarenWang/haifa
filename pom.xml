@@ -19,6 +19,7 @@
         <lucene.version>8.9.0</lucene.version>
         <haifa.project.version>1.0-SNAPSHOT</haifa.project.version>
         <grpc.version>1.55.1</grpc.version>
+        <flink.version>1.18.0</flink.version>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
     </properties>
@@ -64,7 +65,9 @@
         <module>haifa-aws</module>
         <module>haifa-springcloud-nacos</module>
         <module>haifa-reactor</module>
-        <module>haifa-web3j</module>
+<!--        <module>haifa-web3j</module>-->
+        <module>haifa-vs</module>
+        <module>haifa-flink</module>
     </modules>
 
     <build>

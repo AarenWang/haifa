@@ -3,6 +3,7 @@
 .project
 .settings/
 **/.settings/
+haifa-vs/src/
 
 # Intellij
 .idea/
