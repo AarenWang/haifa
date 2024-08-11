@@ -11,7 +11,10 @@ import org.apache.flink.util.Collector;
 public class WindowWordCount {
 
     public static void main(String[] args) throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        // 提交到flink server去执行
+//        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        // 本地启动一个flink server
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
 
         DataStream<Tuple2<String, Integer>> dataStream = env
                 .socketTextStream("localhost", 9999)
