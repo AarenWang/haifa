@@ -68,6 +68,8 @@
 <!--        <module>haifa-web3j</module>-->
         <module>haifa-vs</module>
         <module>haifa-flink</module>
+        <module>haifa-flink13</module>
+        <module>haifa-pdf</module>
     </modules>
 
     <build>
