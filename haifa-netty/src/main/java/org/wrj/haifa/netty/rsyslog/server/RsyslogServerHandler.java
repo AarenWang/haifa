@@ -2,6 +2,7 @@ package org.wrj.haifa.netty.rsyslog.server;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.socket.DatagramChannel;
 import org.wrj.haifa.netty.rsyslog.client.RFC5424Message;
 
 import java.net.InetSocketAddress;
@@ -34,8 +35,19 @@ public class RsyslogServerHandler extends ChannelInboundHandlerAdapter {
     
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
+        // 判断是否是UDP通道
+        if (ctx.channel() instanceof DatagramChannel) {
+            logger.info("UDP channel active");
+            return;
+        }
+        
+        // TCP通道处理
         InetSocketAddress address = (InetSocketAddress) ctx.channel().remoteAddress();
-        logger.info("New client connected: " + address.getHostString() + ":" + address.getPort());
+        if (address != null) {
+            logger.info("New client connected: " + address.getHostString() + ":" + address.getPort());
+        } else {
+            logger.info("New client connected with unknown address");
+        }
     }
     
     @Override
@@ -62,8 +74,19 @@ public class RsyslogServerHandler extends ChannelInboundHandlerAdapter {
     
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
+        // 判断是否是UDP通道
+        if (ctx.channel() instanceof DatagramChannel) {
+            logger.info("UDP channel inactive");
+            return;
+        }
+        
+        // TCP通道处理
         InetSocketAddress address = (InetSocketAddress) ctx.channel().remoteAddress();
-        logger.info("Client disconnected: " + address.getHostString() + ":" + address.getPort());
+        if (address != null) {
+            logger.info("Client disconnected: " + address.getHostString() + ":" + address.getPort());
+        } else {
+            logger.info("Client disconnected with unknown address");
+        }
     }
     
     /**
@@ -87,19 +110,30 @@ public class RsyslogServerHandler extends ChannelInboundHandlerAdapter {
         
         @Override
         public void processMessage(RFC5424Message message, ChannelHandlerContext ctx) {
-            InetSocketAddress address = (InetSocketAddress) ctx.channel().remoteAddress();
+            InetSocketAddress address = null;
+            
+            // 尝试获取远程地址，UDP模式下可能为空
+            if (ctx.channel().remoteAddress() instanceof InetSocketAddress) {
+                address = (InetSocketAddress) ctx.channel().remoteAddress();
+            }
             
             StringBuilder sb = new StringBuilder();
-            sb.append("Received syslog message from: ").append(address.getHostString()).append("\n");
-            sb.append("  Timestamp: ").append(message.getTimestamp()).append("\n");
-            sb.append("  Hostname: ").append(message.getHostname()).append("\n");
-            sb.append("  Application: ").append(message.getAppName()).append("\n");
-            sb.append("  Process ID: ").append(message.getProcId()).append("\n");
-            sb.append("  Message ID: ").append(message.getMsgId()).append("\n");
-            sb.append("  Facility: ").append(message.getFacility()).append("\n");
-            sb.append("  Severity: ").append(message.getSeverity()).append("\n");
-            sb.append("  Structured Data: ").append(message.getStructuredData()).append("\n");
-            sb.append("  Message: ").append(message.getMessage());
+            sb.append("Received syslog message");
+            
+            if (address != null) {
+                sb.append(" from: ").append(address.getHostString());
+            }
+            
+            sb.append("\n")
+              .append("  Timestamp: ").append(message.getTimestamp()).append("\n")
+              .append("  Hostname: ").append(message.getHostname()).append("\n")
+              .append("  Application: ").append(message.getAppName()).append("\n")
+              .append("  Process ID: ").append(message.getProcId()).append("\n")
+              .append("  Message ID: ").append(message.getMsgId()).append("\n")
+              .append("  Facility: ").append(message.getFacility()).append("\n")
+              .append("  Severity: ").append(message.getSeverity()).append("\n")
+              .append("  Structured Data: ").append(message.getStructuredData()).append("\n")
+              .append("  Message: ").append(message.getMessage());
             
             // Log the formatted message
             procLogger.info(sb.toString());

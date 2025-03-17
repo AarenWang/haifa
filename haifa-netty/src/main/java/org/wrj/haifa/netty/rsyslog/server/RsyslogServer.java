@@ -1,16 +1,20 @@
 package org.wrj.haifa.netty.rsyslog.server;
 
+import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 
+import java.util.concurrent.CountDownLatch;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -24,7 +28,9 @@ public class RsyslogServer {
     private final RsyslogServerHandler.RsyslogMessageProcessor messageProcessor;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
-    private ChannelFuture channelFuture;
+    private EventLoopGroup udpGroup;
+    private ChannelFuture tcpChannelFuture;
+    private ChannelFuture udpChannelFuture;
     
     /**
      * Create a new Rsyslog server
@@ -47,7 +53,7 @@ public class RsyslogServer {
     }
     
     /**
-     * Start the Rsyslog server
+     * Start the Rsyslog TCP server
      * 
      * @throws Exception If an error occurs while starting the server
      */
@@ -55,32 +61,71 @@ public class RsyslogServer {
         bossGroup = new NioEventLoopGroup(1);
         workerGroup = new NioEventLoopGroup();
         
-        try {
-            ServerBootstrap bootstrap = new ServerBootstrap();
-            bootstrap.group(bossGroup, workerGroup)
-                    .channel(NioServerSocketChannel.class)
-                    .handler(new LoggingHandler(LogLevel.INFO))
-                    .childHandler(new ChannelInitializer<SocketChannel>() {
-                        @Override
-                        protected void initChannel(SocketChannel ch) throws Exception {
-                            ch.pipeline().addLast(
-                                    new RsyslogDecoder(),
-                                    new RsyslogServerHandler(messageProcessor)
-                            );
-                        }
-                    })
-                    .option(ChannelOption.SO_BACKLOG, 128)
-                    .childOption(ChannelOption.SO_KEEPALIVE, true);
-            
-            // Bind and start to accept incoming connections
-            channelFuture = bootstrap.bind(port).sync();
-            logger.info("Rsyslog server started on port " + port);
-            
-            // Wait until the server socket is closed
-            channelFuture.channel().closeFuture().sync();
-        } finally {
-            shutdown();
-        }
+        ServerBootstrap bootstrap = new ServerBootstrap();
+        bootstrap.group(bossGroup, workerGroup)
+                .channel(NioServerSocketChannel.class)
+                .handler(new LoggingHandler(LogLevel.INFO))
+                .childHandler(new ChannelInitializer<SocketChannel>() {
+                    @Override
+                    protected void initChannel(SocketChannel ch) throws Exception {
+                        ch.pipeline().addLast(
+                                new RsyslogDecoder(),
+                                new RsyslogServerHandler(messageProcessor)
+                        );
+                    }
+                })
+                .option(ChannelOption.SO_BACKLOG, 128)
+                .childOption(ChannelOption.SO_KEEPALIVE, true);
+        
+        // Bind and start to accept incoming connections
+        tcpChannelFuture = bootstrap.bind(port).sync();
+        logger.info("Rsyslog TCP server started on port " + port);
+    }
+    
+    /**
+     * Start the Rsyslog UDP server
+     * 
+     * @throws Exception If an error occurs while starting the UDP server
+     */
+    public void startUdp() throws Exception {
+        udpGroup = new NioEventLoopGroup();
+        
+        Bootstrap bootstrap = new Bootstrap();
+        bootstrap.group(udpGroup)
+                .channel(NioDatagramChannel.class)
+                .handler(new ChannelInitializer<Channel>() {
+                    @Override
+                    protected void initChannel(Channel ch) {
+                        ch.pipeline().addLast(
+                                new RsyslogDatagramDecoder(),
+                                new RsyslogServerHandler(messageProcessor)
+                        );
+                    }
+                })
+                .option(ChannelOption.SO_BROADCAST, true)
+                .option(ChannelOption.SO_RCVBUF, 1024 * 1024);
+
+        udpChannelFuture = bootstrap.bind(port).sync();
+        logger.info("Rsyslog UDP server started on port " + port);
+    }
+    
+    /**
+     * Waits for the servers to shut down
+     */
+    public void waitForShutdown() throws InterruptedException {
+        final CountDownLatch latch = new CountDownLatch(1);
+        
+        // 添加关闭钩子，以便在程序退出时关闭服务器
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            @Override
+            public void run() {
+                shutdown();
+                latch.countDown();
+            }
+        });
+        
+        // 等待关闭信号
+        latch.await();
     }
     
     /**
@@ -98,6 +143,11 @@ public class RsyslogServer {
             workerGroup.shutdownGracefully();
             workerGroup = null;
         }
+        
+        if (udpGroup != null) {
+            udpGroup.shutdownGracefully();
+            udpGroup = null;
+        }
     }
     
     /**
@@ -113,7 +163,8 @@ public class RsyslogServer {
             
             // 示例: 根据消息的严重性级别进行不同的处理
             int severity = message.getSeverity();
-            String logMessage = String.format("[%s] %s: %s", 
+
+            String logMessage = String.format("[%s] %s: %s",
                     message.getHostname(), 
                     message.getAppName(), 
                     message.getMessage());
@@ -168,7 +219,17 @@ public class RsyslogServer {
         RsyslogServer server = new RsyslogServer(port, customProcessor);
         
         try {
+            // 启动TCP服务器
             server.start();
+            logger.info("TCP server started successfully");
+            
+            // 启动UDP服务器
+            server.startUdp();
+            logger.info("UDP server started successfully");
+            
+            // 等待服务器关闭
+            logger.info("Rsyslog servers are running. Press Ctrl+C to stop.");
+            server.waitForShutdown();
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Failed to start Rsyslog server", e);
         }
