@@ -56,4 +56,4 @@ if __name__ == "__main__":
 
     # 同时使用UDP和TCP发送
     send_syslog_udp(message, host, port)
-    #send_syslog_tcp(message, host, port)
+    send_syslog_tcp(message, host, port)
