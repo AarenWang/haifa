@@ -22,34 +22,32 @@
         <dependency>
             <groupId>org.web3j</groupId>
             <artifactId>core</artifactId>
-            <version>4.9.7</version>
+            <version>4.11.0</version>
         </dependency>
 
         <dependency>
             <groupId>org.web3j</groupId>
             <artifactId>crypto</artifactId>
-            <version>4.9.7</version>
+            <version>4.11.0</version>
         </dependency>
 
         <dependency>
             <groupId>org.web3j</groupId>
             <artifactId>utils</artifactId>
-            <version>4.9.5</version>
+            <version>4.11.0</version>
         </dependency>
 
         <dependency>
             <groupId>org.web3j</groupId>
             <artifactId>abi</artifactId>
-            <version>4.10.3</version>
+            <version>4.11.0</version>
         </dependency>
 
         <dependency>
             <groupId>org.web3j</groupId>
             <artifactId>codegen</artifactId>
-            <version>4.10.3</version>
+            <version>4.11.0</version>
         </dependency>
-
-
 
     </dependencies>
 

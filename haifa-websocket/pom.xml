@@ -9,7 +9,7 @@
 
     <artifactId>haifa-websocket</artifactId>
     <version>1.0-SNAPSHOT</version>
-    <packaging>war</packaging>
+    <packaging>jar</packaging>
     <name>haifa-websocket</name>
 
     <dependencies>

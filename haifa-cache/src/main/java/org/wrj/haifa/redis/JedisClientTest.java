@@ -10,6 +10,7 @@ import java.util.List;
  */
 public class JedisClientTest {
 
+
     public static void main(String[] args) {
         Jedis jedis = new Jedis("localhost");
         jedis.set("foo", "bar");
