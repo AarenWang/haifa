@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-
 public class LogEventDispatcher {
 
     private final Map<String, LogEventDecoder> decoderMap = new HashMap<>();
