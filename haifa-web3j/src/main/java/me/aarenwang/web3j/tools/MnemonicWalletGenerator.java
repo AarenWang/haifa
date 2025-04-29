@@ -1,6 +1,8 @@
 package me.aarenwang.web3j.tools;
 
 import org.web3j.crypto.*;
+
+import java.io.File;
 import java.security.SecureRandom;
 
 public class MnemonicWalletGenerator {
@@ -32,6 +34,18 @@ public class MnemonicWalletGenerator {
         System.out.println("私钥: " + credentials.getEcKeyPair().getPrivateKey().toString(16));
         System.out.println("公钥: " + credentials.getEcKeyPair().getPublicKey().toString(16));
         System.out.println("地址: " + credentials.getAddress());
+
+        // 7. 生成钱包文件
+        String password = "yourStrongPassword";
+        String keyStorePath = "./";
+        System.out.println("keystore: " + keyStorePath);
+        File keyStore =  new File(keyStorePath);
+        if(!keyStore.exists()){
+            keyStore.createNewFile();
+        }
+        String keystoreJson = WalletUtils.generateWalletFile(password, credentials.getEcKeyPair(), keyStore, false);
+        System.out.println("Keystore 文件已保存: " + keystoreJson);
+
     }
 
     private static final int HARDENED_BIT = 0x80000000;
