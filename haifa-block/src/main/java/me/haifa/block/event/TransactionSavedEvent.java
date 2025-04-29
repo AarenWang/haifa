@@ -1,4 +1,4 @@
-package me.haifa.block.publisher;
+package me.haifa.block.event;
 
 import me.haifa.block.entity.TransactionEntity;
 import org.springframework.context.ApplicationEvent;
