@@ -41,7 +41,7 @@ public class TransferDecoder implements LogEventDecoder {
         String to = "0x" + topics.get(2).substring(26);
 
         List decoded = FunctionReturnDecoder.decode(log.getData(), Arrays.asList(new TypeReference<Uint256>() {}.getSubTypeReference()));
-        BigInteger value = (BigInteger) decoded.get(0).getValue();
+        BigInteger value = (BigInteger) decoded.get(2);
 
         LogExtEntity ext = new LogExtEntity();
         ext.setLogId(savedLog.getId());

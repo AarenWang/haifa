@@ -82,17 +82,8 @@ public class BlockSubscriber {
                     List<Log> logs = receipt.getLogs();
                     for (int i = 0; i < logs.size(); i++) {
                         Log l = logs.get(i);
-                        LogEntity logEntity = new LogEntity();
-                        logEntity.setTxHash(txHash);
-                        //logEntity.setLogIndex(i);
-                        logEntity.setAddress(l.getAddress());
-                        List<String> topics = l.getTopics();
-                        if (topics.size() > 0) logEntity.setTopic0(topics.get(0));
-                        if (topics.size() > 1) logEntity.setTopic1(topics.get(1));
-                        if (topics.size() > 2) logEntity.setTopic2(topics.get(2));
-                        if (topics.size() > 3) logEntity.setTopic3(topics.get(3));
-                        logEntity.setData(l.getData());
-                        logService.saveLog(logEntity);
+                        logService.saveWeb3jLog(l,txHash);
+
                     }
                 });
             });

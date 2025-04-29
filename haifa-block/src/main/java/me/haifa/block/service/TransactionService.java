@@ -1,6 +1,7 @@
 package me.haifa.block.service;
 
 import me.haifa.block.entity.TransactionEntity;
+import me.haifa.block.publisher.TransactionEventPublisher;
 import me.haifa.block.repository.TransactionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -13,6 +14,9 @@ public class TransactionService {
     @Resource
     private TransactionRepository txRepo;
 
+    @Resource
+    private TransactionEventPublisher txEventPublisher;
+
     public void saveTransactionWithHooks(TransactionEntity tx) {
         // 🔧 预处理逻辑
         preprocess(tx);
@@ -21,7 +25,7 @@ public class TransactionService {
         txRepo.save(tx);
 
         // ✅ 后处理逻辑
-        postprocess(tx);
+        txEventPublisher.publishSavedTx(tx);
     }
 
     private void preprocess(TransactionEntity tx) {
@@ -29,10 +33,6 @@ public class TransactionService {
         tx.setNormalizedInput(tx.getInput().toLowerCase());
     }
 
-    private void postprocess(TransactionEntity tx) {
-        // 例如：写日志、推送事件、发送 MQ
-        System.out.println("✅ 写入交易: " + tx.getTxHash());
-    }
 
     public void saveTransaction(TransactionEntity t) {
         txRepo.save(t);

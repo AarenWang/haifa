@@ -1,7 +1,8 @@
-package me.haifa.block.publisher;
+package me.haifa.block.listener;
 
 
 import me.haifa.block.entity.TransactionEntity;
+import me.haifa.block.event.TransactionSavedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
