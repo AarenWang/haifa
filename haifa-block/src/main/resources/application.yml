@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/blockchain_db
+    username: postgres
+    password: your_password_here
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update  # 开发阶段使用 update，生产推荐使用 validate 或 none
+    show-sql: true      # 控制台显示 SQL
+    properties:
+      hibernate:
+        format_sql: true
+
+  # 如果你有 Flyway 或 Liquibase，可以在这里配置
+  # flyway:
+  #   enabled: true
+
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
