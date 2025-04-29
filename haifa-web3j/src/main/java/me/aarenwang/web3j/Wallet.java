@@ -1,6 +1,7 @@
 package me.aarenwang.web3j;
 
 import org.web3j.crypto.*;
+import org.web3j.crypto.exception.CipherException;
 
 import java.io.File;
 import java.io.IOException;
