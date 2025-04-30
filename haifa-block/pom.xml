@@ -9,7 +9,7 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>me.wrj</groupId>
-	<artifactId>springboot</artifactId>
+	<artifactId>blockscan</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>haifa-block</name>
 	<description>Parse ethereum block  transaction and log</description>
