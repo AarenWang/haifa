@@ -32,7 +32,7 @@ public class AbiDecoderInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        File abiDir = new File("src/main/resources/" + abiPath);
+        File abiDir = new File("haifa-block/src/main/resources/" + abiPath);
         if (!abiDir.exists() || !abiDir.isDirectory()) {
             System.err.println("ABI 目录不存在：" + abiDir.getAbsolutePath());
             return;
