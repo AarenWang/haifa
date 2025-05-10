@@ -7,6 +7,7 @@ import me.haifa.block.service.LogExtService;
 import org.springframework.stereotype.Component;
 import org.web3j.abi.FunctionReturnDecoder;
 import org.web3j.abi.TypeReference;
+import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.protocol.core.methods.response.Log;
 import org.web3j.crypto.Hash;
@@ -40,8 +41,8 @@ public class TransferDecoder implements LogEventDecoder {
         String from = "0x" + topics.get(1).substring(26);
         String to = "0x" + topics.get(2).substring(26);
 
-        List decoded = FunctionReturnDecoder.decode(log.getData(), Arrays.asList(new TypeReference<Uint256>() {}.getSubTypeReference()));
-        BigInteger value = (BigInteger) decoded.get(2);
+        String data = log.getData();
+        BigInteger value = new BigInteger(data.substring(2), 16);
 
         LogExtEntity ext = new LogExtEntity();
         ext.setLogId(savedLog.getId());

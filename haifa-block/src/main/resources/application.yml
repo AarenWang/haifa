@@ -1,8 +1,8 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/blockchain_db
-    username: postgres
-    password: your_password_here
+    url: jdbc:postgresql://localhost:5432/blockchain
+    username: aarenwang
+    password: 123456
     driver-class-name: org.postgresql.Driver
 
   jpa:
