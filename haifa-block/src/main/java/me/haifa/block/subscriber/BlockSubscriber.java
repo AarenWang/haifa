@@ -7,11 +7,20 @@ import me.haifa.block.entity.TransactionEntity;
 import me.haifa.block.service.BlockService;
 import me.haifa.block.service.LogEntityService;
 import me.haifa.block.service.TransactionService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.methods.response.*;
+import org.web3j.protocol.http.HttpService;
 import org.web3j.protocol.websocket.WebSocketService;
+
+import okhttp3.OkHttpClient;
+
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 
 
 import javax.annotation.PostConstruct;
@@ -21,6 +30,7 @@ import java.util.List;
 @Component
 public class BlockSubscriber {
 
+    private static final Logger log = LoggerFactory.getLogger(BlockSubscriber.class);
     @Resource
     private  BlockService blockService;
 
@@ -30,15 +40,30 @@ public class BlockSubscriber {
     @Resource
     private LogEntityService logService;
 
+    @Value("${web3j.ws.url}")
+    private String web3jUrl;
+
 
     @PostConstruct
     public void start() throws Exception {
-        String wsUrl = "wss://mainnet.infura.io/ws/v3/YOUR_INFURA_PROJECT_ID";
-        WebSocketService webSocketService = new WebSocketService(wsUrl, true);
-        webSocketService.connect();
-        Web3j web3j = Web3j.build(webSocketService);
+        //WebSocketService webSocketService = new WebSocketService(web3jUrl, true);
 
-        web3j.blockFlowable(false).subscribe(blockResp -> handleBlock(blockResp.getBlock()));
+        String proxyHost = "127.0.0.1";
+        int proxyPort = 1081;
+
+        // 设置 HTTP 代理
+        Proxy proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort));
+
+        // 创建 OkHttpClient 并设置代理
+        OkHttpClient okHttpClient = new OkHttpClient.Builder()
+                .proxy(proxy)
+                .build();
+
+
+        HttpService httpService = new HttpService(web3jUrl,okHttpClient);
+        Web3j web3j = Web3j.build(httpService);
+
+        web3j.blockFlowable(true).subscribe(blockResp -> handleBlock(blockResp.getBlock()));
     }
 
     @Async
@@ -76,7 +101,21 @@ public class BlockSubscriber {
     @Async
     public void handleReceiptAndLogs(String txHash) {
         try {
-            Web3j web3j = Web3j.build(new WebSocketService("wss://mainnet.infura.io/ws/v3/YOUR_INFURA_PROJECT_ID", true));
+            String proxyHost = "127.0.0.1";
+            int proxyPort = 1081;
+
+            // 设置 HTTP 代理
+            Proxy proxy = new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort));
+
+            // 创建 OkHttpClient 并设置代理
+            OkHttpClient okHttpClient = new OkHttpClient.Builder()
+                    .proxy(proxy)
+                    .build();
+
+
+            HttpService httpService = new HttpService(web3jUrl,okHttpClient);
+
+            Web3j web3j = Web3j.build(httpService);
             web3j.ethGetTransactionReceipt(txHash).sendAsync().thenAccept(resp -> {
                 resp.getTransactionReceipt().ifPresent(receipt -> {
                     List<Log> logs = receipt.getLogs();
@@ -88,6 +127,7 @@ public class BlockSubscriber {
                 });
             });
         } catch (Exception e) {
+            e.printStackTrace();
             System.err.println("❌ 获取日志失败: " + e.getMessage());
         }
     }
