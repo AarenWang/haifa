@@ -59,6 +59,7 @@
         </dependency>
     </dependencies>
 
+    <!--
     <build>
         <finalName>embeddedTomcatSample</finalName>
         <plugins>
@@ -86,5 +87,6 @@
             </plugin>
         </plugins>
     </build>
+    -->
 
 </project>
