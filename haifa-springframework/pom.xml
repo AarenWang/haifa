@@ -21,7 +21,7 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 <!--        <spring-version>4.3.2.RELEASE</spring-version>-->
-        <spring-version>5.3.17</spring-version>
+        <spring-version>6.1.14</spring-version>
         <spring-internal-version>1.0.0-SNAPSHOT</spring-internal-version>
         <junit-version>4.12</junit-version>
         <mybatis-version>3.4.5</mybatis-version>
