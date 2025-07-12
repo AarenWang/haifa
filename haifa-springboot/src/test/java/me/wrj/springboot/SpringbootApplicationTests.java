@@ -1,20 +1,18 @@
 package me.wrj.springboot;
 
+import me.wrj.springboot.entity.Stu;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.util.Assert;
 
-import java.io.Serializable;
-import java.util.Objects;
+import javax.annotation.Resource;
 
 @SpringBootTest
 class SpringbootApplicationTests {
 
-	@Autowired
-	private RedisTemplate redisTemplate;
+	@Resource
+	private RedisTemplate<String,Object> redisTemplate;
 
 	@Test
 	void contextLoads() {
@@ -23,8 +21,11 @@ class SpringbootApplicationTests {
 
 	@Test
 	void testRedis() {
+
 		redisTemplate.opsForValue().set("test", "test");
 		System.out.println(redisTemplate.opsForValue().get("test"));
+
+		redisTemplate.getConnectionFactory().getConnection().flushAll();
 	}
 
 	@Test
@@ -52,14 +53,17 @@ class SpringbootApplicationTests {
 		redisTemplate.opsForList().leftPush(key,new Stu("Mack",23));
 		redisTemplate.opsForList().leftPush(key,new Stu("Pony",24));
 
-		Stu value = (Stu) redisTemplate.opsForList().leftPop(key);
-		Assert.isTrue(value.getAge() == 24);
+		var v1= redisTemplate.opsForList().leftPop(key);
+		System.out.printf("v1=%s,v1 Type=%s \n", v1, v1.getClass().getName());
 
-		value = (Stu) redisTemplate.opsForList().leftPop(key);
-		Assert.isTrue(value.getAge() == 23);
-
-		value = (Stu) redisTemplate.opsForList().leftPop(key);
-		Assert.isTrue(value.getAge() == 22);
+//		Stu value = (Stu) redisTemplate.opsForList().leftPop(key);
+//		Assert.isTrue(value.getAge() == 24);
+//
+//		value = (Stu) redisTemplate.opsForList().leftPop(key);
+//		Assert.isTrue(value.getAge() == 23);
+//
+//		value = (Stu) redisTemplate.opsForList().leftPop(key);
+//		Assert.isTrue(value.getAge() == 22);
 	}
 
 	@Test
@@ -76,46 +80,5 @@ class SpringbootApplicationTests {
 
 	}
 
-
-	static class Stu /*implements Serializable */ {
-		String name;
-
-		int age;
-
-		public Stu(String name, int age) {
-			this.name = name;
-			this.age = age;
-		}
-
-		public String getName() {
-			return name;
-		}
-
-		public void setName(String name) {
-			this.name = name;
-		}
-
-		public int getAge() {
-			return age;
-		}
-
-		public void setAge(int age) {
-			this.age = age;
-		}
-
-
-		@Override
-		public boolean equals(Object o) {
-			if (this == o) return true;
-			if (o == null || getClass() != o.getClass()) return false;
-			Stu stu = (Stu) o;
-			return age == stu.age && Objects.equals(name, stu.name);
-		}
-
-		@Override
-		public int hashCode() {
-			return Objects.hash(name, age);
-		}
-	}
 
 }

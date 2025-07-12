@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 
 public class DataRedisPipelineDemo {
 
-    @Autowired
+    @Resource
     private RedisTemplate redisTemplate;
 
     // inject the template as ListOperations
