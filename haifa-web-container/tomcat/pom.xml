@@ -17,7 +17,7 @@
         <glassfish.javax-impl.version>2.2</glassfish.javax-impl.version>
         <glassfish.javax.version>2.2.3</glassfish.javax.version>
         <glassfish.javax-jstl.version>1.2.1</glassfish.javax-jstl.version>
-        <tomcat.version>9.0.106</tomcat.version>
+        <tomcat.version>9.0.110</tomcat.version>
     </properties>
     <dependencies>
         <dependency>
