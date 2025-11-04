@@ -1,4 +1,4 @@
-package org.wrj.haifa.openfeign.broadcast.model;
+package org.wrj.haifa.openfeign.broadcast.rpc;
 
 import java.util.List;
 

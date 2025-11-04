@@ -2,7 +2,7 @@ package org.wrj.haifa.openfeign.broadcast.client.api;
 
 import java.util.List;
 import java.util.Map;
-import org.wrj.haifa.openfeign.broadcast.model.BroadcastResult;
+import org.wrj.haifa.openfeign.broadcast.rpc.BroadcastResult;
 import org.wrj.haifa.openfeign.broadcast.shared.MessageRecord;
 
 /**

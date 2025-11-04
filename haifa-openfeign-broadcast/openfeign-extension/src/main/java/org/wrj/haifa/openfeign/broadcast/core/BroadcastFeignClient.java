@@ -25,8 +25,9 @@ import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriComponentsBuilder;
-import org.wrj.haifa.openfeign.broadcast.model.BroadcastResult;
-import org.wrj.haifa.openfeign.broadcast.model.InstanceResult;
+import org.wrj.haifa.openfeign.broadcast.rpc.BroadcastResult;
+import org.wrj.haifa.openfeign.broadcast.rpc.InstanceResult;
+import org.wrj.haifa.openfeign.broadcast.rpc.FeignBroadcast;
 
 class BroadcastFeignClient implements Client, BroadcastClientMarker {
 

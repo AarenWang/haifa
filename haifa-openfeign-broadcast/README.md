@@ -3,7 +3,8 @@
 This multi-module sample demonstrates a broadcast-style OpenFeign extension where a single client method call fan-outs to every discovered service instance. The setup uses Spring Cloud OpenFeign with Nacos for service discovery, alongside a small RPC provider and client that verifies end-to-end behaviour.
 
 ## What’s Included
-- **`openfeign-extension`** – reusable library (`haifa-openfeign-broadcast-extension`) containing the broadcast-aware Feign load-balancer, configuration, and DTO models. This jar can be published for other projects.
+- **`rpc`** – shared RPC contract module (`haifa-openfeign-broadcast-rpc`) containing the Feign client interface and public request/response DTOs.
+- **`openfeign-extension`** – reusable library (`haifa-openfeign-broadcast-extension`) providing the broadcast-aware Feign load-balancer and infrastructure. This jar depends on the RPC module and can be published for other projects.
 - **`broadcast-server`** – Spring Boot service (`BroadcastServerApplication`) that stores broadcast messages in-memory for each instance.
 - **`broadcast-client`** – Spring Boot app (`BroadcastClientApplication`) that triggers broadcast calls and exposes a verification REST API.
 - **Docker quick start** – `docker/docker-compose.yml` launches a standalone Nacos registry.
@@ -95,4 +96,6 @@ docker compose down
 - Providers keep messages in-memory only; restart the service to clear history.
 - Adjust the Nacos address via `NACOS_SERVER` environment variable if you run the registry somewhere else.
 - Server and client profiles respect the `SERVER_PORT` environment variable, making it easy to run multiple instances from scripts.
-- Build only the reusable extension with `mvn -pl haifa-openfeign-broadcast-extension -am package`; the resulting jar lives under `openfeign-extension/target`.
+- Build only the reusable components with:
+  - `mvn -pl haifa-openfeign-broadcast-rpc -am package` for the RPC contract jar.
+  - `mvn -pl haifa-openfeign-broadcast-extension -am package` for the broadcast OpenFeign extension jar.

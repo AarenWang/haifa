@@ -1,4 +1,4 @@
-package org.wrj.haifa.openfeign.broadcast.model;
+package org.wrj.haifa.openfeign.broadcast.rpc;
 
 /**
  * Captures the outcome for a single service instance during a broadcast call.

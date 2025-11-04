@@ -1,4 +1,4 @@
-package org.wrj.haifa.openfeign.broadcast.shared;
+package org.wrj.haifa.openfeign.broadcast.rpc;
 
 /**
  * Payload used when broadcasting a message to all service instances.
