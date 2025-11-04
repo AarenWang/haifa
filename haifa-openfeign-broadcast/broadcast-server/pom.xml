@@ -17,13 +17,13 @@
 
     <dependencies>
         <dependency>
-             <artifactId>haifa-openfeign-broadcast-rpc</artifactId>
-             <groupId>me.wrj</groupId>
-        </dependency>   
+            <groupId>me.wrj</groupId>
+            <artifactId>haifa-openfeign-broadcast-rpc</artifactId>
+        </dependency>
         <dependency>
-             <artifactId>haifa-openfeign-broadcast-extension</artifactId>
-             <groupId>me.wrj</groupId>
-        </dependency>  
+            <groupId>me.wrj</groupId>
+            <artifactId>haifa-openfeign-broadcast-extension</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -36,17 +36,6 @@
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
         </dependency>
-        <dependency>
-            <groupId>me.wrj</groupId>
-            <artifactId>haifa-openfeign-broadcast-rpc</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>me.wrj</groupId>
-            <artifactId>haifa-openfeign-broadcast-extension</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
