@@ -1,9 +1,9 @@
 package org.wrj.haifa.openfeign.broadcast.client.service;
 
 import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Arrays;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,9 +12,9 @@ import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.client.discovery.DiscoveryClient;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-import org.wrj.haifa.openfeign.broadcast.client.feign.BroadcastMessageClient;
-import org.wrj.haifa.openfeign.broadcast.model.BroadcastResult;
-import org.wrj.haifa.openfeign.broadcast.shared.BroadcastMessageRequest;
+import org.wrj.haifa.openfeign.broadcast.rpc.BroadcastMessageClient;
+import org.wrj.haifa.openfeign.broadcast.rpc.BroadcastMessageRequest;
+import org.wrj.haifa.openfeign.broadcast.rpc.BroadcastResult;
 import org.wrj.haifa.openfeign.broadcast.shared.MessageRecord;
 
 @Service

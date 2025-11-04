@@ -1,4 +1,4 @@
-package org.wrj.haifa.openfeign.broadcast.core;
+package org.wrj.haifa.openfeign.broadcast.rpc;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

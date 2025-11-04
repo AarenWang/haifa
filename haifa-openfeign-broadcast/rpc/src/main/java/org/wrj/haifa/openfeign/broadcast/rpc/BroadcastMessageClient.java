@@ -1,11 +1,9 @@
-package org.wrj.haifa.openfeign.broadcast.client.feign;
+package org.wrj.haifa.openfeign.broadcast.rpc;
 
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.wrj.haifa.openfeign.broadcast.core.FeignBroadcast;
-import org.wrj.haifa.openfeign.broadcast.model.BroadcastResult;
-import org.wrj.haifa.openfeign.broadcast.shared.BroadcastMessageRequest;
+import org.wrj.haifa.openfeign.broadcast.rpc.FeignBroadcast;
 
 @FeignClient(name = "broadcast-provider", path = "/api/messages")
 public interface BroadcastMessageClient {

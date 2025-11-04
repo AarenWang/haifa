@@ -4,6 +4,7 @@ import feign.MethodMetadata;
 import feign.RequestInterceptor;
 import feign.RequestTemplate;
 import java.lang.reflect.Method;
+import org.wrj.haifa.openfeign.broadcast.rpc.FeignBroadcast;
 
 /**
  * Adds the internal broadcast header whenever a Feign method is annotated with
