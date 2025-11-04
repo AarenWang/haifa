@@ -11,9 +11,9 @@
     <properties>
         <java.version>17</java.version>
         <java.encoding>UTF-8</java.encoding>
-        <spring.version>6.1.20</spring.version>
-        <spring.boot.version>2.5.10</spring.boot.version>
-        <tomcat.version>7.0.68</tomcat.version>
+        <spring.version>6.2.12</spring.version>
+        <spring.boot.version>3.5.7</spring.boot.version>
+        <tomcat.version>11.0.3</tomcat.version>
         <scala.version>2.13.0</scala.version>
         <akka.version>2.6.16</akka.version>
         <lucene.version>8.9.0</lucene.version>

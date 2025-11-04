@@ -35,12 +35,10 @@
         <dependency>
             <groupId>me.wrj</groupId>
             <artifactId>haifa-openfeign-broadcast-rpc</artifactId>
-            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>me.wrj</groupId>
             <artifactId>haifa-openfeign-broadcast-extension</artifactId>
-            <version>${project.version}</version>
         </dependency>
 
         <dependency>
