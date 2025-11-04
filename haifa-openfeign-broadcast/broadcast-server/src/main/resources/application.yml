@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: broadcast-provider
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:}
+        instance-id: ${spring.application.name}:${server.port}
+
+server:
+  port: ${SERVER_PORT:8081}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    org.wrj.haifa.openfeign.broadcast: INFO

@@ -66,6 +66,7 @@
         <module>haifa-springboot</module>
         <module>haifa-aws</module>
         <module>haifa-springcloud-nacos</module>
+        <module>haifa-openfeign-broadcast</module>
         <module>haifa-reactor</module>
         <module>haifa-web3j</module>
         <module>haifa-vs</module>
