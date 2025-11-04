@@ -17,6 +17,14 @@
 
     <dependencies>
         <dependency>
+             <artifactId>haifa-openfeign-broadcast-rpc</artifactId>
+             <groupId>me.wrj</groupId>
+        </dependency>   
+        <dependency>
+             <artifactId>haifa-openfeign-broadcast-extension</artifactId>
+             <groupId>me.wrj</groupId>
+        </dependency>  
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
@@ -43,6 +51,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <scope>runtime</scope>
         </dependency>
     </dependencies>
 
