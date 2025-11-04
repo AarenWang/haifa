@@ -32,7 +32,7 @@
         <aspectj-version>1.8.9</aspectj-version>
         <tomcat-version>7.0.68</tomcat-version>
         <validation-api-version>2.0.0.Final</validation-api-version>
-        <fast-json-version>1.2.39</fast-json-version>
+        <fast-json-version>1.2.83</fast-json-version>
     </properties>
 
     <dependencyManagement>
