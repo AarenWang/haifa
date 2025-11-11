@@ -7,14 +7,15 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Marks a method as a callable geographic knowledge tool. The {@code GeoChatClient}
- * inspects beans with this annotation and delegates questions to the underlying
- * method when a tool call is requested by the chat flow.
+ * Marks a method as a callable tool that can participate in the local chat flow.
+ * The {@code GeoChatClient} inspects beans with this annotation and delegates
+ * questions to the underlying method when a tool call is requested by the chat
+ * flow.
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-public @interface GeoTool {
+public @interface ChatTool {
 
     /**
      * Human readable name exposed to the model.

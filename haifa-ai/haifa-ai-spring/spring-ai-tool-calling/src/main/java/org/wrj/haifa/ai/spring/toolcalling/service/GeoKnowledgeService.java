@@ -13,7 +13,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.wrj.haifa.ai.spring.toolcalling.config.ToolCallingProperties;
 import org.wrj.haifa.ai.spring.toolcalling.model.GeoKnowledgeSummary;
 import org.wrj.haifa.ai.spring.toolcalling.model.GeoLookupResponse;
-import org.wrj.haifa.ai.spring.toolcalling.tool.GeoTool;
+import org.wrj.haifa.ai.spring.toolcalling.tool.ChatTool;
 import reactor.core.publisher.Mono;
 
 /**
@@ -33,7 +33,7 @@ public class GeoKnowledgeService {
         this.properties = properties;
     }
 
-    @GeoTool(name = "geo_lookup", description = "Fetch encyclopedic data about a geographic location.")
+    @ChatTool(name = "geo_lookup", description = "Fetch encyclopedic data about a geographic location.")
     public GeoKnowledgeSummary lookup(String location) {
         if (!StringUtils.hasText(location)) {
             return GeoKnowledgeSummary.empty();

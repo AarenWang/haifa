@@ -21,7 +21,7 @@ without external credentials.
    mvn -pl haifa-ai/haifa-ai-spring/spring-ai-tool-calling spring-boot:run
    ```
 
-3. Interact with the REST endpoint:
+3. Interact with the geography REST endpoint:
 
    ```bash
    curl -X POST http://localhost:8080/api/geo/chat \
@@ -31,10 +31,26 @@ without external credentials.
 
    The response contains the synthesized answer backed by the geography knowledge tool.
 
+4. Inspect the local machine without leaving the sample:
+
+   ```bash
+   curl -X POST http://localhost:8080/api/system/chat \
+        -H "Content-Type: application/json" \
+        -d '{"message": "cpu memory ports"}'
+   ```
+
+   The response is generated from shell commands executed on the host (such as `lscpu`,
+   `free -h`, `ss -tuln`, and `df -h`). The controller assembles the command output into a
+   single chat-style answer that highlights which commands were executed.
+
 ## Testing
 
-The module includes an integration test (`GeoChatControllerIntegrationTest`) that spins up a
-`MockWebServer` to emulate the external API and verifies the tool calling pipeline end-to-end:
+The module includes integration tests for both tools:
+
+- `GeoChatControllerIntegrationTest` spins up a `MockWebServer` to emulate the external API and
+  verifies the tool calling pipeline end-to-end.
+- `SystemInfoControllerIntegrationTest` replaces the command runner with a deterministic stub to
+  assert that the local inspection tool executes the expected shell commands.
 
 ```bash
 mvn -pl haifa-ai/haifa-ai-spring/spring-ai-tool-calling test

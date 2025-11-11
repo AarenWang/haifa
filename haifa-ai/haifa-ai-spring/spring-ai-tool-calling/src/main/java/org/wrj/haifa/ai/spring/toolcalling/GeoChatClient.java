@@ -26,9 +26,9 @@ import org.springframework.lang.Nullable;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.spring.toolcalling.config.ToolCallingProperties;
-import org.wrj.haifa.ai.spring.toolcalling.model.GeoKnowledgeSummary;
+import org.wrj.haifa.ai.spring.toolcalling.model.ToolSummary;
 import org.wrj.haifa.ai.spring.toolcalling.service.GeoKnowledgeService;
-import org.wrj.haifa.ai.spring.toolcalling.tool.GeoTool;
+import org.wrj.haifa.ai.spring.toolcalling.tool.ChatTool;
 
 /**
  * Minimal {@link ChatClient} implementation that routes incoming messages to the
@@ -196,7 +196,7 @@ public class GeoChatClient implements ChatClient {
         @Override
         public CallResponseSpec call() {
             String query = resolveQuery();
-            GeoKnowledgeSummary summary = locateToolResult(query)
+            ToolSummary summary = locateToolResult(query)
                     .orElseGet(() -> geoKnowledgeService.lookup(query));
             return new GeoCallResponseSpec(buildContent(summary));
         }
@@ -216,7 +216,7 @@ public class GeoChatClient implements ChatClient {
             return "";
         }
 
-        private Optional<GeoKnowledgeSummary> locateToolResult(String query) {
+        private Optional<ToolSummary> locateToolResult(String query) {
             return tools.stream()
                     .map(tool -> invokeTool(tool, query))
                     .filter(Optional::isPresent)
@@ -224,30 +224,30 @@ public class GeoChatClient implements ChatClient {
                     .findFirst();
         }
 
-        private Optional<GeoKnowledgeSummary> invokeTool(Object tool, String query) {
+        private Optional<ToolSummary> invokeTool(Object tool, String query) {
             Method matched = findToolMethod(tool.getClass());
             if (matched == null) {
                 return Optional.empty();
             }
             try {
                 Object value = ReflectionUtils.invokeMethod(matched, tool, query);
-                if (value instanceof GeoKnowledgeSummary summary) {
+                if (value instanceof ToolSummary summary) {
                     return Optional.of(summary);
                 }
             }
             catch (Exception ex) {
-                return Optional.of(GeoKnowledgeSummary.empty());
+                return Optional.of(ToolSummary.empty());
             }
             return Optional.empty();
         }
 
         private Method findToolMethod(Class<?> type) {
             Method cached = ReflectionUtils.findMethod(type, "lookup", String.class);
-            if (cached != null && AnnotationUtils.findAnnotation(cached, GeoTool.class) != null) {
+            if (cached != null && AnnotationUtils.findAnnotation(cached, ChatTool.class) != null) {
                 return cached;
             }
             for (Method method : type.getMethods()) {
-                GeoTool annotation = AnnotationUtils.findAnnotation(method, GeoTool.class);
+                ChatTool annotation = AnnotationUtils.findAnnotation(method, ChatTool.class);
                 if (annotation != null && method.getParameterCount() == 1
                         && method.getParameterTypes()[0] == String.class) {
                     return method;
@@ -256,7 +256,7 @@ public class GeoChatClient implements ChatClient {
             return null;
         }
 
-        private String buildContent(GeoKnowledgeSummary summary) {
+        private String buildContent(ToolSummary summary) {
             StringBuilder builder = new StringBuilder();
             String prefix = properties.getResponsePrefix();
             if (StringUtils.hasText(prefix)) {
