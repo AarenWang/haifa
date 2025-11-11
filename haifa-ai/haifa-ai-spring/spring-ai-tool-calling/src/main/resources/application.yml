@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: spring-ai-tool-calling
+  ai:
+    openai:
+      base-url: ${SPRING_AI_OPENAI_BASE_URL:https://api.openai.com/v1}
+      api-key: ${SPRING_AI_OPENAI_API_KEY:}
+      chat:
+        options:
+          model: ${haifa.ai.tool-calling.model:gpt-4o-mini}
+
+haifa:
+  ai:
+    tool-calling:
+      model: ${HAIFA_AI_MODEL:gpt-4o-mini}
+      response-prefix: ${HAIFA_AI_RESPONSE_PREFIX:According to our knowledge base, }
+      geo:
+        base-url: ${GEO_KNOWLEDGE_BASE_URL:https://example.com/api}
+        path: ${GEO_KNOWLEDGE_PATH:/geo}
+        api-key: ${GEO_KNOWLEDGE_API_KEY:}
+        timeout: 5s
