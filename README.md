@@ -3,7 +3,7 @@
 A multi-module Maven workspace for exploring the Java ecosystem—from core language features to frameworks, middleware, distributed systems, and AI integrations. Each `haifa-*` module is a self-contained demo or study note that documents experiments, patterns, and lessons learned while revisiting technologies used in day-to-day development.
 
 ## Repository Overview
-- Parent build: single `pom.xml` at the root orchestrates 40+ modules, all targeting Java 17.
+- Parent build: single `pom.xml` at the root orchestrates 40+ modules, all targeting Java 25.
 - Naming: modules follow the `haifa-<topic>` convention (e.g., `haifa-concurrent`, `haifa-springframework`).
 - Source layout: primary packages live under `org.wrj` with accompanying resources in `src/main/resources`.
 - License: MIT; retain the copyright header when extending.
@@ -22,14 +22,14 @@ A multi-module Maven workspace for exploring the Java ecosystem—from core lang
 > Tip: Not every module has a README yet—scan package names or tests for context when exploring a new area.
 
 ## Technology Highlights
-- Java 17 toolchain with Maven 3.x builds.
+- Java 25 toolchain with Maven 3.x builds.
 - Spring ecosystem (Framework, Boot, Cloud, Security), Netty, Dubbo, Reactor, Akka, Flink, and more.
 - Messaging stacks (Kafka, RocketMQ, RabbitMQ) and database clients (MongoDB, Lucene, Web3j).
 - Occasional Python helpers (e.g., simple Netty integrations) alongside Java code.
 
 ## Getting Started
 ### Prerequisites
-- Java Development Kit 17+
+- Java Development Kit 25+
 - Apache Maven 3.8+ (wrapper not included)
 - Optional: Docker/locally installed services for middleware demos (Kafka, RabbitMQ, MongoDB, Redis, Nacos, etc.)
 
