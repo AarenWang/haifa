@@ -3,7 +3,7 @@
 ## Repository Snapshot
 - Purpose: sandbox for studying Java ecosystem topics—frameworks, middleware, algorithms, and infrastructure demos.
 - Structure: single parent `pom.xml` aggregating 40+ Maven modules; most code lives under `org.wrj`.
-- Tooling: Java 17, Maven 3.x, occasional Python helper scripts, and Spring Boot 2.5.x baselines.
+- Tooling: Java 25, Maven 3.x, occasional Python helper scripts, and Spring Boot 2.5.x baselines.
 - License: MIT (`LICENSE`), so derived work must preserve copyright and license notice.
 
 ## Module Map (high level)
@@ -20,7 +20,7 @@
 ## Key Workflows
 - Build everything: `mvn -T1C clean install` from the repository root. Expect long dependency resolution on first run.
 - Build or test one module: `mvn -pl haifa-<module> -am clean test` to keep scope tight.
-- IDE setup: import as a Maven project; ensure compiler level 17 and Lombok (where used) are configured.
+- IDE setup: import as a Maven project; ensure compiler level 25 and Lombok (where used) are configured.
 
 ## Environment Notes
 - Many demos expect local services (e.g., MongoDB, Kafka/RabbitMQ, Redis-style caches, AWS credentials, Nacos). Stub or mock these when writing automated tests.

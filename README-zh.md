@@ -3,7 +3,7 @@
 Haifa 是一个多模块的 Maven 工作空间，用来系统梳理 Java 生态：从语言基础、并发编程到各类框架、中间件、分布式系统以及 AI 集成。每个 `haifa-*` 模块都是一个独立的实验或学习笔记，记录在日常开发中复盘与探索的主题。
 
 ## 仓库概况
-- 父级构建：根目录下的 `pom.xml` 聚合 40+ 模块，统一使用 Java 17。
+- 父级构建：根目录下的 `pom.xml` 聚合 40+ 模块，统一使用 Java 25。
 - 命名约定：模块命名为 `haifa-<topic>`（如 `haifa-concurrent`、`haifa-springframework`）。
 - 代码布局：Java 源码位于 `org.wrj` 包下，对应资源文件位于 `src/main/resources`。
 - 许可证：MIT License，扩展时请保持版权及许可证声明。
@@ -22,14 +22,14 @@ Haifa 是一个多模块的 Maven 工作空间，用来系统梳理 Java 生态�
 > 提示：部分模块暂未包含 README，探索时可先阅读包名、测试或源码注释。
 
 ## 技术要点
-- 统一的 Java 17 开发环境与 Maven 3.x 构建流程。
+- 统一的 Java 25 开发环境与 Maven 3.x 构建流程。
 - 覆盖 Spring 全家桶、Netty、Dubbo、Reactor、Akka、Flink 等框架。
 - 演示 Kafka、RocketMQ、RabbitMQ 等消息系统与 MongoDB、Lucene、Web3j 等数据技术。
 - 少量 Python 辅助脚本（示例：Netty 场景实验）。
 
 ## 快速开始
 ### 环境要求
-- JDK 17 及以上
+- JDK 25 及以上
 - Apache Maven 3.8+（仓库未提供 Maven Wrapper）
 - 可选：Docker 或本地安装的中间件（Kafka、RabbitMQ、MongoDB、Redis、Nacos 等）
 
