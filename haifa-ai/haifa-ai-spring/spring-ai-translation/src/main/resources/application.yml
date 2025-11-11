@@ -1,0 +1,14 @@
+haifa:
+  ai:
+    translation:
+      model: gpt-4o-mini # Example model identifier; change to the model you subscribed to.
+      token: ${HAIFA_AI_TRANSLATION_TOKEN:}
+      default-target-language: Chinese
+
+spring:
+  ai:
+    openai:
+      chat:
+        api-key: ${haifa.ai.translation.token}
+        options:
+          model: ${haifa.ai.translation.model}
