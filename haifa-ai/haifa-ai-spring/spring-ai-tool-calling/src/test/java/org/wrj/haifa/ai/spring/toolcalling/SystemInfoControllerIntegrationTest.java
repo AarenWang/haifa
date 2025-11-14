@@ -14,6 +14,8 @@ import org.springframework.context.annotation.TestConfiguration;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.util.MimeTypeUtils;
 import org.wrj.haifa.ai.spring.toolcalling.system.CommandResult;
+import org.wrj.haifa.ai.spring.toolcalling.system.PlannedCommand;
+import org.wrj.haifa.ai.spring.toolcalling.system.SystemCommandPlanner;
 import org.wrj.haifa.ai.spring.toolcalling.system.SystemCommandRunner;
 
 @SpringBootTest
@@ -53,6 +55,12 @@ class SystemInfoControllerIntegrationTest {
                 };
                 return new CommandResult(description, String.join(" ", command), stdout, "", 0);
             };
+        }
+
+        @Bean
+        @Primary
+        SystemCommandPlanner stubSystemCommandPlanner() {
+            return (instruction, directive) -> new PlannedCommand(directive.defaultCommand(), "stub");
         }
     }
 }
