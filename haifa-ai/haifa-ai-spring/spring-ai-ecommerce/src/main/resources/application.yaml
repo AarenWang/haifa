@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: spring-ai-ecommerce
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pgvector
+    username: pgvector
+    password: pgvector
+    hikari:
+      maximum-pool-size: 5
+  ai:
+    openai:
+      api-key: 
+      embedding:
+        options:
+          model: text-embedding-3-large
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        schema-name: ecommerce
+        index-type: hnsw
+        distance-type: cosine
+
+catalog:
+  bootstrap:
+    enabled: true
+    dataset: classpath:catalog/products.json
+    delay: PT2S
+
+server:
+  port: 8085
