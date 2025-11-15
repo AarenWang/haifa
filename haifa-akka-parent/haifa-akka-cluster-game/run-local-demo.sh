@@ -8,7 +8,7 @@ LOG_DIR="$PROJECT_ROOT/target/demo-logs"
 mkdir -p "$LOG_DIR"
 
 build_modules() {
-  mvn -pl haifa-akka-cluster-game-gateway -am -DskipTests package | tee "$LOG_DIR/build.log"
+  mvn -pl haifa-akka-cluster-game-gateway -am -DskipTests clean install | tee "$LOG_DIR/build.log"
 }
 
 start_game_node() {
