@@ -48,7 +48,7 @@ public class ToolCallingProperties {
         /**
          * Base URL used for the geographic knowledge API.
          */
-        private String baseUrl = "https://example.com/api"\;
+        private String baseUrl = "https://example.com/api";
 
         /**
          * Relative path invoked on the knowledge API when performing lookups.

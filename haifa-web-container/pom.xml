@@ -13,8 +13,8 @@
     <name>haifa-web-container-parent</name>
 
     <modules>
-      <!--  <module>jetty</module>-->
-        <module>tomcat</module>
+      <!-- <module>jetty</module> -->
+      <!-- <module>tomcat</module> -->
     </modules>
     <properties>
         <glassfish.javax-impl.version>2.2</glassfish.javax-impl.version>

@@ -9,6 +9,6 @@ import java.util.List;
 public record CommandDirective(String identifier, String goal, String defaultCommand, List<String> allowedExamples) {
 
     public CommandDirective {
-        this.allowedExamples = allowedExamples == null ? List.of() : List.copyOf(allowedExamples);
+        allowedExamples = allowedExamples == null ? List.of() : List.copyOf(allowedExamples);
     }
 }

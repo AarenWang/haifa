@@ -20,6 +20,10 @@
         <nacos.version>2.1.1</nacos.version>
         <alibaba.spring.cloud.version>2021.1</alibaba.spring.cloud.version>
         <spring-cloud-commons.version>3.1.9</spring-cloud-commons.version>
+        <java.version>17</java.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.release>17</maven.compiler.release>
     </properties>
 
     <modelVersion>4.0.0</modelVersion>
