@@ -40,6 +40,28 @@
             <version>${akka.version}</version>
         </dependency>
         <dependency>
+            <groupId>com.lightbend.akka.management</groupId>
+            <artifactId>akka-management_2.13</artifactId>
+            <version>${akka.management.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lightbend.akka.management</groupId>
+            <artifactId>akka-management-cluster-http_2.13</artifactId>
+            <version>${akka.management.version}</version>
+        </dependency>
+        <!-- 锁定 akka-stream和akka-protobuf版本 -->
+        <dependency>
+            <groupId>com.typesafe.akka</groupId>
+            <artifactId>akka-stream_${scala.binary.version}</artifactId>
+            <version>${akka.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.typesafe.akka</groupId>
+            <!-- <artifactId>akka-protobuf-v3</artifactId>  -->
+            <artifactId>akka-protobuf-v3_2.13</artifactId>
+            <version>${akka.version}</version>
+        </dependency>
+        <dependency>
             <groupId>redis.clients</groupId>
             <artifactId>jedis</artifactId>
             <version>5.1.0</version>
