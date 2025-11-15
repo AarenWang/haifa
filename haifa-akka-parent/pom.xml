@@ -5,6 +5,8 @@
         <groupId>me.wrj</groupId>
         <artifactId>haifa-parent</artifactId>
         <version>1.0-SNAPSHOT</version>
+        <!-- Ensure Maven can locate the top-level parent when building inside nested modules -->
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>haifa-akka-parent</artifactId>
@@ -13,8 +15,9 @@
     <name>haifa-akka-parent</name>
 
     <modules>
-       <module>haifa-old-akka</module>
+        <module>haifa-old-akka</module>
         <module>haifa-new-akka</module>
+        <module>haifa-akka-cluster-game</module>
     </modules>
 
     <dependencies>
