@@ -23,8 +23,15 @@ public final class GameNodeApp {
                 config);
 
 
-        // 启动管理服务
-        AkkaManagement.get(system).start();
+        try{
+            // 启动管理服务
+            AkkaManagement.get(system).start();
+        } catch (Exception  e) {
+            // ignore 
+            e.printStackTrace();
+
+        }
+        
         system.getWhenTerminated().toCompletableFuture().join();
     }
 }

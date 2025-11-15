@@ -3,9 +3,10 @@ package org.wrj.haifa.akka.game.gateway;
 import akka.actor.typed.ActorRef;
 import akka.actor.typed.Behavior;
 import akka.actor.typed.javadsl.ActorContext;
-import akka.actor.typed.javadsl.Behaviors;
 import akka.cluster.sharding.typed.javadsl.ClusterSharding;
 import akka.cluster.sharding.typed.javadsl.EntityRef;
+import akka.cluster.sharding.typed.javadsl.Entity;
+import akka.actor.typed.javadsl.Behaviors;
 
 import org.wrj.haifa.akka.game.common.player.PlayerCommand;
 import org.wrj.haifa.akka.game.node.PlayerActor;
@@ -48,6 +49,10 @@ public final class GatewayGuardian {
     private GatewayGuardian(ActorContext<Command> context) {
         this.context = context;
         this.sharding = ClusterSharding.get(context.getSystem());
+        // Ensure shard proxy is initialized on gateway nodes so entityRefFor() works
+        // The .withRole("game") means the actual entities are hosted on nodes with role 'game'
+        // and this call will register a proxy on the gateway system.
+        sharding.init(Entity.of(PlayerActor.ENTITY_TYPE_KEY, entityContext -> Behaviors.empty()).withRole("game"));
     }
 
     private Behavior<Command> behavior() {
