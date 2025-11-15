@@ -5,6 +5,8 @@ import akka.actor.typed.Behavior;
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Behaviors;
 
+import java.util.List;
+
 import org.wrj.haifa.akka.game.common.player.PlayerCommand;
 import org.wrj.haifa.akka.game.common.room.RoomCommand;
 
@@ -40,6 +42,8 @@ public class PlayerActor {
                 .onMessage(PlayerCommand.JoinRoom.class, this::onJoinRoom)
                 .onMessage(PlayerCommand.LeaveRoom.class, this::onLeaveRoom)
                 .onMessage(PlayerCommand.ChatInRoom.class, this::onChatInRoom)
+                .onMessage(PlayerCommand.RoomSnapshot.class, this::onRoomSnapshot)
+                .onMessage(PlayerCommand.RoomBroadcast.class, this::onRoomBroadcast)
                 .build();
     }
 
@@ -85,6 +89,35 @@ public class PlayerActor {
                 chat.roomId,
                 new RoomCommand.Chat(playerId, chat.message)
         ));
+        return Behaviors.same();
+    }
+
+    private Behavior<PlayerCommand> onRoomSnapshot(PlayerCommand.RoomSnapshot snapshot) {
+        if (currentRoomId == null || !currentRoomId.equals(snapshot.roomId)) {
+            context.getLog().debug(
+                    "Player {} ignore snapshot for room {} while currently in {}",
+                    playerId,
+                    snapshot.roomId,
+                    currentRoomId);
+            return Behaviors.same();
+        }
+        List<String> occupants = snapshot.occupantIds;
+        context.getLog().info(
+                "Player {} sees {} occupants in room {}: {}",
+                playerId,
+                occupants.size(),
+                snapshot.roomId,
+                occupants);
+        return Behaviors.same();
+    }
+
+    private Behavior<PlayerCommand> onRoomBroadcast(PlayerCommand.RoomBroadcast broadcast) {
+        context.getLog().info(
+                "Player {} receive broadcast in room {} from {}: {}",
+                playerId,
+                broadcast.roomId,
+                broadcast.fromPlayerId,
+                broadcast.message);
         return Behaviors.same();
     }
 }

@@ -6,6 +6,7 @@ import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Behaviors;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.wrj.haifa.akka.game.common.player.PlayerCommand;
@@ -42,6 +43,7 @@ public class RoomActor {
         context.getLog().info("Player {} join room {}", join.playerId, roomId);
         players.put(join.playerId, join.playerRef);
         broadcast(new RoomCommand.Broadcast(join.playerId, "joined the room"));
+        sendSnapshotToAll();
         return Behaviors.same();
     }
 
@@ -49,6 +51,7 @@ public class RoomActor {
         context.getLog().info("Player {} leave room {}", leave.playerId, roomId);
         players.remove(leave.playerId);
         broadcast(new RoomCommand.Broadcast(leave.playerId, "left the room"));
+        sendSnapshotToAll();
         return Behaviors.same();
     }
 
@@ -59,12 +62,26 @@ public class RoomActor {
     }
 
     private Behavior<RoomCommand> onBroadcast(RoomCommand.Broadcast broadcast) {
-        players.forEach((player, ref) -> context.getLog().debug(
-                "Send message to {}: [{}] {}", player, broadcast.fromPlayerId, broadcast.message));
+        players.forEach((player, ref) -> {
+            context.getLog().debug(
+                    "Send message to {}: [{}] {}",
+                    player,
+                    broadcast.fromPlayerId,
+                    broadcast.message);
+            ref.tell(new PlayerCommand.RoomBroadcast(roomId, broadcast.fromPlayerId, broadcast.message));
+        });
         return Behaviors.same();
     }
 
     private void broadcast(RoomCommand.Broadcast broadcast) {
-        context.getSelf().tell(broadcast);
+        onBroadcast(broadcast);
+    }
+
+    private void sendSnapshotToAll() {
+        if (players.isEmpty()) {
+            return;
+        }
+        List<String> occupants = List.copyOf(players.keySet());
+        players.forEach((playerId, ref) -> ref.tell(new PlayerCommand.RoomSnapshot(roomId, occupants)));
     }
 }
