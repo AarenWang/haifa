@@ -4,42 +4,27 @@ import akka.actor.typed.ActorRef;
 import akka.actor.typed.Behavior;
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Behaviors;
-import akka.actor.typed.receptionist.Receptionist;
-
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.stream.Collectors;
+import akka.cluster.sharding.typed.javadsl.ClusterSharding;
+import akka.cluster.sharding.typed.javadsl.EntityRef;
 
 import org.wrj.haifa.akka.game.common.player.PlayerCommand;
-import org.wrj.haifa.akka.game.node.GameNodeGuardian;
+import org.wrj.haifa.akka.game.node.PlayerActor;
 
 /**
- * Gateway guardian simulates the edge node that accepts client events and forwards them to the game cluster.
+ * Gateway guardian simulates the edge node that accepts client events and forwards them to sharded player entities.
  */
-public class GatewayGuardian {
+public final class GatewayGuardian {
 
     public interface Command {
     }
 
-    public static final class RegisterGameNode implements Command {
-        public final String nodeId;
-        public final ActorRef<GameNodeGuardian.Command> ref;
+    public static final class PlayerLogin implements Command {
+        public final String playerId;
+        public final String sessionId;
 
-        public RegisterGameNode(String nodeId, ActorRef<GameNodeGuardian.Command> ref) {
-            this.nodeId = nodeId;
-            this.ref = ref;
-        }
-    }
-
-    public static final class UnregisterGameNode implements Command {
-        public final String nodeId;
-
-        public UnregisterGameNode(String nodeId) {
-            this.nodeId = nodeId;
+        public PlayerLogin(String playerId, String sessionId) {
+            this.playerId = playerId;
+            this.sessionId = sessionId;
         }
     }
 
@@ -53,105 +38,40 @@ public class GatewayGuardian {
         }
     }
 
-    private static final class ListingUpdated implements Command {
-        private final Receptionist.Listing listing;
-
-        private ListingUpdated(Receptionist.Listing listing) {
-            this.listing = listing;
-        }
-    }
-
     public static Behavior<Command> create() {
         return Behaviors.setup(context -> new GatewayGuardian(context).behavior());
     }
 
     private final ActorContext<Command> context;
-    private final Map<String, ActorRef<GameNodeGuardian.Command>> nodeRegistry = new LinkedHashMap<>();
-    private final List<String> nodeOrder = new ArrayList<>();
-    private final ActorRef<Receptionist.Listing> receptionistAdapter;
+    private final ClusterSharding sharding;
 
     private GatewayGuardian(ActorContext<Command> context) {
         this.context = context;
-        this.receptionistAdapter = context.messageAdapter(Receptionist.Listing.class, ListingUpdated::new);
-        context.getSystem()
-                .receptionist()
-                .tell(Receptionist.subscribe(GameNodeGuardian.SERVICE_KEY, receptionistAdapter));
+        this.sharding = ClusterSharding.get(context.getSystem());
     }
 
     private Behavior<Command> behavior() {
         return Behaviors.receive(Command.class)
-                .onMessage(RegisterGameNode.class, this::onRegisterGameNode)
-                .onMessage(UnregisterGameNode.class, this::onUnregisterGameNode)
+                .onMessage(PlayerLogin.class, this::onPlayerLogin)
                 .onMessage(ForwardPlayerCommand.class, this::onForwardPlayerCommand)
-                .onMessage(ListingUpdated.class, this::onListingUpdated)
                 .build();
     }
 
-    private Behavior<Command> onRegisterGameNode(RegisterGameNode register) {
-        context.getLog().info("Register game node {}", register.nodeId);
-        nodeRegistry.put(register.nodeId, register.ref);
-        if (!nodeOrder.contains(register.nodeId)) {
-            nodeOrder.add(register.nodeId);
-        }
-        return Behaviors.same();
-    }
-
-    private Behavior<Command> onUnregisterGameNode(UnregisterGameNode unregister) {
-        context.getLog().info("Unregister game node {}", unregister.nodeId);
-        nodeRegistry.remove(unregister.nodeId);
-        nodeOrder.remove(unregister.nodeId);
+    private Behavior<Command> onPlayerLogin(PlayerLogin login) {
+        EntityRef<PlayerCommand> entityRef = sharding.entityRefFor(PlayerActor.ENTITY_TYPE_KEY, login.playerId);
+        ActorRef<PlayerCommand.Ack> ackRef = context.spawnAnonymous(Behaviors.receiveMessage(msg -> {
+            context.getLog().info("Player {} login acknowledged", login.playerId);
+            return Behaviors.stopped();
+        }));
+        entityRef.tell(new PlayerCommand.Login(login.sessionId, ackRef));
+        context.getLog().info("Forward login for player {}", login.playerId);
         return Behaviors.same();
     }
 
     private Behavior<Command> onForwardPlayerCommand(ForwardPlayerCommand forward) {
-        Optional<ActorRef<GameNodeGuardian.Command>> ref = selectNode(forward.playerId);
-        if (ref.isEmpty()) {
-            context.getLog().warn("No game nodes available for player {}", forward.playerId);
-            return Behaviors.same();
-        }
-        context.getLog().debug("Route player {} to game node", forward.playerId);
-        ref.get().tell(new GameNodeGuardian.PlayerEnvelope(forward.playerId, forward.command));
+        EntityRef<PlayerCommand> entityRef = sharding.entityRefFor(PlayerActor.ENTITY_TYPE_KEY, forward.playerId);
+        entityRef.tell(forward.command);
+        context.getLog().debug("Forward {} to sharded player {}", forward.command.getClass().getSimpleName(), forward.playerId);
         return Behaviors.same();
-    }
-
-    private Optional<ActorRef<GameNodeGuardian.Command>> selectNode(String playerId) {
-        if (nodeRegistry.isEmpty()) {
-            return Optional.empty();
-        }
-        if (nodeOrder.isEmpty()) {
-            nodeOrder.addAll(nodeRegistry.keySet());
-        }
-        int index = Math.floorMod(playerId.hashCode(), nodeOrder.size());
-        String nodeId = nodeOrder.get(index);
-        ActorRef<GameNodeGuardian.Command> ref = nodeRegistry.get(nodeId);
-        if (ref == null) {
-            nodeOrder.remove(nodeId);
-            return selectNode(playerId);
-        }
-        return Optional.of(ref);
-    }
-
-    private Behavior<Command> onListingUpdated(ListingUpdated update) {
-        Map<String, ActorRef<GameNodeGuardian.Command>> discovered = update.listing
-                .getServiceInstances(GameNodeGuardian.SERVICE_KEY)
-                .stream()
-                .sorted((left, right) -> left.path().toString().compareTo(right.path().toString()))
-                .collect(Collectors.toMap(
-                        ref -> ref.path().toString(),
-                        ref -> ref,
-                        (existing, replacement) -> existing,
-                        LinkedHashMap::new));
-
-        nodeRegistry.clear();
-        nodeRegistry.putAll(discovered);
-        nodeOrder.clear();
-        nodeOrder.addAll(discovered.keySet());
-
-        context.getLog().info("Discovered {} game nodes via receptionist", nodeOrder.size());
-        return Behaviors.same();
-    }
-
-    List<String> getRegisteredNodeOrder() {
-        return Collections.unmodifiableList(nodeOrder);
     }
 }

@@ -2,6 +2,8 @@ package org.wrj.haifa.akka.game.common.player;
 
 import akka.actor.typed.ActorRef;
 
+import java.util.List;
+
 /**
  * Common protocol for player level commands exchanged between the gateway and game nodes.
  */
@@ -68,6 +70,34 @@ public interface PlayerCommand {
         public static final Ack INSTANCE = new Ack();
 
         private Ack() {
+        }
+    }
+
+    /**
+     * Snapshot of the current room occupants that helps a client maintain UI state.
+     */
+    final class RoomSnapshot implements PlayerCommand {
+        public final String roomId;
+        public final List<String> occupantIds;
+
+        public RoomSnapshot(String roomId, List<String> occupantIds) {
+            this.roomId = roomId;
+            this.occupantIds = List.copyOf(occupantIds);
+        }
+    }
+
+    /**
+     * Notification emitted by a room and delivered to the player so the client can react to the broadcast.
+     */
+    final class RoomBroadcast implements PlayerCommand {
+        public final String roomId;
+        public final String fromPlayerId;
+        public final String message;
+
+        public RoomBroadcast(String roomId, String fromPlayerId, String message) {
+            this.roomId = roomId;
+            this.fromPlayerId = fromPlayerId;
+            this.message = message;
         }
     }
 }
