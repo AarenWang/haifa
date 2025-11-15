@@ -14,7 +14,7 @@
     <version>1.0.0-SNAPSHOT</version>
     <packaging>war</packaging>
 
-    <name>spring-internal</name>
+    <name>spring-web-internal</name>
     <url>http://maven.apache.org</url>
 
 
@@ -62,16 +62,9 @@
     <build>
         <plugins>
             <plugin>
-                <groupId>org.apache.tomcat.maven</groupId>
-                <artifactId>tomcat7-maven-plugin</artifactId>
-                <version>2.1</version>
-                <configuration>
-                    <port>9090</port>
-                    <path>/</path>
-                    <uriEncoding>UTF-8</uriEncoding>
-                    <finalName>SpringWebInternal</finalName>
-                    <server>tomcat7</server>
-                </configuration>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-war-plugin</artifactId>
+                <version>3.4.0</version> <!-- Or a more recent stable version -->
             </plugin>
         </plugins>
     </build>
