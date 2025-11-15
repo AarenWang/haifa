@@ -1,8 +1,5 @@
 package org.wrj.haifa.akka.game.common.room;
 
-import akka.actor.typed.ActorRef;
-import org.wrj.haifa.akka.game.common.player.PlayerCommand;
-
 /**
  * Protocol used by the room subsystem within a game node.
  */
@@ -11,11 +8,9 @@ public interface RoomCommand {
     /** Command that indicates a player is joining a room. */
     final class PlayerJoin implements RoomCommand {
         public final String playerId;
-        public final ActorRef<PlayerCommand> playerRef;
 
-        public PlayerJoin(String playerId, ActorRef<PlayerCommand> playerRef) {
+        public PlayerJoin(String playerId) {
             this.playerId = playerId;
-            this.playerRef = playerRef;
         }
     }
 

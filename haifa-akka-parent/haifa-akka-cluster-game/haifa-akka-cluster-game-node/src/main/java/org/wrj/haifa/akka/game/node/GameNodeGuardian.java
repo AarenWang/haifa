@@ -1,46 +1,24 @@
 package org.wrj.haifa.akka.game.node;
 
-import akka.actor.typed.ActorRef;
 import akka.actor.typed.Behavior;
 import akka.actor.typed.PostStop;
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Behaviors;
-import akka.actor.typed.receptionist.Receptionist;
-import akka.actor.typed.receptionist.ServiceKey;
+import akka.cluster.sharding.typed.javadsl.ClusterSharding;
+import akka.cluster.sharding.typed.javadsl.Entity;
 
-import org.wrj.haifa.akka.game.common.player.PlayerCommand;
-import org.wrj.haifa.akka.game.common.room.RoomCommand;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Guardian actor for a game node. It initializes the player and room managers and exposes the entry protocol used by
- * the gateway layer.
+ * Guardian actor for a game node. It boots cluster sharding for player and room entities.
  */
-public class GameNodeGuardian {
+public final class GameNodeGuardian {
 
     public interface Command {
     }
 
-    public static final ServiceKey<Command> SERVICE_KEY =
-            ServiceKey.create(Command.class, "game-node-guardian-service");
-
-    public static final class PlayerEnvelope implements Command {
-        public final String playerId;
-        public final PlayerCommand command;
-
-        public PlayerEnvelope(String playerId, PlayerCommand command) {
-            this.playerId = playerId;
-            this.command = command;
-        }
-    }
-
-    public static final class RoomEnvelope implements Command {
-        public final String roomId;
-        public final RoomCommand command;
-
-        public RoomEnvelope(String roomId, RoomCommand command) {
-            this.roomId = roomId;
-            this.command = command;
-        }
+    public enum Stop implements Command {
+        INSTANCE
     }
 
     public static Behavior<Command> createBehavior() {
@@ -48,38 +26,39 @@ public class GameNodeGuardian {
     }
 
     private final ActorContext<Command> context;
-    private final ActorRef<PlayerManagerActor.Command> playerManager;
-    private final ActorRef<RoomManagerActor.Command> roomManager;
+    private final RedisPlayerStateRepository repository;
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     private GameNodeGuardian(ActorContext<Command> context) {
         this.context = context;
-        this.roomManager = context.spawn(RoomManagerActor.createBehavior(), "room-manager");
-        this.playerManager = context.spawn(PlayerManagerActor.createBehavior(), "player-manager");
-        context.getSystem()
-                .receptionist()
-                .tell(Receptionist.register(SERVICE_KEY, context.getSelf()));
+        this.repository = new RedisPlayerStateRepository(context.getSystem().settings().config());
+        startSharding();
     }
 
     private Behavior<Command> behavior() {
         return Behaviors.receive(Command.class)
-                .onMessage(PlayerEnvelope.class, this::onPlayerEnvelope)
-                .onMessage(RoomEnvelope.class, this::onRoomEnvelope)
+                .onMessage(Stop.class, msg -> {
+                    onStop();
+                    return Behaviors.stopped();
+                })
                 .onSignal(PostStop.class, signal -> {
-                    context.getSystem()
-                            .receptionist()
-                            .tell(Receptionist.deregister(SERVICE_KEY, context.getSelf()));
+                    onStop();
                     return Behaviors.same();
                 })
                 .build();
     }
 
-    private Behavior<Command> onPlayerEnvelope(PlayerEnvelope envelope) {
-        playerManager.tell(new PlayerManagerActor.RouteToPlayer(envelope.playerId, envelope.command, roomManager));
-        return Behaviors.same();
+    private void startSharding() {
+        ClusterSharding sharding = ClusterSharding.get(context.getSystem());
+        sharding.init(Entity.of(PlayerActor.ENTITY_TYPE_KEY, entityContext ->
+                PlayerActor.create(entityContext, repository)).withRole("game"));
+        sharding.init(Entity.of(RoomActor.ENTITY_TYPE_KEY, RoomActor::create).withRole("game"));
+        context.getLog().info("Game node guardian started cluster sharding for players and rooms");
     }
 
-    private Behavior<Command> onRoomEnvelope(RoomEnvelope envelope) {
-        roomManager.tell(new RoomManagerActor.RouteToRoom(envelope.roomId, envelope.command));
-        return Behaviors.same();
+    private void onStop() {
+        if (closed.compareAndSet(false, true)) {
+            repository.close();
+        }
     }
 }
