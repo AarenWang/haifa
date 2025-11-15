@@ -78,7 +78,7 @@ public final class GatewayApp {
             joinCount++;
         }
 
-        long demoDurationMs = Duration.ofMinutes(2).toMillis();
+        long demoDurationMs = Duration.ofMinutes(20).toMillis();
         long endTime = System.currentTimeMillis() + demoDurationMs;
         Random random = new Random();
         String[] chatTemplates = {
