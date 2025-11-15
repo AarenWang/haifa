@@ -1,6 +1,7 @@
 package org.wrj.haifa.akka.game.node;
 
 import akka.actor.typed.ActorSystem;
+import akka.management.javadsl.AkkaManagement;
 
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
@@ -21,6 +22,9 @@ public final class GameNodeApp {
                 "GameCluster",
                 config);
 
+
+        // 启动管理服务
+        AkkaManagement.get(system).start();
         system.getWhenTerminated().toCompletableFuture().join();
     }
 }

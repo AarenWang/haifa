@@ -1,38 +1,52 @@
 package org.wrj.haifa.akka.game.node;
 
-import akka.actor.typed.ActorRef;
 import akka.actor.typed.Behavior;
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Behaviors;
+import akka.cluster.sharding.typed.javadsl.ClusterSharding;
+import akka.cluster.sharding.typed.javadsl.EntityContext;
+import akka.cluster.sharding.typed.javadsl.EntityRef;
+import akka.cluster.sharding.typed.javadsl.EntityTypeKey;
 
-import java.util.List;
+import java.util.Optional;
 
 import org.wrj.haifa.akka.game.common.player.PlayerCommand;
 import org.wrj.haifa.akka.game.common.room.RoomCommand;
 
 /**
- * Actor that encapsulates the player state on a game node.
+ * Sharded player entity that keeps track of player state and forwards
+ * room-related commands to the room shards. Snapshots are persisted to Redis so
+ * that the player can be recreated on a different node.
  */
-public class PlayerActor {
+public final class PlayerActor {
 
-    public static Behavior<PlayerCommand> create(String playerId, ActorRef<RoomManagerActor.Command> roomManager) {
-        return Behaviors.setup(ctx -> new PlayerActor(ctx, playerId, roomManager).behavior());
+    public static final EntityTypeKey<PlayerCommand> ENTITY_TYPE_KEY =
+            EntityTypeKey.create(PlayerCommand.class, "PlayerActor");
+
+    public static Behavior<PlayerCommand> create(EntityContext<PlayerCommand> entityContext,
+                                                 RedisPlayerStateRepository repository) {
+        return Behaviors.setup(ctx -> new PlayerActor(ctx, entityContext, repository).behavior());
     }
 
     private final ActorContext<PlayerCommand> context;
+    private final RedisPlayerStateRepository repository;
+    private final ClusterSharding sharding;
     private final String playerId;
-    private final ActorRef<RoomManagerActor.Command> roomManager;
 
-    private int x = 0;
-    private int y = 0;
-    private String currentRoomId;
+    private PlayerState state;
 
     private PlayerActor(ActorContext<PlayerCommand> context,
-                        String playerId,
-                        ActorRef<RoomManagerActor.Command> roomManager) {
+                        EntityContext<PlayerCommand> entityContext,
+                        RedisPlayerStateRepository repository) {
         this.context = context;
-        this.playerId = playerId;
-        this.roomManager = roomManager;
+        this.repository = repository;
+        this.sharding = ClusterSharding.get(context.getSystem());
+        this.playerId = entityContext.getEntityId();
+        this.state = repository.load(playerId).orElseGet(() -> PlayerState.empty(playerId));
+        state.getCurrentRoomId().ifPresent(roomId -> {
+            context.getLog().info("Restoring player {} into room {}", playerId, roomId);
+            roomEntity(roomId).tell(new RoomCommand.PlayerJoin(playerId));
+        });
     }
 
     private Behavior<PlayerCommand> behavior() {
@@ -49,65 +63,73 @@ public class PlayerActor {
 
     private Behavior<PlayerCommand> onLogin(PlayerCommand.Login login) {
         context.getLog().info("Player {} login with session {}", playerId, login.sessionId);
+        state = state.withSession(login.sessionId);
+        persistState();
         login.replyTo.tell(PlayerCommand.Ack.INSTANCE);
         return Behaviors.same();
     }
 
     private Behavior<PlayerCommand> onMoveTo(PlayerCommand.MoveTo move) {
-        this.x = move.x;
-        this.y = move.y;
-        context.getLog().debug("Player {} move to ({}, {})", playerId, x, y);
+        state = state.withPosition(move.x, move.y);
+        persistState();
+        context.getLog().debug("Player {} move to ({}, {})", playerId, state.getX(), state.getY());
         return Behaviors.same();
     }
 
     private Behavior<PlayerCommand> onJoinRoom(PlayerCommand.JoinRoom joinRoom) {
-        this.currentRoomId = joinRoom.roomId;
-        roomManager.tell(new RoomManagerActor.RouteToRoom(
-                joinRoom.roomId,
-                new RoomCommand.PlayerJoin(playerId, context.getSelf())
-        ));
+        String targetRoom = joinRoom.roomId;
+        if (targetRoom == null || targetRoom.isBlank()) {
+            context.getLog().warn("Player {} attempted to join an invalid room id", playerId);
+            return Behaviors.same();
+        }
+
+        Optional<String> currentRoom = state.getCurrentRoomId();
+        if (currentRoom.filter(targetRoom::equals).isPresent()) {
+            context.getLog().debug("Player {} already in room {}", playerId, targetRoom);
+            return Behaviors.same();
+        }
+
+        currentRoom.ifPresent(room -> {
+            context.getLog().info("Player {} leaving room {} before joining {}", playerId, room, targetRoom);
+            roomEntity(room).tell(new RoomCommand.PlayerLeave(playerId));
+        });
+
+        context.getLog().info("Player {} joining room {}", playerId, targetRoom);
+        roomEntity(targetRoom).tell(new RoomCommand.PlayerJoin(playerId));
+        state = state.withCurrentRoom(targetRoom);
+        persistState();
         return Behaviors.same();
     }
 
     private Behavior<PlayerCommand> onLeaveRoom(PlayerCommand.LeaveRoom leaveRoom) {
-        if (currentRoomId != null && currentRoomId.equals(leaveRoom.roomId)) {
-            roomManager.tell(new RoomManagerActor.RouteToRoom(
-                    leaveRoom.roomId,
-                    new RoomCommand.PlayerLeave(playerId)
-            ));
-            currentRoomId = null;
+        Optional<String> currentRoom = state.getCurrentRoomId();
+        if (currentRoom.isPresent() && currentRoom.get().equals(leaveRoom.roomId)) {
+            context.getLog().info("Player {} leaving room {}", playerId, leaveRoom.roomId);
+            roomEntity(leaveRoom.roomId).tell(new RoomCommand.PlayerLeave(playerId));
+            state = state.withCurrentRoom(null);
+            persistState();
+        } else {
+            context.getLog().debug("Player {} ignored leave for non-joined room {}", playerId, leaveRoom.roomId);
         }
         return Behaviors.same();
     }
 
     private Behavior<PlayerCommand> onChatInRoom(PlayerCommand.ChatInRoom chat) {
-        if (currentRoomId == null || !currentRoomId.equals(chat.roomId)) {
-            context.getLog().warn("Player {} chat in not-joined room {}", playerId, chat.roomId);
+        Optional<String> currentRoom = state.getCurrentRoomId();
+        if (currentRoom.isEmpty()) {
+            context.getLog().warn("Player {} chat ignored because not in any room", playerId);
             return Behaviors.same();
         }
-        roomManager.tell(new RoomManagerActor.RouteToRoom(
-                chat.roomId,
-                new RoomCommand.Chat(playerId, chat.message)
-        ));
+        if (!currentRoom.get().equals(chat.roomId)) {
+            context.getLog().warn("Player {} chat ignored because not in room {} (currently in {})", playerId, chat.roomId, currentRoom.get());
+            return Behaviors.same();
+        }
+        roomEntity(chat.roomId).tell(new RoomCommand.Chat(playerId, chat.message));
         return Behaviors.same();
     }
 
     private Behavior<PlayerCommand> onRoomSnapshot(PlayerCommand.RoomSnapshot snapshot) {
-        if (currentRoomId == null || !currentRoomId.equals(snapshot.roomId)) {
-            context.getLog().debug(
-                    "Player {} ignore snapshot for room {} while currently in {}",
-                    playerId,
-                    snapshot.roomId,
-                    currentRoomId);
-            return Behaviors.same();
-        }
-        List<String> occupants = snapshot.occupantIds;
-        context.getLog().info(
-                "Player {} sees {} occupants in room {}: {}",
-                playerId,
-                occupants.size(),
-                snapshot.roomId,
-                occupants);
+        context.getLog().info("Player {} sees {} occupants in room {}", playerId, snapshot.occupantIds.size(), snapshot.roomId);
         return Behaviors.same();
     }
 
@@ -119,5 +141,13 @@ public class PlayerActor {
                 broadcast.fromPlayerId,
                 broadcast.message);
         return Behaviors.same();
+    }
+
+    private EntityRef<RoomCommand> roomEntity(String roomId) {
+        return sharding.entityRefFor(RoomActor.ENTITY_TYPE_KEY, roomId);
+    }
+
+    private void persistState() {
+        repository.save(state);
     }
 }

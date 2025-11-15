@@ -1,33 +1,43 @@
 package org.wrj.haifa.akka.game.node;
 
-import akka.actor.typed.ActorRef;
 import akka.actor.typed.Behavior;
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Behaviors;
+import akka.cluster.sharding.typed.javadsl.ClusterSharding;
+import akka.cluster.sharding.typed.javadsl.EntityContext;
+import akka.cluster.sharding.typed.javadsl.EntityRef;
+import akka.cluster.sharding.typed.javadsl.EntityTypeKey;
 
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 
 import org.wrj.haifa.akka.game.common.player.PlayerCommand;
 import org.wrj.haifa.akka.game.common.room.RoomCommand;
 
 /**
- * Actor that keeps track of in-memory room state.
+ * Sharded room entity that maintains the list of occupants and notifies players
+ * of state changes through cluster sharding.
  */
-public class RoomActor {
+public final class RoomActor {
 
-    public static Behavior<RoomCommand> create(String roomId) {
-        return Behaviors.setup(context -> new RoomActor(context, roomId).behavior());
+    public static final EntityTypeKey<RoomCommand> ENTITY_TYPE_KEY =
+            EntityTypeKey.create(RoomCommand.class, "RoomActor");
+
+    public static Behavior<RoomCommand> create(EntityContext<RoomCommand> entityContext) {
+        return Behaviors.setup(context -> new RoomActor(context, entityContext).behavior());
     }
 
     private final ActorContext<RoomCommand> context;
+    private final ClusterSharding sharding;
     private final String roomId;
-    private final Map<String, ActorRef<PlayerCommand>> players = new HashMap<>();
 
-    private RoomActor(ActorContext<RoomCommand> context, String roomId) {
+    private final Set<String> occupants = new HashSet<>();
+
+    private RoomActor(ActorContext<RoomCommand> context, EntityContext<RoomCommand> entityContext) {
         this.context = context;
-        this.roomId = roomId;
+        this.sharding = ClusterSharding.get(context.getSystem());
+        this.roomId = entityContext.getEntityId();
     }
 
     private Behavior<RoomCommand> behavior() {
@@ -40,48 +50,58 @@ public class RoomActor {
     }
 
     private Behavior<RoomCommand> onPlayerJoin(RoomCommand.PlayerJoin join) {
-        context.getLog().info("Player {} join room {}", join.playerId, roomId);
-        players.put(join.playerId, join.playerRef);
-        broadcast(new RoomCommand.Broadcast(join.playerId, "joined the room"));
-        sendSnapshotToAll();
+        if (occupants.add(join.playerId)) {
+            context.getLog().info("Player {} join room {}", join.playerId, roomId);
+            sendBroadcast(join.playerId, "joined the room");
+            sendSnapshotToAll();
+        } else {
+            context.getLog().debug("Player {} already present in room {}", join.playerId, roomId);
+        }
         return Behaviors.same();
     }
 
     private Behavior<RoomCommand> onPlayerLeave(RoomCommand.PlayerLeave leave) {
-        context.getLog().info("Player {} leave room {}", leave.playerId, roomId);
-        players.remove(leave.playerId);
-        broadcast(new RoomCommand.Broadcast(leave.playerId, "left the room"));
-        sendSnapshotToAll();
+        if (occupants.remove(leave.playerId)) {
+            context.getLog().info("Player {} leave room {}", leave.playerId, roomId);
+            sendBroadcast(leave.playerId, "left the room");
+            sendSnapshotToAll();
+        } else {
+            context.getLog().debug("Player {} not present in room {}", leave.playerId, roomId);
+        }
         return Behaviors.same();
     }
 
     private Behavior<RoomCommand> onChat(RoomCommand.Chat chat) {
+        if (!occupants.contains(chat.playerId)) {
+            context.getLog().warn("Player {} attempted to chat in room {} without joining", chat.playerId, roomId);
+            return Behaviors.same();
+        }
         context.getLog().info("Player {} say in room {}: {}", chat.playerId, roomId, chat.message);
-        broadcast(new RoomCommand.Broadcast(chat.playerId, chat.message));
+        sendBroadcast(chat.playerId, chat.message);
         return Behaviors.same();
     }
 
     private Behavior<RoomCommand> onBroadcast(RoomCommand.Broadcast broadcast) {
-        players.forEach((player, ref) -> {
-            context.getLog().debug(
-                    "Send message to {}: [{}] {}",
-                    player,
-                    broadcast.fromPlayerId,
-                    broadcast.message);
-            ref.tell(new PlayerCommand.RoomBroadcast(roomId, broadcast.fromPlayerId, broadcast.message));
-        });
+        sendBroadcast(broadcast.fromPlayerId, broadcast.message);
         return Behaviors.same();
     }
 
-    private void broadcast(RoomCommand.Broadcast broadcast) {
-        onBroadcast(broadcast);
+    private void sendBroadcast(String fromPlayerId, String message) {
+        List<String> targets = List.copyOf(occupants);
+        for (String playerId : targets) {
+            EntityRef<PlayerCommand> playerRef = sharding.entityRefFor(PlayerActor.ENTITY_TYPE_KEY, playerId);
+            playerRef.tell(new PlayerCommand.RoomBroadcast(roomId, fromPlayerId, message));
+        }
     }
 
     private void sendSnapshotToAll() {
-        if (players.isEmpty()) {
+        if (occupants.isEmpty()) {
             return;
         }
-        List<String> occupants = List.copyOf(players.keySet());
-        players.forEach((playerId, ref) -> ref.tell(new PlayerCommand.RoomSnapshot(roomId, occupants)));
+        List<String> snapshot = List.copyOf(occupants);
+        for (String playerId : snapshot) {
+            EntityRef<PlayerCommand> playerRef = sharding.entityRefFor(PlayerActor.ENTITY_TYPE_KEY, playerId);
+            playerRef.tell(new PlayerCommand.RoomSnapshot(roomId, snapshot));
+        }
     }
 }

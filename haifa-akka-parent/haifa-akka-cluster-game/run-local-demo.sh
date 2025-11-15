@@ -103,7 +103,7 @@ start_gateway_simulation() {
   local log_file="$LOG_DIR/gateway.log"
   log_step "Starting gateway simulation (logs: $log_file)..."
   (
-    AKKA_PORT=25510 \
+    AKKA_PORT=0 \
       mvn -pl haifa-akka-cluster-game-gateway exec:java \
         -Dexec.mainClass=org.wrj.haifa.akka.game.gateway.GatewayApp \
         -Dexec.cleanupDaemonThreads=false \
@@ -155,11 +155,11 @@ build_modules
 
 mkdir -p "$LOG_DIR" "$REDIS_BASE_DIR"
 
-download_redis
-start_redis
+#download_redis
+#start_redis
 
 start_game_node 25520 seed-a
-sleep 2
+#sleep 3
 start_game_node 25530 seed-b
 sleep 5
 
