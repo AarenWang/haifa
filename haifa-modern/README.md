@@ -1,3 +1,54 @@
+# haifa-modern — 类型推导学习与示例
+
+本模块收集了与 Java 类型推导（type inference）相关的学习资料与可运行示例，覆盖从 Java 11 到 Java 21 常用或现代化的类型推导用法（示例代码基于能够运行这些特性的较新 JDK）。
+
+快速目录
+- **概览**：本文件对关键特性做简要说明。
+- **示例源码**：位于 `src/main/java/org/wrj/haifa/modern/typeinference/` 下的若干演示程序。
+- **运行**：如何用 `javac`/`java` 或 Maven 运行示例。
+
+概览（要点）
+
+- `var`（局部变量类型推导）: 由 Java 10 引入，Java 11 及更高版本均支持。用于局部变量、增强 for、try-with-resources 等场景。
+- `var` 在 lambda 参数中的使用：可以在 lambda 参数上使用 `var`（带来统一的声明语法，便于使用注解），需要较新的 JDK 支持。
+- 模式匹配（Pattern Matching） for `instanceof`：可以在 `instanceof` 检查时直接绑定变量，避免显式强转（从较新 Java 版本开始逐步标准化）。
+- Switch 表达式：`switch` 可作为表达式返回值，写法更简洁，配合类型推导可写出更清晰代码。
+- `record`：轻量不可变数据载体（自带构造器/访问器），与类型推导配合可写出非常简洁的示例代码。
+- 泛型推断改进：方法调用、构造器钻石操作符和集合工厂方法（`List.of` / `Map.of`）在类型推断上更智能，常用时会自动推断泛型参数类型。
+
+示例列表与文件
+
+- `VarExample` — 演示 `var` 在局部变量、循环、集合等场景下的使用。  
+- `LambdaVarExample` — 演示在 lambda 参数上使用 `var` 的写法。  
+- `PatternMatchingInstanceofExample` — 演示 `instanceof` 模式匹配的用法（绑定变量）。
+- `SwitchExpressionExample` — 演示 `switch` 表达式与类型推导配合使用。  
+- `Point`（record）与 `RecordExample` — 演示 `record` 与 `var` 结合使用。  
+- `GenericInferenceExample` — 演示泛型方法/构造器以及类型推断示例。
+
+运行说明
+
+- 推荐 JDK：为了覆盖所有示例，建议使用 JDK 17 或 JDK 21（若使用较老 JDK，某些示例可能不可用）。
+- 使用 javac + java（示例）：
+
+```bash
+javac -d out $(find src/main/java -name "*.java")
+java -cp out org.wrj.haifa.modern.typeinference.VarExample
+```
+
+- 使用 Maven（若模块配置完整）：
+
+```bash
+mvn -pl haifa-modern -am compile
+mvn -pl haifa-modern -am exec:java -Dexec.mainClass="org.wrj.haifa.modern.typeinference.VarExample"
+```
+
+更多说明
+
+示例代码直接放在 `src/main/java/org/wrj/haifa/modern/typeinference/`，每个类均含 `main` 方法，可单独运行以观察输出。文档和示例旨在教学用途，重点展示“如何使用”和“为什么这样更清晰”。
+
+如果需要，我可以：
+- 为每个示例添加单元测试或构建脚本。  
+- 将 README 中的版本注记调整为精确的 JEP/版本引用（需要我去查阅 JEP 列表）。
 # Haifa Modern Java Features
 
 此模块用于学习和展示 Java 11 以后的新增功能。
