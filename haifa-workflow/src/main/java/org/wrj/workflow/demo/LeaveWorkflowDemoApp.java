@@ -29,7 +29,7 @@ public final class LeaveWorkflowDemoApp {
         TaskService taskService = engine.getTaskService();
 
         Map<String, Object> variables = new HashMap<>();
-        variables.put("employee", "zhangsan");
+        variables.put("employee", "zhangsan");  
         variables.put("days", 3);
         variables.put("leaveType", "marriage");
         variables.put("reason", "wedding");

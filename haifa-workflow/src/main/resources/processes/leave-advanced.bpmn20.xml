@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://www.wrj.org/workflow/leave-advanced">
+    <!-- 请假流程（进阶演示）：用于驳回、撤回、加签示例 -->
+    <process id="leaveAdvanced" name="Leave Advanced Demo" isExecutable="true">
+        <startEvent id="start" name="Start"/>
+
+        <!-- 提交申请 -->
+        <userTask id="submitRequest" name="Submit Leave Request" flowable:assignee="${employee}"/>
+        <!-- 主管审批 -->
+        <userTask id="managerApproval" name="Manager Approval" flowable:assignee="manager"/>
+        <!-- HR 归档 -->
+        <userTask id="hrRecord" name="HR Record" flowable:assignee="hr"/>
+
+        <endEvent id="endApproved" name="Approved End"/>
+
+        <sequenceFlow id="flow1" sourceRef="start" targetRef="submitRequest"/>
+        <sequenceFlow id="flow2" sourceRef="submitRequest" targetRef="managerApproval"/>
+        <sequenceFlow id="flow3" sourceRef="managerApproval" targetRef="hrRecord"/>
+        <sequenceFlow id="flow4" sourceRef="hrRecord" targetRef="endApproved"/>
+    </process>
+</definitions>
