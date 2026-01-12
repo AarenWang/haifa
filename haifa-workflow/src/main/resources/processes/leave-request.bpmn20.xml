@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://www.wrj.org/workflow/leave">
+    <!-- 员工请假审批流程：提交 -> 主管审批 -> HR 归档 -->
+    <process id="leaveRequest" name="Employee Leave Request" isExecutable="true">
+        <startEvent id="start" name="Start"/>
+
+        <!-- 员工提交请假申请 -->
+        <userTask id="submitRequest" name="Submit Leave Request" flowable:assignee="${employee}"/>
+        <!-- 直属主管审批 -->
+        <userTask id="managerApproval" name="Manager Approval" flowable:assignee="manager"/>
+        <!-- 是否婚假判断 -->
+        <exclusiveGateway id="marriageGateway" name="Marriage Leave?"/>
+        <!-- 婚假需提交结婚证明 -->
+        <userTask id="marriageProof" name="Marriage Proof" flowable:assignee="${employee}"/>
+        <!-- 是否超过三天判断 -->
+        <exclusiveGateway id="daysGateway" name=">=3 Days?"/>
+        <!-- 总监审批 -->
+        <userTask id="directorApproval" name="Director Approval" flowable:assignee="director"/>
+        <!-- 审批结果判断 -->
+        <exclusiveGateway id="approvalGateway" name="Approved?"/>
+        <!-- HR 归档 -->
+        <userTask id="hrRecord" name="HR Record" flowable:assignee="hr"/>
+
+        <endEvent id="endApproved" name="Approved End"/>
+        <endEvent id="endRejected" name="Rejected End"/>
+
+        <sequenceFlow id="flow1" sourceRef="start" targetRef="submitRequest"/>
+        <sequenceFlow id="flow2" sourceRef="submitRequest" targetRef="managerApproval"/>
+        <sequenceFlow id="flow3" sourceRef="managerApproval" targetRef="marriageGateway"/>
+        <!-- 婚假需要提供证明 -->
+        <sequenceFlow id="flow4" sourceRef="marriageGateway" targetRef="marriageProof">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${leaveType == 'marriage'}]]></conditionExpression>
+        </sequenceFlow>
+        <!-- 非婚假跳过证明 -->
+        <sequenceFlow id="flow5" sourceRef="marriageGateway" targetRef="daysGateway">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${leaveType != 'marriage'}]]></conditionExpression>
+        </sequenceFlow>
+        <!-- 提交婚假证明后继续 -->
+        <sequenceFlow id="flow6" sourceRef="marriageProof" targetRef="daysGateway"/>
+        <!-- 三天及以上需要总监审批 -->
+        <sequenceFlow id="flow7" sourceRef="daysGateway" targetRef="directorApproval">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${days >= 3}]]></conditionExpression>
+        </sequenceFlow>
+        <!-- 三天以内直接进入结果判断 -->
+        <sequenceFlow id="flow8" sourceRef="daysGateway" targetRef="approvalGateway">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${days < 3}]]></conditionExpression>
+        </sequenceFlow>
+        <!-- 总监审批后进入结果判断 -->
+        <sequenceFlow id="flow9" sourceRef="directorApproval" targetRef="approvalGateway"/>
+        <!-- 审批通过进入 HR 归档：三天以下只看主管审批，三天及以上需总监通过 -->
+        <sequenceFlow id="flow10" sourceRef="approvalGateway" targetRef="hrRecord">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == true && (days < 3 || directorApproved == true)}]]></conditionExpression>
+        </sequenceFlow>
+        <!-- 审批拒绝直接结束 -->
+        <sequenceFlow id="flow11" sourceRef="approvalGateway" targetRef="endRejected">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == false || (days >= 3 && directorApproved == false)}]]></conditionExpression>
+        </sequenceFlow>
+        <sequenceFlow id="flow12" sourceRef="hrRecord" targetRef="endApproved"/>
+    </process>
+</definitions>
