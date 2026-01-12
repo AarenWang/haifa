@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://www.wrj.org/workflow/loan">
+    <!-- 银行贷款信审流程：申请 -> 信审 -> 风控 -> 签约 -->
+    <process id="loanApproval" name="Bank Loan Approval" isExecutable="true">
+        <startEvent id="start" name="Start"/>
+
+        <!-- 客户提交贷款申请 -->
+        <userTask id="submitApplication" name="Submit Loan Application" flowable:assignee="${applicant}"/>
+        <!-- 信审专员审查 -->
+        <userTask id="creditReview" name="Credit Officer Review" flowable:assignee="creditOfficer"/>
+        <!-- 风控复核 -->
+        <userTask id="riskReview" name="Risk Control Review" flowable:assignee="riskOfficer"/>
+        <!-- 审批结果判断 -->
+        <exclusiveGateway id="decisionGateway" name="Approved?"/>
+        <!-- 通过后进入签约 -->
+        <userTask id="contractSigning" name="Contract Signing" flowable:assignee="finance"/>
+
+        <endEvent id="endApproved" name="Approved End"/>
+        <endEvent id="endRejected" name="Rejected End"/>
+
+        <sequenceFlow id="flow1" sourceRef="start" targetRef="submitApplication"/>
+        <sequenceFlow id="flow2" sourceRef="submitApplication" targetRef="creditReview"/>
+        <sequenceFlow id="flow3" sourceRef="creditReview" targetRef="riskReview"/>
+        <sequenceFlow id="flow4" sourceRef="riskReview" targetRef="decisionGateway"/>
+        <!-- 审批通过进入签约 -->
+        <sequenceFlow id="flow5" sourceRef="decisionGateway" targetRef="contractSigning">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == true}]]></conditionExpression>
+        </sequenceFlow>
+        <!-- 审批拒绝直接结束 -->
+        <sequenceFlow id="flow6" sourceRef="decisionGateway" targetRef="endRejected">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == false}]]></conditionExpression>
+        </sequenceFlow>
+        <sequenceFlow id="flow7" sourceRef="contractSigning" targetRef="endApproved"/>
+    </process>
+</definitions>
