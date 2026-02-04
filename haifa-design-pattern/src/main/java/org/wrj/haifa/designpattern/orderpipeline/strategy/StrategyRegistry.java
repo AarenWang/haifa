@@ -16,8 +16,7 @@ import java.util.stream.Collectors;
  * <p>这是一个泛型类，可以复用于不同类型的策略接口</p>
  * 
  * <p>使用方式：为每种策略类型创建一个具体的 Registry Bean，参见
- * {@link org.wrj.haifa.designpattern.orderpipeline.strategy.shipping.ShippingStrategyRegistry} 和
- * {@link org.wrj.haifa.designpattern.orderpipeline.strategy.discount.DiscountStrategyRegistry}</p>
+ * {@link org.wrj.haifa.designpattern.orderpipeline.strategy.shipping.ShippingStrategyRegistry}</p>
  * 
  * @param <T> 策略类型，必须实现 {@link KeyedStrategy} 接口
  * @author wrj

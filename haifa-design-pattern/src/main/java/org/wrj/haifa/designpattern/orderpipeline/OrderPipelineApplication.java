@@ -32,9 +32,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * <h2>处理链顺序</h2>
  * <ol>
  *   <li>BasePriceHandler (Order=10) - 设置基础价格</li>
- *   <li>DiscountHandler (Order=20) - 计算折扣（使用策略模式）</li>
- *   <li>ShippingHandler (Order=30) - 计算运费（使用策略模式）</li>
- *   <li>TaxHandler (Order=40) - 计算税费</li>
+ *   <li>ItemDiscountHandler (Order=20) - 跑商品级折扣规则</li>
+ *   <li>OrderDiscountHandler (Order=30) - 处理优惠券/促销码</li>
+ *   <li>ShippingHandler (Order=40) - 计算运费（使用策略模式）</li>
+ *   <li>TaxHandler (Order=45) - 计算税费</li>
  *   <li>SummaryHandler (Order=50) - 汇总计算应付金额</li>
  * </ol>
  * 

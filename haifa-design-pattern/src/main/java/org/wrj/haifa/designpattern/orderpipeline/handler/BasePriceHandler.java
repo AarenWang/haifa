@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.designpattern.orderpipeline.chain.OrderHandler;
+import org.wrj.haifa.designpattern.orderpipeline.model.LineItem;
 import org.wrj.haifa.designpattern.orderpipeline.model.OrderContext;
 
 /**
@@ -23,9 +24,21 @@ public class BasePriceHandler implements OrderHandler {
 
     @Override
     public void handle(OrderContext ctx) {
-        // 示例：直接使用请求中的金额作为基础价格
-        // 实际业务中可能需要：查询商品价格、应用价格策略、汇率转换等
-        ctx.setBasePriceCents(ctx.getRequest().getAmountCents());
+        int basePrice;
+        if (ctx.getRequest().hasItems()) {
+            int subtotal = 0;
+            for (LineItem item : ctx.getRequest().getItems()) {
+                subtotal += item.getRawLineCents();
+            }
+            basePrice = subtotal;
+            ctx.setItemsSubtotalCents(subtotal);
+        } else {
+            basePrice = ctx.getRequest().getAmountCents();
+            ctx.setItemsSubtotalCents(basePrice);
+        }
+
+        ctx.setBasePriceCents(basePrice);
+        ctx.setDiscountCents(0); // 初始化折扣，兼容旧版字段
 
         log.info("BasePriceHandler: Set base price to {} cents", ctx.getBasePriceCents());
     }

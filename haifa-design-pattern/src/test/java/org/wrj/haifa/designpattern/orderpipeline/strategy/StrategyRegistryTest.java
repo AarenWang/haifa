@@ -2,12 +2,13 @@ package org.wrj.haifa.designpattern.orderpipeline.strategy;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
+import org.wrj.haifa.designpattern.orderpipeline.model.LineItem;
 import org.wrj.haifa.designpattern.orderpipeline.model.OrderContext;
 import org.wrj.haifa.designpattern.orderpipeline.model.OrderRequest;
-import org.wrj.haifa.designpattern.orderpipeline.strategy.discount.DiscountNormal;
-import org.wrj.haifa.designpattern.orderpipeline.strategy.discount.DiscountSVIP;
-import org.wrj.haifa.designpattern.orderpipeline.strategy.discount.DiscountStrategy;
-import org.wrj.haifa.designpattern.orderpipeline.strategy.discount.DiscountVIP;
+import org.wrj.haifa.designpattern.orderpipeline.strategy.itemdiscount.DiscountVIPRule;
+import org.wrj.haifa.designpattern.orderpipeline.strategy.itemdiscount.FlashSaleRule;
+import org.wrj.haifa.designpattern.orderpipeline.strategy.orderdiscount.Coupon100Minus20;
+import org.wrj.haifa.designpattern.orderpipeline.strategy.orderdiscount.PromoCode10Off;
 import org.wrj.haifa.designpattern.orderpipeline.strategy.shipping.ShippingCN;
 import org.wrj.haifa.designpattern.orderpipeline.strategy.shipping.ShippingJP;
 import org.wrj.haifa.designpattern.orderpipeline.strategy.shipping.ShippingStrategy;
@@ -58,58 +59,54 @@ class StrategyRegistryTest {
     @DisplayName("测试策略注册表 - Optional 方式获取")
     void testGetOptional() {
         // Given
-        List<DiscountStrategy> strategies = Arrays.asList(
-                new DiscountVIP(),
-                new DiscountNormal(),
-                new DiscountSVIP()
+        List<ShippingStrategy> strategies = Arrays.asList(
+            new ShippingCN(),
+            new ShippingUS()
         );
-        StrategyRegistry<DiscountStrategy> registry = new StrategyRegistry<>(strategies, "Discount");
+        StrategyRegistry<ShippingStrategy> registry = new StrategyRegistry<>(strategies, "Shipping");
 
-        // When & Then
-        assertTrue(registry.get("VIP").isPresent());
-        assertTrue(registry.get("NORMAL").isPresent());
-        assertTrue(registry.get("SVIP").isPresent());
-        assertFalse(registry.get("UNKNOWN").isPresent());
+        assertTrue(registry.get("CN").isPresent());
+        assertTrue(registry.get("US").isPresent());
+        assertFalse(registry.get("JP").isPresent());
     }
 
     @Test
     @DisplayName("测试策略注册表 - 获取所有键")
     void testGetAllKeys() {
         // Given
-        List<DiscountStrategy> strategies = Arrays.asList(
-                new DiscountVIP(),
-                new DiscountNormal()
+        List<ShippingStrategy> strategies = Arrays.asList(
+            new ShippingCN(),
+            new ShippingUS()
         );
-        StrategyRegistry<DiscountStrategy> registry = new StrategyRegistry<>(strategies, "Discount");
+        StrategyRegistry<ShippingStrategy> registry = new StrategyRegistry<>(strategies, "Shipping");
 
         // When
         var keys = registry.getAllKeys();
 
         // Then
         assertEquals(2, keys.size());
-        assertTrue(keys.contains("VIP"));
-        assertTrue(keys.contains("NORMAL"));
+        assertTrue(keys.contains("CN"));
+        assertTrue(keys.contains("US"));
     }
 
     @Test
-    @DisplayName("测试折扣策略计算")
-    void testDiscountStrategyCalculation() {
-        // Given
-        OrderRequest request = new OrderRequest("WEB", "CN", "VIP", 10000);
+        @DisplayName("测试商品级折扣规则")
+        void testItemDiscountRuleCalculation() {
+        OrderRequest request = new OrderRequest();
+        request.setChannel("WEB");
+        request.setCountry("CN");
+        request.setUserTier("VIP");
+        LineItem flashSaleItem = new LineItem("FS-9001", 1000, 1);
+        request.setItems(List.of(flashSaleItem));
         OrderContext ctx = new OrderContext(request);
-        ctx.setBasePriceCents(10000);
 
-        // When & Then - VIP 策略（5% 折扣）
-        DiscountVIP vipStrategy = new DiscountVIP();
-        assertEquals(500, vipStrategy.calcDiscountCents(ctx));
+        FlashSaleRule flashSaleRule = new FlashSaleRule();
+        assertTrue(flashSaleRule.supports(ctx, flashSaleItem));
+        assertEquals(200, flashSaleRule.calcDiscountCents(ctx, flashSaleItem));
 
-        // When & Then - SVIP 策略（10% 折扣）
-        DiscountSVIP svipStrategy = new DiscountSVIP();
-        assertEquals(1000, svipStrategy.calcDiscountCents(ctx));
-
-        // When & Then - Normal 策略（无折扣）
-        DiscountNormal normalStrategy = new DiscountNormal();
-        assertEquals(0, normalStrategy.calcDiscountCents(ctx));
+        DiscountVIPRule vipRule = new DiscountVIPRule();
+        assertTrue(vipRule.supports(ctx, flashSaleItem));
+        assertEquals(50, vipRule.calcDiscountCents(ctx, flashSaleItem));
     }
 
     @Test
@@ -130,5 +127,25 @@ class StrategyRegistryTest {
         // When & Then - 日本运费
         ShippingJP jpStrategy = new ShippingJP();
         assertEquals(1200, jpStrategy.calcShippingCents(ctx));
+    }
+
+    @Test
+    @DisplayName("测试订单级折扣策略")
+    void testOrderDiscountStrategyCalculation() {
+        OrderRequest request = new OrderRequest();
+        request.setItems(List.of());
+        OrderContext ctx = new OrderContext(request);
+        ctx.setItemsAfterItemDiscCents(12000);
+        request.setCouponCode("C100-20");
+
+        Coupon100Minus20 coupon = new Coupon100Minus20();
+        assertTrue(coupon.supports(ctx));
+        assertEquals(2000, coupon.calcOrderDiscountCents(ctx));
+
+        ctx.setItemsAfterItemDiscCents(15000);
+        request.setCouponCode("OFF10");
+        PromoCode10Off promo = new PromoCode10Off();
+        assertTrue(promo.supports(ctx));
+        assertEquals(1500, promo.calcOrderDiscountCents(ctx));
     }
 }
