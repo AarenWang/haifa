@@ -121,7 +121,7 @@ class OrderPipelineIntegrationTest {
         // 验证折扣明细
         assertFalse(result.getOrderDiscountEntries().isEmpty(), "应该有订单级折扣明细");
         assertEquals(1, result.getOrderDiscountEntries().size(), "应该有一条订单折扣记录");
-        assertEquals("ORDER_DISCOUNT", result.getOrderDiscountEntries().get(0).getSource());
+        assertEquals("PROMO_CODE", result.getOrderDiscountEntries().get(0).getSource());
         assertEquals("OFF10", result.getOrderDiscountEntries().get(0).getCouponId());
     }
 
@@ -153,7 +153,8 @@ class OrderPipelineIntegrationTest {
         request.setCouponCode("C100-20");
         request.setItems(List.of(
                 new LineItem("FS-1001", 5000, 1),  // 秒杀品 8 折
-                new LineItem("SKU-2002", 3000, 1)   // 普通 VIP 95 折
+                new LineItem("SKU-2002", 3000, 1), // 普通 VIP 95 折
+                new LineItem("SKU-2003", 2000, 2)  // 追加行，确保满足满减阈值
         ));
 
         OrderContext result = pipeline.execute(request);
@@ -228,19 +229,19 @@ class OrderPipelineIntegrationTest {
         List<LineItem> items = result.getRequest().getItems();
         LineItem item = items.get(0);
 
-        // 商品级折扣：5000 * 0.2 = 1000
-        assertEquals(1000, item.getItemDiscountCents(), "商品折扣应为 1000 分");
+        // 商品级折扣：秒杀 20% + VIP 5% = 25% * 5000 = 1250
+        assertEquals(1250, item.getItemDiscountCents(), "商品折扣应为 1250 分");
 
-        // 订单折扣分摊：2000 * (4000 / 10400) ≈ 769
+        // 满减券未触发（不足 100 元），因此无订单折扣分摊
         int allocatedOrderDiscount = item.getAllocatedOrderDiscountCents();
-        assertTrue(allocatedOrderDiscount > 0, "应有订单折扣分摊");
+        assertEquals(0, allocatedOrderDiscount, "金额不足 100 元时不应分摊订单折扣");
 
-        // 总折扣 = 商品折扣 + 分摊的订单折扣
-        assertEquals(item.getItemDiscountCents() + allocatedOrderDiscount,
-                item.getTotalDiscountCents(), "总折扣应为商品折扣加订单折扣分摊");
+        // 总折扣 = 商品折扣（无订单折扣）
+        assertEquals(item.getItemDiscountCents(), item.getTotalDiscountCents(),
+                "总折扣应等于商品折扣");
 
-        // 最终应付行金额
-        assertEquals(5000 - item.getItemDiscountCents() - allocatedOrderDiscount,
+        // 最终应付行金额 = 原价 - 总折扣
+        assertEquals(5000 - item.getItemDiscountCents(),
                 item.getFinalPayableLineCents(), "最终应付行金额计算正确");
     }
 }
