@@ -2,6 +2,7 @@ package org.wrj.haifa.designpattern.orderpipeline;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.ComponentScan;
 
 /**
  * 订单处理管道示例应用 - 演示策略模式 + 职责链模式 + Spring IoC 的混合使用
@@ -50,6 +51,12 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * @see org.wrj.haifa.designpattern.orderpipeline.chain.OrderPipeline
  * @see org.wrj.haifa.designpattern.orderpipeline.strategy.StrategyRegistry
  */
+@ComponentScan(basePackages = {
+    "org.wrj.haifa.designpattern.orderpipeline.controller",
+    "org.wrj.haifa.designpattern.orderpipeline.chain",
+    "org.wrj.haifa.designpattern.orderpipeline.handler",
+    "org.wrj.haifa.designpattern.orderpipeline.strategy"
+})
 @SpringBootApplication
 public class OrderPipelineApplication {
 
