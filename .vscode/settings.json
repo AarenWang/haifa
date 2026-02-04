@@ -1,4 +1,10 @@
 {
     "java.configuration.updateBuildConfiguration": "automatic",
-    "java.debug.settings.onBuildFailureProceed": true
+    "java.debug.settings.onBuildFailureProceed": true,
+    "java.compile.nullAnalysis.mode": "automatic",
+    "chat.tools.terminal.autoApprove": {
+        "mvn spring-boot:run": true,
+        "mvn dependency:tree": true,
+        "mvn org.springframework.boot:spring-boot-maven-plugin:3.3.0:run": true
+    }
 }
