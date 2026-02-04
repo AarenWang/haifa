@@ -21,7 +21,7 @@ public class DiscountVIPRule implements ItemDiscountRule {
     }
 
     @Override
-    public String tag() { return "VIP_DISCOUNT"; }
+    public String tag() { return "VIP"; }
 
     @Override
     public int priority() { return 20; }
