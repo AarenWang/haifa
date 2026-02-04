@@ -30,12 +30,18 @@ public class OrderController {
      * POST /order/quote
      * Content-Type: application/json
      * 
-     * {
-     *   "channel": "WEB",
-     *   "country": "CN",
-     *   "userTier": "VIP",
-     *   "amountCents": 10000
-     * }
+    * {
+    *   "channel": "WEB",
+    *   "country": "CN",
+    *   "userTier": "VIP",
+    *   "couponCode": "C100-20",
+    *   "items": [
+    *     { "sku": "FS-1001", "unitPriceCents": 5000, "qty": 1 },
+    *     { "sku": "SKU-2002", "unitPriceCents": 3000, "qty": 1 }
+    *   ]
+    * }
+    *
+    * <p>amountCents 依旧支持，作为无商品明细时的兼容输入。</p>
      * </pre>
      * 
      * @param request 订单请求

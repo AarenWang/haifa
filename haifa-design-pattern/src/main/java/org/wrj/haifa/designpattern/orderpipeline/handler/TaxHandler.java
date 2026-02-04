@@ -16,7 +16,7 @@ import org.wrj.haifa.designpattern.orderpipeline.model.OrderContext;
  * @author wrj
  */
 @Component
-@Order(40) // 在运费之后执行
+@Order(45) // 在运费之后执行
 public class TaxHandler implements OrderHandler {
 
     private static final Logger log = LoggerFactory.getLogger(TaxHandler.class);
@@ -27,17 +27,17 @@ public class TaxHandler implements OrderHandler {
     public void handle(OrderContext ctx) {
         String country = ctx.getRequest().getCountry();
         int taxCents = 0;
+        int taxableBase = Math.max(0, ctx.getBasePriceCents() - ctx.getDiscountCents());
 
         if ("CN".equals(country)) {
             // 中国订单：对（基础价格 - 折扣）征收 6% 的税
-            int taxableAmount = Math.max(0, ctx.getBasePriceCents() - ctx.getDiscountCents());
-            taxCents = (int) Math.round(taxableAmount * CN_TAX_RATE);
+            taxCents = (int) Math.round(taxableBase * CN_TAX_RATE);
         }
         // 其他国家暂不计税（实际业务中需要根据当地税法计算）
 
         ctx.setTaxCents(taxCents);
 
         log.info("TaxHandler: Country [{}] -> Tax {} cents (taxable base: {} cents)",
-                country, taxCents, ctx.getBasePriceCents() - ctx.getDiscountCents());
+                country, taxCents, taxableBase);
     }
 }

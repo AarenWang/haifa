@@ -23,17 +23,19 @@ public class SummaryHandler implements OrderHandler {
 
     @Override
     public void handle(OrderContext ctx) {
-        // 计算小计（基础价格 - 折扣）
-        int subtotal = ctx.getBasePriceCents() - ctx.getDiscountCents();
+        // 支持两层折扣：先使用商品折后小计，再减订单折扣
+        int afterItemDisc = ctx.getItemsAfterItemDiscCents() > 0 ? ctx.getItemsAfterItemDiscCents() : ctx.getBasePriceCents();
+        int afterOrderDisc = Math.max(0, afterItemDisc - ctx.getOrderDiscountCents());
 
-        // 计算最终应付金额 = 小计 + 运费 + 税费
-        int payableCents = Math.max(0, subtotal) + ctx.getShippingCents() + ctx.getTaxCents();
+        int payableCents = afterOrderDisc + ctx.getShippingCents() + ctx.getTaxCents();
         ctx.setPayableCents(payableCents);
 
         log.info("SummaryHandler: Calculation breakdown:");
-        log.info("  Base price:    {} cents", ctx.getBasePriceCents());
-        log.info("  - Discount:    {} cents", ctx.getDiscountCents());
-        log.info("  = Subtotal:    {} cents", subtotal);
+        log.info("  Items subtotal: {} cents", ctx.getItemsSubtotalCents());
+        log.info("  - Item discount total: {} cents", ctx.getItemDiscountCents());
+        log.info("  = After item discounts: {} cents", afterItemDisc);
+        log.info("  - Order discount: {} cents", ctx.getOrderDiscountCents());
+        log.info("  = After order discounts: {} cents", afterOrderDisc);
         log.info("  + Shipping:    {} cents", ctx.getShippingCents());
         log.info("  + Tax:         {} cents", ctx.getTaxCents());
         log.info("  -------------------------");

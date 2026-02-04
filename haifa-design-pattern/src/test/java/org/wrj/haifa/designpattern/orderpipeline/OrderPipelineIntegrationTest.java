@@ -8,8 +8,11 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.FilterType;
 import org.wrj.haifa.designpattern.orderpipeline.chain.OrderPipeline;
+import org.wrj.haifa.designpattern.orderpipeline.model.LineItem;
 import org.wrj.haifa.designpattern.orderpipeline.model.OrderContext;
 import org.wrj.haifa.designpattern.orderpipeline.model.OrderRequest;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -43,96 +46,72 @@ class OrderPipelineIntegrationTest {
     }
 
     @Test
-    @DisplayName("测试中国 VIP 用户订单计算")
-    void testChinaVIPOrder() {
-        // Given: 中国 VIP 用户，订单金额 10000 分（100 元）
-        OrderRequest request = new OrderRequest("WEB", "CN", "VIP", 10000);
+    @DisplayName("中国 VIP 用户：商品折扣 + 优惠券")
+    void testChinaVIPOrderWithItemsAndCoupon() {
+        OrderRequest request = new OrderRequest();
+        request.setChannel("WEB");
+        request.setCountry("CN");
+        request.setUserTier("VIP");
+        request.setCouponCode("C100-20");
+        request.setItems(List.of(
+                new LineItem("FS-1001", 5000, 1),
+                new LineItem("SKU-2002", 3000, 1),
+                new LineItem("SKU-2003", 2000, 2)
+        ));
 
-        // When: 执行订单处理管道
         OrderContext result = pipeline.execute(request);
 
-        // Then: 验证计算结果
-        // 基础价格：10000 分
-        assertEquals(10000, result.getBasePriceCents());
-
-        // VIP 折扣：10000 * 5% = 500 分
-        assertEquals(500, result.getDiscountCents());
-
-        // 中国运费：800 分（固定 8 元）
+        assertEquals(12000, result.getBasePriceCents());
+        assertEquals(12000, result.getItemsSubtotalCents());
+        assertEquals(1600, result.getItemDiscountCents());
+        assertEquals(10400, result.getItemsAfterItemDiscCents());
+        assertEquals(2000, result.getOrderDiscountCents());
+        assertEquals(3600, result.getDiscountCents());
         assertEquals(800, result.getShippingCents());
-
-        // 中国税费：(10000 - 500) * 6% = 570 分
-        assertEquals(570, result.getTaxCents());
-
-        // 应付金额：(10000 - 500) + 800 + 570 = 10870 分
-        assertEquals(10870, result.getPayableCents());
+        assertEquals(504, result.getTaxCents());
+        assertEquals(9704, result.getPayableCents());
     }
 
     @Test
-    @DisplayName("测试中国普通用户订单计算")
-    void testChinaNormalOrder() {
-        // Given: 中国普通用户，订单金额 10000 分
+    @DisplayName("美国订单：10% 优惠码")
+    void testUSOrderWithPromoCode() {
+        OrderRequest request = new OrderRequest();
+        request.setChannel("APP");
+        request.setCountry("US");
+        request.setUserTier("NORMAL");
+        request.setCouponCode("OFF10");
+        request.setItems(List.of(
+                new LineItem("SKU-1100", 4000, 1),
+                new LineItem("SKU-2200", 6000, 1)
+        ));
+
+        OrderContext result = pipeline.execute(request);
+
+        assertEquals(10000, result.getItemsSubtotalCents());
+        assertEquals(0, result.getItemDiscountCents());
+        assertEquals(10000, result.getItemsAfterItemDiscCents());
+        assertEquals(1000, result.getOrderDiscountCents());
+        assertEquals(1000, result.getDiscountCents());
+        assertEquals(1500, result.getShippingCents());
+        assertEquals(0, result.getTaxCents());
+        assertEquals(10500, result.getPayableCents());
+    }
+
+    @Test
+    @DisplayName("兼容旧版：无商品列表时仍可计算")
+    void testLegacySingleAmountOrder() {
         OrderRequest request = new OrderRequest("APP", "CN", "NORMAL", 10000);
 
-        // When
         OrderContext result = pipeline.execute(request);
 
-        // Then
         assertEquals(10000, result.getBasePriceCents());
-        assertEquals(0, result.getDiscountCents()); // 普通用户无折扣
+        assertEquals(10000, result.getItemsSubtotalCents());
+        assertEquals(0, result.getItemDiscountCents());
+        assertEquals(10000, result.getItemsAfterItemDiscCents());
+        assertEquals(0, result.getOrderDiscountCents());
+        assertEquals(0, result.getDiscountCents());
         assertEquals(800, result.getShippingCents());
-        assertEquals(600, result.getTaxCents()); // 10000 * 6% = 600
-        assertEquals(11400, result.getPayableCents()); // 10000 + 800 + 600
-    }
-
-    @Test
-    @DisplayName("测试美国 VIP 用户订单计算")
-    void testUSVIPOrder() {
-        // Given: 美国 VIP 用户，订单金额 10000 分
-        OrderRequest request = new OrderRequest("WEB", "US", "VIP", 10000);
-
-        // When
-        OrderContext result = pipeline.execute(request);
-
-        // Then
-        assertEquals(10000, result.getBasePriceCents());
-        assertEquals(500, result.getDiscountCents()); // VIP 5% 折扣
-        assertEquals(1500, result.getShippingCents()); // 美国运费 15 USD
-        assertEquals(0, result.getTaxCents()); // 美国暂不计税
-        assertEquals(11000, result.getPayableCents()); // (10000 - 500) + 1500
-    }
-
-    @Test
-    @DisplayName("测试日本 SVIP 用户订单计算")
-    void testJapanSVIPOrder() {
-        // Given: 日本 SVIP 用户，订单金额 20000 分
-        OrderRequest request = new OrderRequest("WEB", "JP", "SVIP", 20000);
-
-        // When
-        OrderContext result = pipeline.execute(request);
-
-        // Then
-        assertEquals(20000, result.getBasePriceCents());
-        assertEquals(2000, result.getDiscountCents()); // SVIP 10% 折扣
-        assertEquals(1200, result.getShippingCents()); // 日本运费 1200 JPY
-        assertEquals(0, result.getTaxCents()); // 日本暂不计税
-        assertEquals(19200, result.getPayableCents()); // (20000 - 2000) + 1200
-    }
-
-    @Test
-    @DisplayName("测试小额订单计算")
-    void testSmallOrder() {
-        // Given: 中国 VIP 用户，订单金额 100 分（1 元）
-        OrderRequest request = new OrderRequest("WEB", "CN", "VIP", 100);
-
-        // When
-        OrderContext result = pipeline.execute(request);
-
-        // Then
-        assertEquals(100, result.getBasePriceCents());
-        assertEquals(5, result.getDiscountCents()); // 100 * 5% = 5
-        assertEquals(800, result.getShippingCents());
-        assertEquals(6, result.getTaxCents()); // (100 - 5) * 6% ≈ 6
-        assertEquals(901, result.getPayableCents()); // (100 - 5) + 800 + 6
+        assertEquals(600, result.getTaxCents());
+        assertEquals(11400, result.getPayableCents());
     }
 }

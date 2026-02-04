@@ -18,7 +18,7 @@ import org.wrj.haifa.designpattern.orderpipeline.strategy.shipping.ShippingStrat
  * @author wrj
  */
 @Component
-@Order(30) // 在折扣之后执行
+@Order(40) // 在所有折扣之后执行
 public class ShippingHandler implements OrderHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ShippingHandler.class);

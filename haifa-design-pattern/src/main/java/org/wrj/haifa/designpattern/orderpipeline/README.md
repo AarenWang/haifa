@@ -48,17 +48,21 @@ org.wrj.haifa.designpattern.orderpipeline
 │   │   ├── ShippingUS.java              # 美国运费
 │   │   ├── ShippingJP.java              # 日本运费
 │   │   └── ShippingStrategyRegistry.java
-│   └── discount/                        # 折扣策略
-│       ├── DiscountStrategy.java
-│       ├── DiscountVIP.java             # VIP 折扣
-│       ├── DiscountNormal.java          # 普通用户
-│       ├── DiscountSVIP.java            # SVIP 超级会员
-│       └── DiscountStrategyRegistry.java
+│   ├── itemdiscount/                    # 商品级折扣规则（可叠加）
+│   │   ├── ItemDiscountRule.java
+│   │   ├── FlashSaleRule.java           # 秒杀 8 折
+│   │   ├── DiscountVIPRule.java         # VIP 95 折
+│   │   └── DiscountNormalRule.java      # 兜底规则
+│   └── orderdiscount/                   # 订单级折扣（互斥）
+  ├── OrderDiscountStrategy.java
+  ├── Coupon100Minus20.java        # 满 100-20 优惠券
+  └── PromoCode10Off.java          # OFF10 促销码
 ├── handler/                             # 处理器实现
 │   ├── BasePriceHandler.java            # @Order(10) 基础定价
-│   ├── DiscountHandler.java             # @Order(20) 折扣计算
-│   ├── ShippingHandler.java             # @Order(30) 运费计算
-│   ├── TaxHandler.java                  # @Order(40) 税费计算
+│   ├── ItemDiscountHandler.java         # @Order(20) 商品折扣
+│   ├── OrderDiscountHandler.java        # @Order(30) 订单折扣
+│   ├── ShippingHandler.java             # @Order(40) 运费计算
+│   ├── TaxHandler.java                  # @Order(45) 税费计算
 │   └── SummaryHandler.java              # @Order(50) 汇总
 └── controller/
     └── OrderController.java             # REST API
@@ -68,11 +72,12 @@ org.wrj.haifa.designpattern.orderpipeline
 
 | Order | Handler           | 说明                     |
 |-------|-------------------|--------------------------|
-| 10    | BasePriceHandler  | 设置基础价格             |
-| 20    | DiscountHandler   | 计算折扣（使用策略模式） |
-| 30    | ShippingHandler   | 计算运费（使用策略模式） |
-| 40    | TaxHandler        | 计算税费                 |
-| 50    | SummaryHandler    | 汇总计算应付金额         |
+| 10    | BasePriceHandler      | 汇总商品原价 / 兼容单价输入 |
+| 20    | ItemDiscountHandler   | 跑商品级折扣规则（可叠加）   |
+| 30    | OrderDiscountHandler  | 处理优惠券/促销码           |
+| 40    | ShippingHandler       | 计算运费（策略模式）        |
+| 45    | TaxHandler            | 计算税费                   |
+| 50    | SummaryHandler        | 汇总应付金额               |
 
 ## 策略配置
 
@@ -84,13 +89,20 @@ org.wrj.haifa.designpattern.orderpipeline
 | US  | ShippingUS | 美国，固定 15 USD       |
 | JP  | ShippingJP | 日本，固定 1200 JPY     |
 
-### 折扣策略
+### 商品级折扣规则（可叠加）
 
-| Key    | 实现类         | 说明                |
-|--------|----------------|---------------------|
-| NORMAL | DiscountNormal | 普通用户，无折扣    |
-| VIP    | DiscountVIP    | VIP 用户，95 折     |
-| SVIP   | DiscountSVIP   | SVIP 用户，90 折    |
+| 顺序 | 实现类             | 说明                      |
+|------|--------------------|---------------------------|
+| 10   | FlashSaleRule      | SKU 以 FS- 开头享 8 折     |
+| 20   | DiscountVIPRule    | VIP 用户额外 95 折         |
+| 30   | DiscountNormalRule | 兜底：保持原价，可扩展其它 |
+
+### 订单级折扣策略（互斥）
+
+| Key      | 实现类             | 说明                                          |
+|----------|--------------------|-----------------------------------------------|
+| C100-20  | Coupon100Minus20   | 商品折后金额 ≥ 100 元时立减 20 元             |
+| OFF10    | PromoCode10Off     | 任意订单按商品折后金额的 10% 进行促销码折扣   |
 
 ## 运行方式
 
@@ -104,14 +116,19 @@ mvn spring-boot:run -Dstart-class=org.wrj.haifa.designpattern.orderpipeline.Orde
 ### API 调用示例
 
 ```bash
-# 中国 VIP 用户，订单金额 100 元（10000 分）
-curl -X POST http://localhost:8080/order/quote \
+# 中国 VIP 用户，下单 3 个商品并使用满减券
+curl -X POST http://localhost:38080/order/quote \
   -H "Content-Type: application/json" \
   -d '{
     "channel": "WEB",
     "country": "CN",
     "userTier": "VIP",
-    "amountCents": 10000
+    "couponCode": "C100-20",
+    "items": [
+      { "sku": "FS-1001", "unitPriceCents": 5000, "qty": 1 },
+      { "sku": "SKU-2002", "unitPriceCents": 3000, "qty": 1 },
+      { "sku": "SKU-2003", "unitPriceCents": 2000, "qty": 2 }
+    ]
   }'
 ```
 
@@ -119,29 +136,41 @@ curl -X POST http://localhost:8080/order/quote \
 
 ```json
 {
+  "basePriceCents": 12000,
+  "itemsSubtotalCents": 12000,
+  "itemDiscountCents": 1600,
+  "itemsAfterItemDiscCents": 10400,
+  "orderDiscountCents": 2000,
+  "discountCents": 3600,
+  "shippingCents": 800,
+  "taxCents": 504,
+  "payableCents": 9704,
   "request": {
     "channel": "WEB",
     "country": "CN",
     "userTier": "VIP",
-    "amountCents": 10000
-  },
-  "basePriceCents": 10000,
-  "discountCents": 500,
-  "shippingCents": 800,
-  "taxCents": 570,
-  "payableCents": 10870
+    "couponCode": "C100-20",
+    "items": [
+      { "sku": "FS-1001", "unitPriceCents": 5000, "qty": 1 },
+      { "sku": "SKU-2002", "unitPriceCents": 3000, "qty": 1 },
+      { "sku": "SKU-2003", "unitPriceCents": 2000, "qty": 2 }
+    ]
+  }
 }
 ```
 
 ## 计算说明
 
-以上面的例子为例：
+延续上面的示例：
 
-1. **基础价格**：10000 分（100 元）
-2. **VIP 折扣**：10000 × 5% = 500 分
-3. **中国运费**：固定 800 分（8 元）
-4. **中国税费**：(10000 - 500) × 6% = 570 分
-5. **应付金额**：(10000 - 500) + 800 + 570 = **10870 分**
+1. **商品原价小计**：5000 + 3000 + 4000 = 12000 分
+2. **商品级折扣**：
+   - 秒杀商品：5000 × 20% = 1000 分；再叠加 VIP 5% = 250 分
+   - 其他商品：VIP 5% 共减 350 分
+   - 合计商品级折扣 1600 分，折后小计 10400 分
+3. **订单级折扣**：10400 ≥ 10000，满减券再减 2000 分
+4. **税费基数**：10400 - 2000 = 8400 分，按 6% = 504 分
+5. **总计**：8400 + 运费 800 + 税 504 = **9704 分**
 
 ## 扩展指南
 

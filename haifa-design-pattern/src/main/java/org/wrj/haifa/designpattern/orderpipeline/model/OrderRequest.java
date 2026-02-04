@@ -1,7 +1,11 @@
 package org.wrj.haifa.designpattern.orderpipeline.model;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 订单请求对象 - 包含订单的输入信息
+ * 支持多商品行和优惠券/折扣码
  * 
  * @author wrj
  */
@@ -18,14 +22,24 @@ public class OrderRequest {
     private String country;
 
     /**
-     * 用户等级: "VIP" / "NORMAL"
+     * 用户等级: "VIP" / "NORMAL" / "SVIP"
      */
     private String userTier;
 
     /**
-     * 订单金额（单位：分）
+     * 订单金额（单位：分）- 兼容旧版单商品模式
      */
     private int amountCents;
+    
+    /**
+     * 优惠券/折扣码: "C100-20" / "OFF10" / ...
+     */
+    private String couponCode;
+    
+    /**
+     * 商品行列表 - 新版多商品模式
+     */
+    private List<LineItem> items = new ArrayList<>();
 
     public OrderRequest() {
     }
@@ -35,6 +49,13 @@ public class OrderRequest {
         this.country = country;
         this.userTier = userTier;
         this.amountCents = amountCents;
+    }
+    
+    /**
+     * 判断是否为多商品模式
+     */
+    public boolean hasItems() {
+        return items != null && !items.isEmpty();
     }
 
     public String getChannel() {
@@ -68,6 +89,22 @@ public class OrderRequest {
     public void setAmountCents(int amountCents) {
         this.amountCents = amountCents;
     }
+    
+    public String getCouponCode() {
+        return couponCode;
+    }
+    
+    public void setCouponCode(String couponCode) {
+        this.couponCode = couponCode;
+    }
+    
+    public List<LineItem> getItems() {
+        return items;
+    }
+    
+    public void setItems(List<LineItem> items) {
+        this.items = items;
+    }
 
     @Override
     public String toString() {
@@ -76,6 +113,8 @@ public class OrderRequest {
                 ", country='" + country + '\'' +
                 ", userTier='" + userTier + '\'' +
                 ", amountCents=" + amountCents +
+                ", couponCode='" + couponCode + '\'' +
+                ", items=" + items +
                 '}';
     }
 }
