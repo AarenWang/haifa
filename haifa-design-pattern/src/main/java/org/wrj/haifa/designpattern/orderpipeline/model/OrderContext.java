@@ -1,9 +1,13 @@
 package org.wrj.haifa.designpattern.orderpipeline.model;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 订单上下文 - 在职责链中传递的上下文对象，包含计算过程中的各项费用
  * 支持两层折扣结构：商品级折扣 + 订单级折扣
- * 
+ * 支持折扣明细记录与审计追踪
+ *
  * @author wrj
  */
 public class OrderContext {
@@ -59,6 +63,23 @@ public class OrderContext {
      * 最终应付金额（单位：分）
      */
     private int payableCents;
+
+    // ========== 新增：折扣明细记录 ==========
+
+    /**
+     * 所有折扣明细列表（商品级 + 订单级）
+     */
+    private List<DiscountEntry> discountEntries = new ArrayList<>();
+
+    /**
+     * 商品级折扣明细
+     */
+    private List<DiscountEntry> itemDiscountEntries = new ArrayList<>();
+
+    /**
+     * 订单级折扣明细
+     */
+    private List<DiscountEntry> orderDiscountEntries = new ArrayList<>();
 
     public OrderContext(OrderRequest request) {
         this.request = request;
@@ -140,6 +161,36 @@ public class OrderContext {
         this.payableCents = payableCents;
     }
 
+    // ========== 新增：折扣明细 Getters ==========
+
+    public List<DiscountEntry> getDiscountEntries() {
+        return discountEntries;
+    }
+
+    public List<DiscountEntry> getItemDiscountEntries() {
+        return itemDiscountEntries;
+    }
+
+    public List<DiscountEntry> getOrderDiscountEntries() {
+        return orderDiscountEntries;
+    }
+
+    /**
+     * 添加商品级折扣明细
+     */
+    public void addItemDiscountEntry(DiscountEntry entry) {
+        this.itemDiscountEntries.add(entry);
+        this.discountEntries.add(entry);
+    }
+
+    /**
+     * 添加订单级折扣明细
+     */
+    public void addOrderDiscountEntry(DiscountEntry entry) {
+        this.orderDiscountEntries.add(entry);
+        this.discountEntries.add(entry);
+    }
+
     @Override
     public String toString() {
         return "OrderContext{" +
@@ -153,6 +204,7 @@ public class OrderContext {
                 ", shippingCents=" + shippingCents +
                 ", taxCents=" + taxCents +
                 ", payableCents=" + payableCents +
+                ", discountEntries=" + discountEntries +
                 '}';
     }
 }

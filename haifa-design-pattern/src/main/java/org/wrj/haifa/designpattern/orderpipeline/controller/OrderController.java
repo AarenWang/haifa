@@ -5,6 +5,8 @@ import org.wrj.haifa.designpattern.orderpipeline.chain.OrderPipeline;
 import org.wrj.haifa.designpattern.orderpipeline.model.OrderContext;
 import org.wrj.haifa.designpattern.orderpipeline.model.OrderRequest;
 
+import jakarta.annotation.PostConstruct;
+
 /**
  * 订单报价 REST 接口
  * 
@@ -58,5 +60,10 @@ public class OrderController {
     @GetMapping("/health")
     public String health() {
         return "OK";
+    }
+
+    @PostConstruct
+    public void init() {
+        System.out.println("OrderController initialized");
     }
 }
