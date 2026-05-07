@@ -159,11 +159,11 @@ public class Java19RecordPatterns {
                 "Product: " + pname + " (id: " + id + ", price: $" + price + ")";
             case ApiResponse(200, String msg, List list) ->
                 "Got " + list.size() + " items";
-            case ApiResponse(200, _, _) ->
+            case ApiResponse(200, var _, var _) ->
                 "Success: " + response.code();
-            case ApiResponse(code, String msg, _) when code >= 400 ->
+            case ApiResponse(code, String msg, var _) when code >= 400 ->
                 "Error " + code + ": " + msg;
-            case ApiResponse(code, _, _) ->
+            case ApiResponse(code, var _, var _) ->
                 "Response code: " + code;
         };
     }
@@ -203,12 +203,12 @@ public class Java19RecordPatterns {
         User u = new User("Alice", 30, "alice@example.com");
         
         // 只关心 x 坐标，忽略 y
-        if (p instanceof Point(int x, _)) {
+        if (p instanceof Point(int x, var _)) {
             System.out.println("X coordinate: " + x);
         }
         
         // 只关心用户名，忽略其他字段
-        if (u instanceof User(String name, _, _)) {
+        if (u instanceof User(String name, var _, var _)) {
             System.out.println("User name: " + name);
         }
         System.out.println();
