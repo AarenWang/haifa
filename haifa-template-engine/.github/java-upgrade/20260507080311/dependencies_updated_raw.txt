@@ -1,0 +1,9 @@
+
+The following files have been resolved:
+   org.apache.velocity:velocity-tools:jar:1.3:compile[36m -- module velocity.tools[0;1;33m (auto)[m
+   org.apache.velocity:velocity:jar:1.7:compile[36m -- module velocity[0;1;33m (auto)[m
+   commons-logging:commons-logging:jar:1.2:compile[36m -- module commons.logging[0;1;33m (auto)[m
+   org.apache.commons:commons-lang3:jar:3.3.2:compile[36m -- module commons.lang3[0;1;33m (auto)[m
+   org.slf4j:slf4j-api:jar:2.0.16:compile[36m -- module org.slf4j[m
+   org.slf4j:slf4j-simple:jar:2.0.16:test[36m -- module org.slf4j.simple[m
+

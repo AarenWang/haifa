@@ -1,0 +1,8 @@
+
+The following files have been resolved:
+   commons-logging:commons-logging:jar:1.2:compile
+   io.netty:netty-all:jar:4.1.93.Final:compile
+   org.apache.commons:commons-lang3:jar:3.3.2:compile
+   org.slf4j:slf4j-api:jar:2.0.16:compile
+   org.slf4j:slf4j-simple:jar:2.0.16:test
+

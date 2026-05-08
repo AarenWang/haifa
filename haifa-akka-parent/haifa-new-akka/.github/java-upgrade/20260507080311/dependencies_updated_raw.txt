@@ -1,0 +1,12 @@
+
+The following files have been resolved:
+   com.typesafe.akka:akka-actor-typed_2.13:jar:2.6.16:compile[36m -- module akka.actor.typed[0;1m [auto][m
+   ch.qos.logback:logback-classic:jar:1.2.3:compile[36m -- module logback.classic[0;1;33m (auto)[m
+   org.slf4j:slf4j-api:jar:1.7.32:compile[36m -- module org.slf4j[0;1m [auto][m
+   org.slf4j:slf4j-simple:jar:1.7.32:compile[36m -- module org.slf4j.simple[0;1m [auto][m
+   com.typesafe.akka:akka-actor-testkit-typed_2.13:jar:2.6.16:test[36m -- module akka.actor.testkit.typed[0;1m [auto][m
+   junit:junit:jar:4.13.1:test[36m -- module junit[0;1m [auto][m
+   org.scalatestplus:junit-4-13_2.13:jar:3.2.10.0:test
+   commons-logging:commons-logging:jar:1.2:compile[36m -- module commons.logging[0;1;33m (auto)[m
+   org.apache.commons:commons-lang3:jar:3.3.2:compile[36m -- module commons.lang3[0;1;33m (auto)[m
+

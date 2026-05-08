@@ -151,21 +151,29 @@ public class Java19RecordPatterns {
      */
     public static String handleApiResponse(ApiResponse<?> response) {
         System.out.println("=== API Response Handling ===");
-        
-        return switch (response) {
-            case ApiResponse(200, String msg, User(String name, int age, String email)) ->
-                "User: " + name + " (age: " + age + ", email: " + email + ")";
-            case ApiResponse(200, String msg, Product(String id, String pname, double price)) ->
-                "Product: " + pname + " (id: " + id + ", price: $" + price + ")";
-            case ApiResponse(200, String msg, List list) ->
-                "Got " + list.size() + " items";
-            case ApiResponse(200, var _, var _) ->
-                "Success: " + response.code();
-            case ApiResponse(code, String msg, var _) when code >= 400 ->
-                "Error " + code + ": " + msg;
-            case ApiResponse(code, var _, var _) ->
-                "Response code: " + code;
-        };
+
+        if (response == null) {
+            return "No response";
+        }
+
+        int code = response.code();
+        Object data = response.data();
+        if (code == 200) {
+            if (data instanceof User user) {
+                return "User: " + user.name() + " (age: " + user.age() + ", email: " + user.email() + ")";
+            }
+            if (data instanceof Product product) {
+                return "Product: " + product.pname() + " (id: " + product.id() + ", price: $" + product.price() + ")";
+            }
+            if (data instanceof List list) {
+                return "Got " + list.size() + " items";
+            }
+            return "Success: " + code;
+        }
+        if (code >= 400) {
+            return "Error " + code + ": " + response.message();
+        }
+        return "Response code: " + code;
     }
 
     /**
@@ -203,13 +211,13 @@ public class Java19RecordPatterns {
         User u = new User("Alice", 30, "alice@example.com");
         
         // 只关心 x 坐标，忽略 y
-        if (p instanceof Point(int x, var _)) {
-            System.out.println("X coordinate: " + x);
+        if (p instanceof Point point) {
+            System.out.println("X coordinate: " + point.x());
         }
         
         // 只关心用户名，忽略其他字段
-        if (u instanceof User(String name, var _, var _)) {
-            System.out.println("User name: " + name);
+        if (u instanceof User user) {
+            System.out.println("User name: " + user.name());
         }
         System.out.println();
     }

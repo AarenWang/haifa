@@ -1,6 +1,5 @@
 package org.wrj.haifa.rabbitmq.spring.wms;
 
-import org.apache.log4j.spi.LoggerFactory;
 import org.slf4j.Logger;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
