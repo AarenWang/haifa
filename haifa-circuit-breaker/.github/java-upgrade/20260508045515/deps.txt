@@ -1,0 +1,14 @@
+
+The following files have been resolved:
+   com.netflix.hystrix:hystrix-core:jar:1.5.11:compile[36m -- module hystrix.core[0;1;33m (auto)[m
+   com.netflix.hystrix:hystrix-javanica:jar:1.5.11:compile[36m -- module hystrix.javanica[0;1;33m (auto)[m
+   io.github.resilience4j:resilience4j-retry:jar:0.13.2:compile[36m -- module resilience4j.retry[0;1;33m (auto)[m
+   io.github.resilience4j:resilience4j-core:jar:0.14.1:compile[36m -- module resilience4j.core[0;1;33m (auto)[m
+   io.github.resilience4j:resilience4j-circuitbreaker:jar:0.14.1:compile[36m -- module resilience4j.circuitbreaker[0;1;33m (auto)[m
+   io.github.resilience4j:resilience4j-ratelimiter:jar:0.14.1:compile[36m -- module resilience4j.ratelimiter[0;1;33m (auto)[m
+   org.assertj:assertj-core:jar:3.16.1:compile[36m -- module org.assertj.core[m
+   commons-logging:commons-logging:jar:1.2:compile[36m -- module commons.logging[0;1;33m (auto)[m
+   org.apache.commons:commons-lang3:jar:3.3.2:compile[36m -- module commons.lang3[0;1;33m (auto)[m
+   org.slf4j:slf4j-api:jar:2.0.16:compile[36m -- module org.slf4j[m
+   org.slf4j:slf4j-simple:jar:2.0.16:test[36m -- module org.slf4j.simple[m
+

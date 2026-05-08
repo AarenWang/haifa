@@ -1,0 +1,13 @@
+
+The following files have been resolved:
+   org.junit.jupiter:junit-jupiter:jar:5.7.2:test[36m -- module org.junit.jupiter[m
+   org.apache.commons:commons-csv:jar:1.10.0:compile[36m -- module org.apache.commons.csv[0;1m [auto][m
+   com.alibaba:easyexcel:jar:3.3.4:compile[36m -- module easyexcel[0;1;33m (auto)[m
+   org.projectlombok:lombok:jar:1.18.30:provided[36m -- module lombok[m
+   com.alibaba.fastjson2:fastjson2:jar:2.0.48:compile[36m -- module com.alibaba.fastjson2[m
+   org.slf4j:slf4j-api:jar:2.0.12:compile[36m -- module org.slf4j[m
+   org.slf4j:slf4j-simple:jar:2.0.12:compile[36m -- module org.slf4j.simple[m
+   org.apache.commons:commons-collections4:jar:4.4:compile[36m -- module org.apache.commons.collections4[0;1m [auto][m
+   commons-logging:commons-logging:jar:1.2:compile[36m -- module commons.logging[0;1;33m (auto)[m
+   org.apache.commons:commons-lang3:jar:3.3.2:compile[36m -- module commons.lang3[0;1;33m (auto)[m
+
