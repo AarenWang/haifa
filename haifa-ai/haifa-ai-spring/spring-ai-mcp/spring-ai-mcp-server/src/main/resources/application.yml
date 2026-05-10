@@ -1,0 +1,23 @@
+server:
+  port: 8091
+
+spring:
+  application:
+    name: spring-ai-mcp-server
+  ai:
+    mcp:
+      server:
+        name: haifa-catalog-mcp-server
+        version: 1.0.0
+        instructions: >-
+          Demo MCP Server for haifa-ai product catalog scenarios.
+          Prefer the searchCatalog tool for recommendations, use catalog://featured
+          and catalog://playbook/onboarding for static resources, and use the
+          sales-playbook prompt when you want sales guidance.
+        type: SYNC
+        sse-endpoint: /sse
+        sse-message-endpoint: /mcp/message
+
+logging:
+  level:
+    org.springframework.ai: INFO

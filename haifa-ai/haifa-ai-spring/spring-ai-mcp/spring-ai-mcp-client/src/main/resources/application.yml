@@ -1,0 +1,21 @@
+server:
+  port: 8092
+
+spring:
+  application:
+    name: spring-ai-mcp-client
+  ai:
+    mcp:
+      client:
+        name: haifa-demo-mcp-client
+        version: 1.0.0
+        type: SYNC
+        request-timeout: 30s
+        sse:
+          connections:
+            haifa-catalog-server:
+              url: http://localhost:8091
+
+logging:
+  level:
+    org.springframework.ai: INFO

@@ -21,6 +21,7 @@
         <module>spring-ai-translation</module>
         <module>spring-ai-tool-calling</module>
         <module>spring-ai-ecommerce</module>
+        <module>spring-ai-mcp</module>
     </modules>
 
     <dependencyManagement>
