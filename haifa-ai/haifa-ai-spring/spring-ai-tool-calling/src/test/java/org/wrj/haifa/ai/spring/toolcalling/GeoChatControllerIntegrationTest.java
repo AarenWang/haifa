@@ -11,7 +11,6 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
@@ -28,15 +27,19 @@ import org.springframework.util.MimeTypeUtils;
 @TestInstance(Lifecycle.PER_CLASS)
 class GeoChatControllerIntegrationTest {
 
-    private static MockWebServer mockWebServer;
+    private static final MockWebServer mockWebServer = startMockWebServer();
 
     @Autowired
     private MockMvc mockMvc;
 
-    @BeforeAll
-    static void setUp() throws IOException {
-        mockWebServer = new MockWebServer();
-        mockWebServer.start();
+    private static MockWebServer startMockWebServer() {
+        MockWebServer server = new MockWebServer();
+        try {
+            server.start();
+            return server;
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to start mock geo service", e);
+        }
     }
 
     @AfterAll
