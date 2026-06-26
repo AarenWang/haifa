@@ -20,6 +20,7 @@
     <modules>
        <module>haifa-ai-spring</module>
        <module>haifa-ai-alibaba</module>
+       <module>haifa-ai-deerflow</module>
     </modules>
 
     <dependencies>

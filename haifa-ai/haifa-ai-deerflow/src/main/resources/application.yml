@@ -1,0 +1,17 @@
+server:
+  port: 8095
+
+spring:
+  application:
+    name: haifa-ai-deerflow
+
+haifa:
+  ai:
+    deerflow:
+      model: ${HAIFA_DEERFLOW_MODEL:}
+      max-iterations: 4
+      workspace-root: ${HAIFA_DEERFLOW_WORKSPACE:${user.dir}}
+      system-prompt: >
+        You are the Java DeerFlow lead agent prototype. Use the provided
+        local tool observations when they are relevant, be concise, and name
+        any files you used.
