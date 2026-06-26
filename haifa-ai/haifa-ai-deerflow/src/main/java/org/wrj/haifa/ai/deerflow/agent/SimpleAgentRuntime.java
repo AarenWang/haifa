@@ -2,6 +2,7 @@ package org.wrj.haifa.ai.deerflow.agent;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -11,6 +12,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.middleware.AgentMiddleware;
+import org.wrj.haifa.ai.deerflow.middleware.AgentRuntimeContext;
+import org.wrj.haifa.ai.deerflow.middleware.MiddlewareChain;
+import org.wrj.haifa.ai.deerflow.middleware.MiddlewareOrder;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
@@ -31,13 +36,20 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final ToolRegistry toolRegistry;
     private final AgentModelClient modelClient;
     private final RunManager runManager;
+    private final List<AgentMiddleware> middlewares;
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
-            RunManager runManager) {
+            RunManager runManager, List<AgentMiddleware> middlewares) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
         this.runManager = runManager;
+        this.middlewares = middlewares.stream()
+                .sorted(Comparator.comparingInt(m -> {
+                    MiddlewareOrder order = m.getClass().getAnnotation(MiddlewareOrder.class);
+                    return order == null ? Integer.MAX_VALUE : order.value();
+                }))
+                .toList();
     }
 
     @Override
@@ -57,28 +69,45 @@ public class SimpleAgentRuntime implements AgentRuntime {
             prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Run started", Map.of()));
 
             List<ToolResult> toolResults = executePlannedTools(request, config, seq, prefixEvents);
-            prefixEvents.add(event(seq, config, AgentEventType.MODEL_STARTED, "Calling Spring AI model adapter",
-                    Map.of("model", nullToEmpty(modelName))));
 
-            ModelPrompt prompt = new ModelPrompt(this.properties.getSystemPrompt(),
-                    buildUserPrompt(request.message(), toolResults), modelName);
+            AgentRuntimeContext runtimeContext = new AgentRuntimeContext(config, request, toolResults, this.properties);
+            Mono<ModelPrompt> promptMono = new MiddlewareChain(this.middlewares).next(runtimeContext);
 
-            Mono<List<AgentEvent>> modelAndTerminalEvents = this.modelClient.generate(prompt)
-                    .map(answer -> {
-                        this.runManager.markCompleted(run.runId());
-                        AgentEvent modelCompleted = event(seq, config, AgentEventType.MODEL_COMPLETED, answer,
-                                Map.of("toolCount", toolResults.size()));
-                        AgentEvent runCompleted = event(seq, config, AgentEventType.RUN_COMPLETED, "Run completed",
-                                Map.of("status", "COMPLETED"));
-                        return List.of(modelCompleted, runCompleted);
-                    })
-                    .onErrorResume(ex -> {
-                        this.runManager.markFailed(run.runId(), ex.getMessage());
-                        return Mono.just(List.of(event(seq, config, AgentEventType.RUN_FAILED, ex.getMessage(),
-                                Map.of("status", "FAILED"))));
-                    });
+            Flux<AgentEvent> modelAndTerminalEvents = promptMono.flatMapMany(prompt -> {
+                if (prompt.userPrompt() != null && prompt.userPrompt().startsWith("BUDGET_EXCEEDED:")) {
+                    this.runManager.markCompleted(run.runId());
+                    return Flux.fromIterable(List.of(
+                            event(seq, config, AgentEventType.MODEL_COMPLETED,
+                                    "Budget exceeded: request + observations too large.",
+                                    Map.of("budgetExceeded", true, "toolCount", toolResults.size())),
+                            event(seq, config, AgentEventType.RUN_COMPLETED, "Run completed with budget limit",
+                                    Map.of("status", "BUDGET_LIMITED"))
+                    ));
+                }
+                return Flux.concat(
+                        Flux.just(event(seq, config, AgentEventType.MODEL_STARTED, "Calling Spring AI model adapter",
+                                Map.of("model", nullToEmpty(modelName)))),
+                        this.modelClient.generate(prompt)
+                                .flatMapMany(answer -> {
+                                    this.runManager.markCompleted(run.runId());
+                                    return Flux.fromIterable(List.of(
+                                            event(seq, config, AgentEventType.MODEL_COMPLETED, answer,
+                                                    Map.of("toolCount", toolResults.size())),
+                                            event(seq, config, AgentEventType.RUN_COMPLETED, "Run completed",
+                                                    Map.of("status", "COMPLETED"))
+                                    ));
+                                })
+                                .onErrorResume(ex -> {
+                                    this.runManager.markFailed(run.runId(), ex.getMessage());
+                                    return Flux.fromIterable(List.of(
+                                            event(seq, config, AgentEventType.RUN_FAILED, ex.getMessage(),
+                                                    Map.of("status", "FAILED"))
+                                    ));
+                                })
+                );
+            });
 
-            return Flux.concat(Flux.fromIterable(prefixEvents), modelAndTerminalEvents.flatMapMany(Flux::fromIterable))
+            return Flux.concat(Flux.fromIterable(prefixEvents), modelAndTerminalEvents)
                     .doOnCancel(() -> this.runManager.markCancelled(run.runId()));
         });
     }
@@ -106,22 +135,6 @@ public class SimpleAgentRuntime implements AgentRuntime {
             log.warn("Tool {} failed: {}", tool.name(), ex.getMessage());
             return ToolResult.of(tool.name(), "Tool failed: " + ex.getMessage());
         }
-    }
-
-    private static String buildUserPrompt(String userMessage, List<ToolResult> toolResults) {
-        StringBuilder builder = new StringBuilder();
-        builder.append("User request:\n").append(userMessage == null ? "" : userMessage).append("\n\n");
-        if (toolResults.isEmpty()) {
-            builder.append("No local tools were triggered for this request.\n");
-            return builder.toString();
-        }
-        builder.append("Local tool observations:\n");
-        for (ToolResult result : toolResults) {
-            builder.append("\n<tool name=\"").append(result.toolName()).append("\">\n")
-                    .append(result.content())
-                    .append("\n</tool>\n");
-        }
-        return builder.toString();
     }
 
     private static AgentEvent event(AtomicInteger seq, AgentRunConfig config, AgentEventType type, String content,

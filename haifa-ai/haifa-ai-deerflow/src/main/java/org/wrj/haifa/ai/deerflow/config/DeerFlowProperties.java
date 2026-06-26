@@ -15,6 +15,9 @@ public class DeerFlowProperties {
     @Max(20)
     private int maxIterations = 4;
 
+    @Min(0)
+    private int charBudget = 0;
+
     public String getModel() {
         return model;
     }
@@ -45,5 +48,13 @@ public class DeerFlowProperties {
 
     public void setMaxIterations(int maxIterations) {
         this.maxIterations = maxIterations;
+    }
+
+    public int getCharBudget() {
+        return charBudget;
+    }
+
+    public void setCharBudget(int charBudget) {
+        this.charBudget = charBudget;
     }
 }

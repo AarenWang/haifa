@@ -5,6 +5,9 @@ import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.middleware.DynamicContextMiddleware;
+import org.wrj.haifa.ai.deerflow.middleware.TokenBudgetMiddleware;
+import org.wrj.haifa.ai.deerflow.middleware.ToolErrorHandlingMiddleware;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunStatus;
@@ -38,7 +41,8 @@ class SimpleAgentRuntimeTest {
                 new CurrentTimeTool(),
                 new ListWorkspaceFilesTool(),
                 new ReadWorkspaceFileTool()));
-        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager);
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()));
 
         List<AgentEvent> events = runtime.stream(new AgentRequest("thread-1",
                         "List workspace files and read \"note.md\"", null))
@@ -69,7 +73,8 @@ class SimpleAgentRuntimeTest {
         AgentModelClient modelClient = prompt -> Mono.error(new IllegalStateException("model down"));
         RunManager runManager = new RunManager();
         ToolRegistry tools = new ToolRegistry(List.of());
-        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager);
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()));
 
         StepVerifier.create(runtime.stream(new AgentRequest("thread-2", "hello", null)))
                 .recordWith(java.util.ArrayList::new)
@@ -95,7 +100,8 @@ class SimpleAgentRuntimeTest {
         AgentModelClient modelClient = prompt -> Mono.just(prompt.userPrompt());
         RunManager runManager = new RunManager();
         ToolRegistry tools = new ToolRegistry(List.of(new ExplodingTool()));
-        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager);
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()));
 
         List<AgentEvent> events = runtime.stream(new AgentRequest("thread-3", "please explode", null))
                 .collectList()
@@ -106,8 +112,43 @@ class SimpleAgentRuntimeTest {
                         AgentEventType.MODEL_COMPLETED,
                         AgentEventType.RUN_COMPLETED);
         assertThat(events).anySatisfy(event -> assertThat(event.content()).contains("Tool failed: boom"));
+        assertThat(events).anySatisfy(event -> {
+            if (event.type() == AgentEventType.MODEL_COMPLETED) {
+                assertThat(event.content()).contains("handled gracefully");
+            }
+        });
         assertThat(runManager.find(events.get(0).runId())).hasValueSatisfying(run ->
                 assertThat(run.status()).isEqualTo(RunStatus.COMPLETED));
+    }
+
+    @Test
+    void producesControlledEventWhenBudgetExceeded() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("test system");
+        properties.setCharBudget(5);
+
+        AgentModelClient modelClient = prompt -> Mono.just("should not reach model");
+        RunManager runManager = new RunManager();
+        ToolRegistry tools = new ToolRegistry(List.of());
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()));
+
+        StepVerifier.create(runtime.stream(new AgentRequest("thread-4", "this is a long message", null)))
+                .recordWith(java.util.ArrayList::new)
+                .expectNextCount(3)
+                .consumeRecordedWith(events -> {
+                    assertThat(events).extracting(AgentEvent::type)
+                            .containsExactly(AgentEventType.RUN_STARTED,
+                                    AgentEventType.MODEL_COMPLETED,
+                                    AgentEventType.RUN_COMPLETED);
+                    assertThat(events).anySatisfy(event ->
+                            assertThat(event.content()).contains("Budget exceeded"));
+                    String runId = events.iterator().next().runId();
+                    assertThat(runManager.find(runId)).hasValueSatisfying(run ->
+                            assertThat(run.status()).isEqualTo(RunStatus.COMPLETED));
+                })
+                .verifyComplete();
     }
 
     private static final class ExplodingTool implements AgentTool {
