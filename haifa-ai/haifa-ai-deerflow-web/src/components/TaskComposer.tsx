@@ -1,4 +1,4 @@
-import { Play, Square, RotateCcw, Trash2, ChevronDown, Copy, Check } from 'lucide-react';
+import { Play, Square, RotateCcw, Trash2, ChevronDown, Copy, Check, Search, MessageCircle } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import type { RunRequest } from '../types';
 
@@ -23,6 +23,10 @@ export default function TaskComposer({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [threadId, setThreadId] = useState('');
   const [model, setModel] = useState('');
+  const [mode, setMode] = useState<'chat' | 'research'>('chat');
+  const [depth, setDepth] = useState<'quick' | 'standard' | 'deep'>('standard');
+  const [maxSources, setMaxSources] = useState(10);
+  const [outputAsReport, setOutputAsReport] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -30,17 +34,29 @@ export default function TaskComposer({
       setMessage(lastRequest.message);
       setThreadId(lastRequest.threadId || '');
       setModel(lastRequest.model || '');
+      setMode(lastRequest.mode || 'chat');
+      setDepth(lastRequest.researchOptions?.depth || 'standard');
+      setMaxSources(lastRequest.researchOptions?.maxSources || 10);
+      setOutputAsReport(lastRequest.researchOptions?.outputFormat === 'report');
     }
   }, [lastRequest]);
 
   const handleRun = () => {
     if (!message.trim() || isRunning) return;
-    onRun({
+    const req: RunRequest = {
       message: message.trim(),
       threadId: threadId.trim() || undefined,
       model: model.trim() || undefined,
-    });
-    // Do not clear message on run — keep it for re-run
+      mode,
+    };
+    if (mode === 'research') {
+      req.researchOptions = {
+        depth,
+        maxSources,
+        outputFormat: outputAsReport ? 'report' : 'answer',
+      };
+    }
+    onRun(req);
   };
 
   const handleReRun = () => {
@@ -62,7 +78,9 @@ export default function TaskComposer({
       <textarea
         ref={textareaRef}
         className="composer-textarea"
-        placeholder="Ask DeerFlow to inspect this workspace and summarize the project."
+        placeholder={mode === 'research'
+          ? "Ask DeerFlow to research a topic deeply..."
+          : "Ask DeerFlow to inspect this workspace and summarize the project."}
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -77,8 +95,8 @@ export default function TaskComposer({
             onClick={handleRun}
             disabled={!canRun}
           >
-            <Play size={16} />
-            Run
+            {mode === 'research' ? <Search size={16} /> : <Play size={16} />}
+            {mode === 'research' ? 'Research' : 'Run'}
           </button>
           {isRunning && (
             <button
@@ -130,26 +148,97 @@ export default function TaskComposer({
 
       {advancedOpen && (
         <div className="advanced-panel">
-          <div>
-            <label className="field-label">Thread ID</label>
-            <input
-              className="field-input"
-              placeholder="empty means auto"
-              value={threadId}
-              onChange={(e) => setThreadId(e.target.value)}
-              disabled={isRunning}
-            />
+          <div className="advanced-row">
+            <div>
+              <label className="field-label">Thread ID</label>
+              <input
+                className="field-input"
+                placeholder="empty means auto"
+                value={threadId}
+                onChange={(e) => setThreadId(e.target.value)}
+                disabled={isRunning}
+              />
+            </div>
+            <div>
+              <label className="field-label">Model</label>
+              <input
+                className="field-input"
+                placeholder="backend default"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                disabled={isRunning}
+              />
+            </div>
           </div>
-          <div>
-            <label className="field-label">Model</label>
-            <input
-              className="field-input"
-              placeholder="backend default"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              disabled={isRunning}
-            />
+
+          <div className="advanced-row">
+            <div className="mode-toggle">
+              <label className="field-label">Mode</label>
+              <div className="mode-buttons">
+                <button
+                  type="button"
+                  className={`mode-btn ${mode === 'chat' ? 'active' : ''}`}
+                  onClick={() => setMode('chat')}
+                  disabled={isRunning}
+                >
+                  <MessageCircle size={14} />
+                  Chat
+                </button>
+                <button
+                  type="button"
+                  className={`mode-btn ${mode === 'research' ? 'active' : ''}`}
+                  onClick={() => setMode('research')}
+                  disabled={isRunning}
+                >
+                  <Search size={14} />
+                  Research
+                </button>
+              </div>
+            </div>
           </div>
+
+          {mode === 'research' && (
+            <div className="research-options">
+              <div className="advanced-row">
+                <div>
+                  <label className="field-label">Depth</label>
+                  <select
+                    className="field-input"
+                    value={depth}
+                    onChange={(e) => setDepth(e.target.value as 'quick' | 'standard' | 'deep')}
+                    disabled={isRunning}
+                  >
+                    <option value="quick">Quick</option>
+                    <option value="standard">Standard</option>
+                    <option value="deep">Deep</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="field-label">Max Sources</label>
+                  <input
+                    className="field-input"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={maxSources}
+                    onChange={(e) => setMaxSources(Math.max(1, Math.min(50, parseInt(e.target.value) || 10)))}
+                    disabled={isRunning}
+                  />
+                </div>
+              </div>
+              <div className="advanced-row">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={outputAsReport}
+                    onChange={(e) => setOutputAsReport(e.target.checked)}
+                    disabled={isRunning}
+                  />
+                  Output as report
+                </label>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

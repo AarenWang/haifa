@@ -6,7 +6,24 @@ export type DeerFlowEventType =
   | 'MODEL_COMPLETED'
   | 'RUN_COMPLETED'
   | 'RUN_FAILED'
-  | 'RUN_CANCELLED';
+  | 'RUN_CANCELLED'
+  | 'RESEARCH_PLAN_CREATED'
+  | 'RESEARCH_DIMENSION_STARTED'
+  | 'RESEARCH_DIMENSION_COMPLETED'
+  | 'SOURCE_FOUND'
+  | 'SOURCE_FETCHED'
+  | 'EVIDENCE_EXTRACTED'
+  | 'QUALITY_GATE_STARTED'
+  | 'QUALITY_GATE_PASSED'
+  | 'QUALITY_GATE_FAILED'
+  | 'REPORT_STARTED'
+  | 'REPORT_COMPLETED'
+  | 'ARTIFACT_CREATED'
+  | 'SUBAGENT_STARTED'
+  | 'SUBAGENT_COMPLETED'
+  | 'MODEL_DELTA'
+  | 'TOOL_CALL_REQUESTED'
+  | 'RESEARCH_STEP_COMPLETED';
 
 export interface DeerFlowEvent {
   eventId: string;
@@ -23,6 +40,14 @@ export interface RunRequest {
   message: string;
   model?: string;
   uploadedFileIds?: string[];
+  mode?: 'chat' | 'research';
+  researchOptions?: {
+    depth?: 'quick' | 'standard' | 'deep';
+    timeWindow?: 'latest' | 'last_30_days' | 'last_year' | 'all_time';
+    maxSources?: number;
+    requireCitations?: boolean;
+    outputFormat?: 'answer' | 'report';
+  };
 }
 
 export interface RunResponse {

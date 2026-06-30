@@ -14,6 +14,16 @@ import {
   Code2,
   Copy,
   Check,
+  FileSearch,
+  Layers,
+  Link,
+  Download,
+  Highlighter,
+  Shield,
+  XCircle,
+  FileText,
+  Package,
+  Users,
 } from 'lucide-react';
 
 const eventTitles: Record<string, string> = {
@@ -25,6 +35,24 @@ const eventTitles: Record<string, string> = {
   RUN_COMPLETED: 'Run completed',
   RUN_FAILED: 'Run failed',
   RUN_CANCELLED: 'Run cancelled',
+  // Research events
+  RESEARCH_PLAN_CREATED: 'Research plan created',
+  RESEARCH_DIMENSION_STARTED: 'Research dimension started',
+  RESEARCH_DIMENSION_COMPLETED: 'Research dimension completed',
+  SOURCE_FOUND: 'Source found',
+  SOURCE_FETCHED: 'Source fetched',
+  EVIDENCE_EXTRACTED: 'Evidence extracted',
+  QUALITY_GATE_STARTED: 'Quality gate started',
+  QUALITY_GATE_PASSED: 'Quality gate passed',
+  QUALITY_GATE_FAILED: 'Quality gate failed',
+  REPORT_STARTED: 'Report started',
+  REPORT_COMPLETED: 'Report completed',
+  ARTIFACT_CREATED: 'Artifact created',
+  SUBAGENT_STARTED: 'Subagent started',
+  SUBAGENT_COMPLETED: 'Subagent completed',
+  MODEL_DELTA: 'Model delta',
+  TOOL_CALL_REQUESTED: 'Tool call requested',
+  RESEARCH_STEP_COMPLETED: 'Research step completed',
 };
 
 const eventIcons: Record<string, React.ReactNode> = {
@@ -36,6 +64,24 @@ const eventIcons: Record<string, React.ReactNode> = {
   RUN_COMPLETED: <Flag size={16} />,
   RUN_FAILED: <AlertTriangle size={16} />,
   RUN_CANCELLED: <Ban size={16} />,
+  // Research events
+  RESEARCH_PLAN_CREATED: <FileSearch size={16} />,
+  RESEARCH_DIMENSION_STARTED: <Layers size={16} />,
+  RESEARCH_DIMENSION_COMPLETED: <Layers size={16} />,
+  SOURCE_FOUND: <Link size={16} />,
+  SOURCE_FETCHED: <Download size={16} />,
+  EVIDENCE_EXTRACTED: <Highlighter size={16} />,
+  QUALITY_GATE_STARTED: <Shield size={16} />,
+  QUALITY_GATE_PASSED: <CheckCircle2 size={16} />,
+  QUALITY_GATE_FAILED: <XCircle size={16} />,
+  REPORT_STARTED: <FileText size={16} />,
+  REPORT_COMPLETED: <FileText size={16} />,
+  ARTIFACT_CREATED: <Package size={16} />,
+  SUBAGENT_STARTED: <Users size={16} />,
+  SUBAGENT_COMPLETED: <Users size={16} />,
+  MODEL_DELTA: <Brain size={16} />,
+  TOOL_CALL_REQUESTED: <Wrench size={16} />,
+  RESEARCH_STEP_COMPLETED: <CheckCircle2 size={16} />,
 };
 
 const eventIconColors: Record<string, string> = {
@@ -47,6 +93,24 @@ const eventIconColors: Record<string, string> = {
   RUN_COMPLETED: 'blue',
   RUN_FAILED: 'red',
   RUN_CANCELLED: 'gray',
+  // Research events
+  RESEARCH_PLAN_CREATED: 'purple',
+  RESEARCH_DIMENSION_STARTED: 'teal',
+  RESEARCH_DIMENSION_COMPLETED: 'teal',
+  SOURCE_FOUND: 'cyan',
+  SOURCE_FETCHED: 'cyan',
+  EVIDENCE_EXTRACTED: 'indigo',
+  QUALITY_GATE_STARTED: 'orange',
+  QUALITY_GATE_PASSED: 'green',
+  QUALITY_GATE_FAILED: 'red',
+  REPORT_STARTED: 'violet',
+  REPORT_COMPLETED: 'violet',
+  ARTIFACT_CREATED: 'pink',
+  SUBAGENT_STARTED: 'teal',
+  SUBAGENT_COMPLETED: 'teal',
+  MODEL_DELTA: 'green',
+  TOOL_CALL_REQUESTED: 'amber',
+  RESEARCH_STEP_COMPLETED: 'blue',
 };
 
 interface EventCardProps {

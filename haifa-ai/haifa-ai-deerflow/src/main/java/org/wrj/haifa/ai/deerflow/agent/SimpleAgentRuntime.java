@@ -12,6 +12,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
+import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.middleware.AgentMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.AgentRuntimeContext;
@@ -47,6 +49,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final ThreadManager threadManager;
     private final MessageStore messageStore;
     private final List<AgentMiddleware> middlewares;
+    private final AgentLoop agentLoop;
 
     @Autowired(required = false)
     private ToolPolicyService toolPolicyService;
@@ -68,10 +71,18 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     return order == null ? Integer.MAX_VALUE : order.value();
                 }))
                 .toList();
+        this.agentLoop = new AgentLoop(modelClient, toolRegistry);
     }
 
     @Override
     public Flux<AgentEvent> stream(AgentRequest request) {
+        if (request.isResearchMode()) {
+            return streamResearch(request);
+        }
+        return streamChat(request);
+    }
+
+    private Flux<AgentEvent> streamChat(AgentRequest request) {
         return Flux.defer(() -> {
             long runStartTime = System.currentTimeMillis();
             String requestedThreadId = StringUtils.hasText(request.threadId()) ? request.threadId() : UUID.randomUUID().toString();
@@ -80,19 +91,19 @@ public class SimpleAgentRuntime implements AgentRuntime {
             String threadId = thread.threadId();
             String modelName = StringUtils.hasText(request.model()) ? request.model() : this.properties.getModel();
             int uploadedFileCount = request.uploadedFileIds() == null ? 0 : request.uploadedFileIds().size();
-            RunRecord run = this.runManager.create(threadId, modelName, Map.of("source", "sse", "uploadedFiles", uploadedFileCount));
+            RunRecord run = this.runManager.create(threadId, modelName, Map.of("source", "sse", "uploadedFiles", uploadedFileCount, "mode", "chat"));
             this.runManager.markRunning(run.runId());
             this.messageStore.add(threadId, run.runId(), MessageRole.USER, request.message(),
                     Map.of("uploadedFileCount", uploadedFileCount));
-            log.info("Run started. runId={}, threadId={}, model={}, uploadedFileCount={}", run.runId(), threadId, nullToEmpty(modelName), uploadedFileCount);
+            log.info("Run started. runId={}, threadId={}, model={}, uploadedFileCount={}, mode=chat", run.runId(), threadId, nullToEmpty(modelName), uploadedFileCount);
 
             AgentRunConfig config = new AgentRunConfig(threadId, run.runId(), modelName, true, false,
-                    this.properties.getMaxIterations(), Path.of(this.properties.getWorkspaceRoot()),
-                    Map.of("runtime", "simple-agent-runtime"));
+                    this.properties.getMaxIterations(), Path.of(this.properties.getWorkspaceRoot()), RunMode.CHAT,
+                    ResearchOptions.defaults(), Map.of("runtime", "simple-agent-runtime"));
             AtomicInteger seq = new AtomicInteger();
 
             List<AgentEvent> prefixEvents = new ArrayList<>();
-            prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Run started", Map.of("uploadedFileCount", uploadedFileCount)));
+            prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Run started", Map.of("uploadedFileCount", uploadedFileCount, "mode", "chat")));
 
             List<Skill> activeSkills = resolveActiveSkills(request);
             List<ToolResult> toolResults = executePlannedTools(request, config, seq, prefixEvents, activeSkills);
@@ -168,6 +179,110 @@ public class SimpleAgentRuntime implements AgentRuntime {
                         this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, "Run cancelled",
                                 Map.of("status", "CANCELLED", "totalDurationMs", totalDuration));
                     });
+        });
+    }
+
+    private Flux<AgentEvent> streamResearch(AgentRequest request) {
+        return Flux.defer(() -> {
+            long runStartTime = System.currentTimeMillis();
+            String requestedThreadId = StringUtils.hasText(request.threadId()) ? request.threadId() : UUID.randomUUID().toString();
+            ThreadRecord thread = this.threadManager.upsert(requestedThreadId,
+                    ThreadManager.titleFromMessage(request.message()), Map.of("source", "run"));
+            String threadId = thread.threadId();
+            String modelName = StringUtils.hasText(request.model()) ? request.model() : this.properties.getModel();
+            int uploadedFileCount = request.uploadedFileIds() == null ? 0 : request.uploadedFileIds().size();
+            ResearchOptions researchOptions = request.researchOptions() == null ? ResearchOptions.defaults() : request.researchOptions();
+            Map<String, Object> runMetadata = Map.of(
+                    "source", "sse",
+                    "uploadedFiles", uploadedFileCount,
+                    "mode", "research",
+                    "depth", researchOptions.depth().name(),
+                    "timeWindow", researchOptions.timeWindow().name(),
+                    "maxSources", researchOptions.maxSources(),
+                    "requireCitations", researchOptions.requireCitations(),
+                    "outputFormat", researchOptions.outputFormat().name()
+            );
+            RunRecord run = this.runManager.create(threadId, modelName, runMetadata);
+            this.runManager.markRunning(run.runId());
+            this.messageStore.add(threadId, run.runId(), MessageRole.USER, request.message(),
+                    Map.of("uploadedFileCount", uploadedFileCount, "mode", "research"));
+            log.info("Research run started. runId={}, threadId={}, model={}, depth={}, timeWindow={}, maxSources={}, outputFormat={}",
+                    run.runId(), threadId, nullToEmpty(modelName), researchOptions.depth(), researchOptions.timeWindow(),
+                    researchOptions.maxSources(), researchOptions.outputFormat());
+
+            AgentRunConfig config = new AgentRunConfig(threadId, run.runId(), modelName, true, false,
+                    this.properties.getMaxIterations(), Path.of(this.properties.getWorkspaceRoot()), RunMode.RESEARCH,
+                    researchOptions, Map.of("runtime", "agent-loop"));
+            AtomicInteger seq = new AtomicInteger();
+
+            List<AgentEvent> prefixEvents = new ArrayList<>();
+            prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Research run started", runMetadata));
+            prefixEvents.add(event(seq, config, AgentEventType.RESEARCH_PLAN_CREATED,
+                    "Research plan created for: " + request.message(),
+                    Map.of("depth", researchOptions.depth().name(), "timeWindow", researchOptions.timeWindow().name(),
+                            "maxSources", researchOptions.maxSources(), "outputFormat", researchOptions.outputFormat().name())));
+
+            String researchSystemPrompt = this.properties.getResearchSystemPrompt() != null
+                    ? this.properties.getResearchSystemPrompt()
+                    : this.properties.getSystemPrompt();
+
+            LoopConfig loopConfig = new LoopConfig(
+                    this.properties.getMaxResearchSteps(),
+                    this.properties.getMaxFetchesPerRun(),
+                    this.properties.getResearchTimeout(),
+                    researchOptions);
+
+            List<Skill> activeSkills = resolveActiveSkills(request);
+
+            // Run the agent loop with full context (policy, skills, uploads)
+            Flux<AgentEvent> loopEvents = this.agentLoop.run(loopConfig, config, researchSystemPrompt, request.message(), seq,
+                    this.toolPolicyService, activeSkills, request.uploadedFileIds());
+
+            // After loop completes, mark run status based on last event type
+            final java.util.concurrent.atomic.AtomicReference<String> lastEventType = new java.util.concurrent.atomic.AtomicReference<>();
+            Flux<AgentEvent> wrappedLoopEvents = loopEvents
+                    .doOnNext(evt -> {
+                        lastEventType.set(evt.type().name());
+                        if (evt.type() == AgentEventType.MODEL_COMPLETED) {
+                            this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, evt.content(),
+                                    Map.of("mode", "research", "toolCount", evt.metadata().getOrDefault("totalToolCalls", 0)));
+                        }
+                    })
+                    .doOnComplete(() -> {
+                        String lastType = lastEventType.get();
+                        long totalDuration = System.currentTimeMillis() - runStartTime;
+                        if ("RUN_FAILED".equals(lastType)) {
+                            // Already marked as failed by AgentLoop — do not override
+                            this.threadManager.touch(threadId);
+                            log.info("Research run failed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+                        } else if ("RUN_CANCELLED".equals(lastType)) {
+                            this.threadManager.touch(threadId);
+                            log.info("Research run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+                        } else {
+                            this.runManager.markCompleted(run.runId());
+                            this.threadManager.touch(threadId);
+                            log.info("Research run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+                        }
+                    })
+                    .doOnError(ex -> {
+                        String errorMessage = describeException(ex);
+                        this.runManager.markFailed(run.runId(), errorMessage);
+                        this.threadManager.touch(threadId);
+                        this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
+                                Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "mode", "research"));
+                        long totalDuration = System.currentTimeMillis() - runStartTime;
+                        log.error("Research run failed. runId={}, totalDurationMs={}", run.runId(), totalDuration, ex);
+                    })
+                    .doOnCancel(() -> {
+                        long totalDuration = System.currentTimeMillis() - runStartTime;
+                        log.info("Research run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+                        this.runManager.markCancelled(run.runId());
+                        this.threadManager.touch(threadId);
+                        this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, "Research run cancelled",
+                                Map.of("status", "CANCELLED", "totalDurationMs", totalDuration, "mode", "research"));
+                    });
+
+            return Flux.concat(Flux.fromIterable(prefixEvents), wrappedLoopEvents);
         });
     }
 

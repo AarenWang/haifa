@@ -27,8 +27,37 @@ public class DeerFlowProperties {
     @Min(0)
     private int charBudget = 0;
 
+    // Research mode configuration
+    @Min(1)
+    @Max(100)
+    private int maxResearchSteps = 20;
+
+    @Min(1)
+    @Max(50)
+    private int maxResearchSources = 20;
+
+    @Min(1)
+    @Max(30)
+    private int maxFetchesPerRun = 10;
+
+    @Min(10_000)
+    private long researchTimeout = 300_000; // 5 minutes in ms
+
+    private String defaultResearchDepth = "STANDARD";
+
+    private boolean researchEnabled = true;
+    private String researchSystemPrompt;
+
     public String getModel() {
         return model;
+    }
+
+    public String getResearchSystemPrompt() {
+        return researchSystemPrompt;
+    }
+
+    public void setResearchSystemPrompt(String researchSystemPrompt) {
+        this.researchSystemPrompt = researchSystemPrompt;
     }
 
     public void setModel(String model) {
@@ -129,5 +158,54 @@ public class DeerFlowProperties {
 
     public void setCharBudget(int charBudget) {
         this.charBudget = charBudget;
+    }
+
+    // Research getters/setters
+    public int getMaxResearchSteps() {
+        return maxResearchSteps;
+    }
+
+    public void setMaxResearchSteps(int maxResearchSteps) {
+        this.maxResearchSteps = maxResearchSteps;
+    }
+
+    public int getMaxResearchSources() {
+        return maxResearchSources;
+    }
+
+    public void setMaxResearchSources(int maxResearchSources) {
+        this.maxResearchSources = maxResearchSources;
+    }
+
+    public int getMaxFetchesPerRun() {
+        return maxFetchesPerRun;
+    }
+
+    public void setMaxFetchesPerRun(int maxFetchesPerRun) {
+        this.maxFetchesPerRun = maxFetchesPerRun;
+    }
+
+    public long getResearchTimeout() {
+        return researchTimeout;
+    }
+
+    public void setResearchTimeout(long researchTimeout) {
+        this.researchTimeout = researchTimeout;
+    }
+
+    public String getDefaultResearchDepth() {
+        return defaultResearchDepth;
+    }
+
+    public void setDefaultResearchDepth(String defaultResearchDepth) {
+        this.defaultResearchDepth = defaultResearchDepth;
+    }
+
+    public boolean isResearchEnabled() {
+        return researchEnabled;
+    }
+
+    public void setResearchEnabled(boolean researchEnabled) {
+        this.researchEnabled = researchEnabled;
     }
 }

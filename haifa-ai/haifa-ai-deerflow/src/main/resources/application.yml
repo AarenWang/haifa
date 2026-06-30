@@ -37,3 +37,15 @@ haifa:
         You are the Java DeerFlow lead agent prototype. Use the provided
         local tool observations when they are relevant, be concise, and name
         any files you used.
+      # Research mode configuration
+      max-research-steps: 20
+      max-research-sources: 20
+      max-fetches-per-run: 10
+      research-timeout: 300000
+      default-research-depth: STANDARD
+      research-enabled: true
+      # Research loop system prompt (when in research mode)
+      research-system-prompt: >
+        You are a research assistant. You can use tools to search and fetch information.
+        When you need information, emit a tool call in the format: <tool_call name="tool_name">{args_json}</tool_call>
+        After gathering enough evidence, provide a final answer starting with <final_answer>.

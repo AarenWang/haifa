@@ -13,6 +13,22 @@ function getPhaseFromEvent(type: string): AppPhase {
       return 'answering';
     case 'RUN_COMPLETED':
       return 'done';
+    // Research events map to similar phases
+    case 'RESEARCH_PLAN_CREATED':
+      return 'preparing';
+    case 'RESEARCH_STEP_COMPLETED':
+    case 'SOURCE_FOUND':
+    case 'SOURCE_FETCHED':
+    case 'EVIDENCE_EXTRACTED':
+      return 'gathering_context';
+    case 'QUALITY_GATE_STARTED':
+    case 'QUALITY_GATE_PASSED':
+    case 'QUALITY_GATE_FAILED':
+      return 'thinking';
+    case 'REPORT_STARTED':
+    case 'REPORT_COMPLETED':
+    case 'ARTIFACT_CREATED':
+      return 'answering';
     default:
       return 'idle';
   }
