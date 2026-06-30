@@ -1,60 +1,100 @@
 package org.wrj.haifa.ai.deerflow.run;
 
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import org.wrj.haifa.ai.deerflow.persistence.entity.RunEntity;
+import org.wrj.haifa.ai.deerflow.persistence.mapper.JsonMapper;
+import org.wrj.haifa.ai.deerflow.persistence.mapper.RunMapper;
+import org.wrj.haifa.ai.deerflow.persistence.repository.RunRepository;
 
 @Component
 public class RunManager {
 
-    private final Map<String, RunRecord> runs = new ConcurrentHashMap<>();
+    private final RunRepository runRepository;
+    private final RunMapper runMapper;
+    private final JsonMapper jsonMapper;
 
+    public RunManager(RunRepository runRepository, RunMapper runMapper, JsonMapper jsonMapper) {
+        this.runRepository = runRepository;
+        this.runMapper = runMapper;
+        this.jsonMapper = jsonMapper;
+    }
+
+    @Transactional
     public RunRecord create(String threadId, String modelName, Map<String, Object> metadata) {
         String runId = UUID.randomUUID().toString();
         Instant now = Instant.now();
-        RunRecord record = new RunRecord(runId, threadId, modelName, RunStatus.PENDING, null,
-                metadata == null ? Map.of() : Map.copyOf(metadata), now, now);
-        this.runs.put(runId, record);
-        return record;
+        RunEntity entity = new RunEntity();
+        entity.setRunId(runId);
+        entity.setThreadId(threadId);
+        entity.setModelName(modelName);
+        entity.setStatus(RunStatus.PENDING);
+        entity.setMetadataJson(metadataToJson(metadata));
+        entity.setCreatedAt(now);
+        entity.setUpdatedAt(now);
+        runRepository.save(entity);
+        return runMapper.toRecord(entity);
     }
 
+    @Transactional(readOnly = true)
     public Optional<RunRecord> find(String runId) {
-        return Optional.ofNullable(this.runs.get(runId));
+        return runRepository.findByRunId(runId).map(runMapper::toRecord);
     }
 
+    @Transactional(readOnly = true)
     public List<RunRecord> listByThread(String threadId) {
-        return this.runs.values().stream()
-                .filter(record -> record.threadId().equals(threadId))
-                .sorted(Comparator.comparing(RunRecord::createdAt).reversed())
+        return runRepository.findByThreadIdOrderByCreatedAtDesc(threadId).stream()
+                .map(runMapper::toRecord)
                 .toList();
     }
 
+    @Transactional
     public RunRecord markRunning(String runId) {
         return updateStatus(runId, RunStatus.RUNNING);
     }
 
+    @Transactional
     public RunRecord markCompleted(String runId) {
         return updateStatus(runId, RunStatus.COMPLETED);
     }
 
+    @Transactional
     public RunRecord markCancelled(String runId) {
         return updateStatus(runId, RunStatus.CANCELLED);
     }
 
+    @Transactional
     public RunRecord markFailed(String runId, String error) {
-        return this.runs.computeIfPresent(runId, (ignored, existing) -> existing.withError(error));
+        return runRepository.findByRunId(runId).map(entity -> {
+            entity.setStatus(RunStatus.FAILED);
+            entity.setError(error);
+            entity.setUpdatedAt(Instant.now());
+            runRepository.save(entity);
+            return runMapper.toRecord(entity);
+        }).orElse(null);
     }
 
     private RunRecord updateStatus(String runId, RunStatus status) {
-        return this.runs.computeIfPresent(runId, (ignored, existing) -> existing.withStatus(status));
+        return runRepository.findByRunId(runId).map(entity -> {
+            entity.setStatus(status);
+            entity.setUpdatedAt(Instant.now());
+            runRepository.save(entity);
+            return runMapper.toRecord(entity);
+        }).orElse(null);
     }
 
+    @Transactional(readOnly = true)
     public int count() {
-        return this.runs.size();
+        return (int) runRepository.count();
+    }
+
+    private String metadataToJson(Map<String, Object> metadata) {
+        String result = jsonMapper.toJson(metadata);
+        return result != null ? result : "{}";
     }
 }

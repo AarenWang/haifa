@@ -8,7 +8,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -20,6 +19,7 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.persistence.store.UploadStore;
 
 @Service
 public class UploadStorageService {
@@ -27,11 +27,12 @@ public class UploadStorageService {
     private static final Logger log = LoggerFactory.getLogger(UploadStorageService.class);
 
     private final DeerFlowProperties properties;
-    private final ConcurrentHashMap<String, UploadRecord> metadataStore = new ConcurrentHashMap<>();
+    private final UploadStore uploadStore;
     private final Set<String> allowedExtensions;
 
-    public UploadStorageService(DeerFlowProperties properties) {
+    public UploadStorageService(DeerFlowProperties properties, UploadStore uploadStore) {
         this.properties = properties;
+        this.uploadStore = uploadStore;
         this.allowedExtensions = Arrays.stream(properties.getAllowedUploadExtensions().split(","))
                 .map(String::trim)
                 .map(String::toLowerCase)
@@ -110,7 +111,7 @@ public class UploadStorageService {
                     threadId,
                     targetPath.toString());
 
-            metadataStore.put(fileId, record);
+            uploadStore.save(record);
             log.info("Stored upload fileId={}, originalFilename={}, size={}, threadId={}, durationMs={}",
                     fileId, originalFilename, content.length, threadId, System.currentTimeMillis() - startTime);
             return record;
@@ -120,30 +121,15 @@ public class UploadStorageService {
     }
 
     public UploadRecord find(String fileId) {
-        return metadataStore.get(fileId);
+        return uploadStore.find(fileId);
     }
 
     public UploadRecord findByFileIdAndThreadId(String fileId, String threadId) {
-        if (!StringUtils.hasText(threadId)) {
-            return null;
-        }
-        UploadRecord record = metadataStore.get(fileId);
-        if (record == null) {
-            return null;
-        }
-        if (!threadId.equals(record.getThreadId())) {
-            return null; // File does not belong to this thread
-        }
-        return record;
+        return uploadStore.findByFileIdAndThreadId(fileId, threadId);
     }
 
     public List<UploadRecord> list(String threadId) {
-        if (!StringUtils.hasText(threadId)) {
-            return List.of(); // Return empty list instead of all files when no thread is specified
-        }
-        return metadataStore.values().stream()
-                .filter(r -> threadId.equals(r.getThreadId()))
-                .collect(Collectors.toList());
+        return uploadStore.list(threadId);
     }
 
     public String readContent(String fileId, String threadId) {
@@ -167,7 +153,7 @@ public class UploadStorageService {
         if (record == null) {
             throw new IllegalArgumentException("File not found: " + fileId);
         }
-        metadataStore.remove(fileId);
+        uploadStore.delete(fileId, threadId);
         try {
             Path path = Path.of(record.getStoredPath());
             Files.deleteIfExists(path);
@@ -178,7 +164,7 @@ public class UploadStorageService {
     }
 
     public int count() {
-        return metadataStore.size();
+        return uploadStore.count();
     }
 
     private static String getExtension(String filename) {

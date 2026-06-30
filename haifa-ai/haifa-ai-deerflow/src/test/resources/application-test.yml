@@ -1,0 +1,39 @@
+spring:
+  datasource:
+    url: "jdbc:sqlite::memory:"
+    driver-class-name: org.sqlite.JDBC
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.community.dialect.SQLiteDialect
+
+deerflow:
+  persistence:
+    sqlite:
+      path: ":memory:"
+
+haifa:
+  ai:
+    deerflow:
+      model: test-model
+      max-iterations: 4
+      workspace-root: ${java.io.tmpdir}
+      skills-root: ${java.io.tmpdir}
+      skills-enabled: true
+      mcp-enabled: false
+      tool-search-enabled: true
+      uploads-root: ${java.io.tmpdir}/uploads
+      max-upload-bytes: 10485760
+      max-converted-chars: 60000
+      allowed-upload-extensions: txt,md,json,csv,log,xml,yml,yaml,properties
+      system-prompt: "test system prompt"
+      max-research-steps: 20
+      max-research-sources: 20
+      max-fetches-per-run: 10
+      research-timeout: 300000
+      default-research-depth: STANDARD
+      research-enabled: true
+      research-system-prompt: "test research prompt"

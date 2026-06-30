@@ -1,86 +1,120 @@
 package org.wrj.haifa.ai.deerflow.thread;
 
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.wrj.haifa.ai.deerflow.persistence.entity.ThreadEntity;
+import org.wrj.haifa.ai.deerflow.persistence.mapper.JsonMapper;
+import org.wrj.haifa.ai.deerflow.persistence.mapper.ThreadMapper;
+import org.wrj.haifa.ai.deerflow.persistence.repository.ThreadRepository;
+import org.wrj.haifa.ai.deerflow.thread.ThreadRecord;
+import org.wrj.haifa.ai.deerflow.thread.ThreadStatus;
 
 @Component
 public class ThreadManager {
 
     private static final int TITLE_MAX_LENGTH = 80;
 
-    private final Map<String, ThreadRecord> threads = new ConcurrentHashMap<>();
+    private final ThreadRepository threadRepository;
+    private final ThreadMapper threadMapper;
+    private final JsonMapper jsonMapper;
 
+    public ThreadManager(ThreadRepository threadRepository, ThreadMapper threadMapper, JsonMapper jsonMapper) {
+        this.threadRepository = threadRepository;
+        this.threadMapper = threadMapper;
+        this.jsonMapper = jsonMapper;
+    }
+
+    @Transactional
     public ThreadRecord create(String title, Map<String, Object> metadata) {
         return upsert(UUID.randomUUID().toString(), title, metadata);
     }
 
+    @Transactional
     public ThreadRecord upsert(String threadId, String title, Map<String, Object> metadata) {
         String resolvedThreadId = StringUtils.hasText(threadId) ? threadId.trim() : UUID.randomUUID().toString();
-        return this.threads.compute(resolvedThreadId, (ignored, existing) -> {
-            Instant now = Instant.now();
-            if (existing == null) {
-                return new ThreadRecord(resolvedThreadId, normalizeTitle(title), ThreadStatus.ACTIVE,
-                        metadata == null ? Map.of() : Map.copyOf(metadata), now, now);
-            }
-            ThreadRecord updated = existing.touched();
-            if (StringUtils.hasText(title) && isUntitled(existing.title())) {
-                updated = updated.withTitle(normalizeTitle(title));
-            }
-            if (metadata != null && !metadata.isEmpty()) {
-                updated = updated.withMetadata(metadata);
-            }
-            return updated;
-        });
+        Optional<ThreadEntity> existing = threadRepository.findByThreadId(resolvedThreadId);
+        Instant now = Instant.now();
+        if (existing.isEmpty()) {
+            ThreadEntity entity = new ThreadEntity();
+            entity.setThreadId(resolvedThreadId);
+            entity.setTitle(normalizeTitle(title));
+            entity.setStatus(ThreadStatus.ACTIVE);
+            entity.setMetadataJson(metadataToJson(metadata));
+            entity.setCreatedAt(now);
+            entity.setUpdatedAt(now);
+            threadRepository.save(entity);
+            return threadMapper.toRecord(entity);
+        }
+        ThreadEntity entity = existing.get();
+        entity.setUpdatedAt(now);
+        if (StringUtils.hasText(title) && isUntitled(entity.getTitle())) {
+            entity.setTitle(normalizeTitle(title));
+        }
+        if (metadata != null && !metadata.isEmpty()) {
+            entity.setMetadataJson(metadataToJson(metadata));
+        }
+        threadRepository.save(entity);
+        return threadMapper.toRecord(entity);
     }
 
+    @Transactional(readOnly = true)
     public Optional<ThreadRecord> find(String threadId) {
         if (!StringUtils.hasText(threadId)) {
             return Optional.empty();
         }
-        return Optional.ofNullable(this.threads.get(threadId.trim()));
+        return threadRepository.findByThreadId(threadId.trim())
+                .map(threadMapper::toRecord);
     }
 
+    @Transactional(readOnly = true)
     public List<ThreadRecord> list() {
-        return this.threads.values().stream()
-                .sorted(Comparator.comparing(ThreadRecord::updatedAt).reversed())
+        return threadRepository.findAllByOrderByUpdatedAtDesc().stream()
+                .map(threadMapper::toRecord)
                 .toList();
     }
 
+    @Transactional
     public Optional<ThreadRecord> update(String threadId, String title, ThreadStatus status, Map<String, Object> metadata) {
         if (!StringUtils.hasText(threadId)) {
             return Optional.empty();
         }
-        return Optional.ofNullable(this.threads.computeIfPresent(threadId.trim(), (ignored, existing) -> {
-            ThreadRecord updated = existing;
+        return threadRepository.findByThreadId(threadId.trim()).map(entity -> {
             if (StringUtils.hasText(title)) {
-                updated = updated.withTitle(normalizeTitle(title));
+                entity.setTitle(normalizeTitle(title));
             }
             if (status != null) {
-                updated = updated.withStatus(status);
+                entity.setStatus(status);
             }
             if (metadata != null) {
-                updated = updated.withMetadata(metadata);
+                entity.setMetadataJson(metadataToJson(metadata));
             }
-            return updated.touched();
-        }));
+            entity.setUpdatedAt(Instant.now());
+            threadRepository.save(entity);
+            return threadMapper.toRecord(entity);
+        });
     }
 
+    @Transactional
     public Optional<ThreadRecord> touch(String threadId) {
         if (!StringUtils.hasText(threadId)) {
             return Optional.empty();
         }
-        return Optional.ofNullable(this.threads.computeIfPresent(threadId.trim(), (ignored, existing) -> existing.touched()));
+        return threadRepository.findByThreadId(threadId.trim()).map(entity -> {
+            entity.setUpdatedAt(Instant.now());
+            threadRepository.save(entity);
+            return threadMapper.toRecord(entity);
+        });
     }
 
+    @Transactional(readOnly = true)
     public int count() {
-        return this.threads.size();
+        return (int) threadRepository.count();
     }
 
     public static String titleFromMessage(String message) {
@@ -103,5 +137,10 @@ public class ThreadManager {
 
     private static boolean isUntitled(String title) {
         return !StringUtils.hasText(title) || "New thread".equals(title);
+    }
+
+    private String metadataToJson(Map<String, Object> metadata) {
+        String result = jsonMapper.toJson(metadata);
+        return result != null ? result : "{}";
     }
 }

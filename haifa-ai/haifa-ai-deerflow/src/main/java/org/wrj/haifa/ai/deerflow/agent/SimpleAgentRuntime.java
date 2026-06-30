@@ -21,6 +21,11 @@ import org.wrj.haifa.ai.deerflow.middleware.MiddlewareChain;
 import org.wrj.haifa.ai.deerflow.middleware.MiddlewareOrder;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentEventStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
@@ -36,6 +41,7 @@ import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 @Component
 public class SimpleAgentRuntime implements AgentRuntime {
@@ -50,6 +56,11 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final MessageStore messageStore;
     private final List<AgentMiddleware> middlewares;
     private final AgentLoop agentLoop;
+    private final AgentEventStore agentEventStore;
+    private final ToolExecutionStore toolExecutionStore;
+    private final ModelStepStore modelStepStore;
+    private final ToolCallStore toolCallStore;
+    private final AgentLoopRunStore agentLoopRunStore;
 
     @Autowired(required = false)
     private ToolPolicyService toolPolicyService;
@@ -58,7 +69,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private SlashSkillResolver slashSkillResolver;
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
-            RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares) {
+            RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
+            AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
@@ -71,7 +84,12 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     return order == null ? Integer.MAX_VALUE : order.value();
                 }))
                 .toList();
-        this.agentLoop = new AgentLoop(modelClient, toolRegistry);
+        this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore);
+        this.agentEventStore = agentEventStore;
+        this.toolExecutionStore = toolExecutionStore;
+        this.modelStepStore = modelStepStore;
+        this.toolCallStore = toolCallStore;
+        this.agentLoopRunStore = agentLoopRunStore;
     }
 
     @Override
@@ -171,6 +189,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             });
 
             return Flux.concat(Flux.fromIterable(prefixEvents), modelAndTerminalEvents)
+                    .doOnNext(this::saveEvent)
                     .doOnCancel(() -> {
                         long totalDuration = System.currentTimeMillis() - runStartTime;
                         log.info("Run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
@@ -179,7 +198,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                         this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, "Run cancelled",
                                 Map.of("status", "CANCELLED", "totalDurationMs", totalDuration));
                     });
-        });
+        }).subscribeOn(Schedulers.boundedElastic());
     }
 
     private Flux<AgentEvent> streamResearch(AgentRequest request) {
@@ -282,8 +301,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 Map.of("status", "CANCELLED", "totalDurationMs", totalDuration, "mode", "research"));
                     });
 
-            return Flux.concat(Flux.fromIterable(prefixEvents), wrappedLoopEvents);
-        });
+            return Flux.concat(Flux.fromIterable(prefixEvents), wrappedLoopEvents)
+                    .doOnNext(this::saveEvent);
+        }).subscribeOn(Schedulers.boundedElastic());
     }
 
     private List<Skill> resolveActiveSkills(AgentRequest request) {
@@ -320,17 +340,29 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 results.add(ToolResult.of(tool.name(), "Tool denied by policy: not in allowed-tools for active skills."));
                 events.add(event(seq, config, AgentEventType.TOOL_COMPLETED, "Tool denied by policy",
                         Map.of("tool", tool.name(), "denied", true)));
+                this.toolExecutionStore.saveDenied(config.runId(), config.threadId(), tool.name(),
+                        "Policy denied: not in allowed-tools for active skills",
+                        Map.of("tool", tool.name(), "denied", true));
                 continue;
             }
             long toolStartTime = System.currentTimeMillis();
             events.add(event(seq, config, AgentEventType.TOOL_STARTED, "Executing " + tool.name(),
                     Map.of("tool", tool.name(), "description", tool.description())));
+            this.toolExecutionStore.saveStarted(config.runId(), config.threadId(), tool.name(), tool.description(),
+                    toolRequest.toString(), Map.of("tool", tool.name()));
             ToolResult result = executeToolSafely(tool, toolRequest);
             long toolDuration = System.currentTimeMillis() - toolStartTime;
             log.info("Tool executed. tool={}, runId={}, durationMs={}, resultLength={}", tool.name(), config.runId(), toolDuration, result.content().length());
             results.add(result);
             events.add(event(seq, config, AgentEventType.TOOL_COMPLETED, result.content(),
                     Map.of("tool", result.toolName(), "durationMs", toolDuration)));
+            if (result.content() != null && result.content().startsWith("Tool failed:")) {
+                this.toolExecutionStore.saveFailed(config.runId(), config.threadId(), tool.name(), result.content(),
+                        toolDuration, Map.of("tool", tool.name()));
+            } else {
+                this.toolExecutionStore.saveCompleted(config.runId(), config.threadId(), tool.name(), result.content(),
+                        toolDuration, Map.of("tool", tool.name()));
+            }
         }
         return results;
     }
@@ -349,6 +381,14 @@ public class SimpleAgentRuntime implements AgentRuntime {
             Map<String, Object> metadata) {
         return AgentEvent.of(Integer.toString(seq.incrementAndGet()), config.runId(), config.threadId(), type, content,
                 metadata);
+    }
+
+    private void saveEvent(AgentEvent event) {
+        try {
+            this.agentEventStore.save(event);
+        } catch (Exception e) {
+            log.warn("Failed to persist event: {}", e.getMessage());
+        }
     }
 
     private static String nullToEmpty(String value) {

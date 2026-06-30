@@ -48,6 +48,41 @@ public class DeerFlowProperties {
     private boolean researchEnabled = true;
     private String researchSystemPrompt;
 
+    // Persistence configuration
+    private Persistence persistence = new Persistence();
+
+    public static class Persistence {
+        private Sqlite sqlite = new Sqlite();
+
+        public Sqlite getSqlite() {
+            return sqlite;
+        }
+
+        public void setSqlite(Sqlite sqlite) {
+            this.sqlite = sqlite;
+        }
+    }
+
+    public static class Sqlite {
+        private String path = "${user.dir}/data/deerflow.sqlite";
+
+        public String getPath() {
+            return path;
+        }
+
+        public void setPath(String path) {
+            this.path = path;
+        }
+    }
+
+    public Persistence getPersistence() {
+        return persistence;
+    }
+
+    public void setPersistence(Persistence persistence) {
+        this.persistence = persistence;
+    }
+
     public String getModel() {
         return model;
     }

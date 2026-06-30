@@ -21,4 +21,11 @@ public record RunRecord(
     public RunRecord withError(String error) {
         return new RunRecord(runId, threadId, modelName, RunStatus.FAILED, error, metadata, createdAt, Instant.now());
     }
+
+    public String mode() {
+        if (metadata != null && metadata.get("mode") instanceof String m) {
+            return m;
+        }
+        return "chat";
+    }
 }

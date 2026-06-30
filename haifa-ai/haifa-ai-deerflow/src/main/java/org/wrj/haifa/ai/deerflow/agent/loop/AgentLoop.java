@@ -3,6 +3,7 @@ package org.wrj.haifa.ai.deerflow.agent.loop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +12,10 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.persistence.entity.AgentLoopRunEntity;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
@@ -40,11 +45,22 @@ public class AgentLoop {
     private final AgentModelClient modelClient;
     private final ToolRegistry toolRegistry;
     private final ToolCallParser toolCallParser;
+    private final ModelStepStore modelStepStore;
+    private final ToolCallStore toolCallStore;
+    private final AgentLoopRunStore agentLoopRunStore;
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry) {
+        this(modelClient, toolRegistry, null, null, null);
+    }
+
+    public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore) {
         this.modelClient = modelClient;
         this.toolRegistry = toolRegistry;
         this.toolCallParser = new ToolCallParser();
+        this.modelStepStore = modelStepStore;
+        this.toolCallStore = toolCallStore;
+        this.agentLoopRunStore = agentLoopRunStore;
     }
 
     /**
@@ -74,6 +90,11 @@ public class AgentLoop {
             List<String> history = new ArrayList<>();
             history.add("User: " + userMessage);
 
+            // Persist loop run start
+            if (agentLoopRunStore != null) {
+                agentLoopRunStore.create(runConfig.runId(), runConfig.threadId(), config);
+            }
+
             StringBuilder toolDescriptions = new StringBuilder();
             for (AgentTool tool : toolRegistry.tools()) {
                 toolDescriptions.append("- ").append(tool.name()).append(": ").append(tool.description()).append("\n");
@@ -89,22 +110,32 @@ public class AgentLoop {
             String stopReason = null;
 
             for (int step = 0; step < config.maxSteps(); step++) {
+                if (agentLoopRunStore != null) {
+                    agentLoopRunStore.updateStepCount(runConfig.runId(), step + 1);
+                }
+
                 // Check timeout
                 if (System.currentTimeMillis() - loopStartTime > config.timeoutMs()) {
                     stopReason = "TIMEOUT";
                     events.add(event(seq, runConfig, AgentEventType.RUN_FAILED,
                             "Loop timeout exceeded after " + config.timeoutMs() + "ms",
                             Map.of("stopReason", stopReason, "steps", step)));
+                    if (agentLoopRunStore != null) {
+                        agentLoopRunStore.markTimeout(runConfig.runId());
+                    }
                     stopped = true;
                     break;
                 }
 
                 // Check max tool calls
                 if (totalToolCalls >= config.maxToolCalls()) {
-                    stopReason = "MAX_TOOL_CALLS";
+                    stopReason = "MAX_TOOL_CALLS_REACHED";
                     events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                             "Max tool calls reached",
                             Map.of("stopReason", stopReason, "steps", step, "totalToolCalls", totalToolCalls)));
+                    if (agentLoopRunStore != null) {
+                        agentLoopRunStore.markCompleted(runConfig.runId(), stopReason);
+                    }
                     stopped = true;
                     break;
                 }
@@ -131,6 +162,9 @@ public class AgentLoop {
                     events.add(event(seq, runConfig, AgentEventType.RUN_FAILED,
                             "Model call failed: " + ex.getMessage(),
                             Map.of("stopReason", stopReason, "step", step, "errorType", ex.getClass().getName())));
+                    if (agentLoopRunStore != null) {
+                        agentLoopRunStore.markFailed(runConfig.runId(), stopReason);
+                    }
                     stopped = true;
                     break;
                 }
@@ -138,6 +172,16 @@ public class AgentLoop {
 
                 if (modelResponse == null) {
                     modelResponse = "";
+                }
+
+                // Persist model step
+                if (modelStepStore != null) {
+                    try {
+                        ModelStep modelStep = new ModelStep(step + 1, userPrompt, modelResponse, List.of(), modelStartTime, modelDuration);
+                        modelStepStore.save(modelStep, runConfig.runId(), runConfig.threadId());
+                    } catch (Exception e) {
+                        log.warn("Failed to persist model step: {}", e.getMessage());
+                    }
                 }
 
                 history.add("Assistant: " + modelResponse);
@@ -158,6 +202,9 @@ public class AgentLoop {
                     events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                             "Research run completed",
                             Map.of("stopReason", stopReason, "steps", step + 1, "totalToolCalls", totalToolCalls)));
+                    if (agentLoopRunStore != null) {
+                        agentLoopRunStore.markCompleted(runConfig.runId(), stopReason);
+                    }
                     stopped = true;
                     break;
                 }
@@ -176,11 +223,15 @@ public class AgentLoop {
                     events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                             "Research run completed",
                             Map.of("stopReason", stopReason, "steps", step + 1, "totalToolCalls", totalToolCalls)));
+                    if (agentLoopRunStore != null) {
+                        agentLoopRunStore.markCompleted(runConfig.runId(), stopReason);
+                    }
                     stopped = true;
                     break;
                 }
 
                 // Execute tool calls
+                List<ToolCallResult> stepToolResults = new ArrayList<>();
                 for (ToolCallParser.ParsedToolCall parsedCall : parsedCalls) {
                     totalToolCalls++;
                     if (totalToolCalls > config.maxToolCalls()) {
@@ -191,6 +242,15 @@ public class AgentLoop {
                     events.add(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
                             "Tool call requested: " + toolCall.toolName(),
                             Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(), "arguments", toolCall.arguments())));
+
+                    // Persist tool call request
+                    if (toolCallStore != null) {
+                        try {
+                            toolCallStore.saveRequested(toolCall, runConfig.runId(), runConfig.threadId());
+                        } catch (Exception e) {
+                            log.warn("Failed to persist tool call request: {}", e.getMessage());
+                        }
+                    }
 
                     // Policy check
                     if (toolPolicy != null && activeSkills != null && !toolPolicy.isToolAllowed(toolCall.toolName(), activeSkills)) {
@@ -212,6 +272,15 @@ public class AgentLoop {
                     ToolCallResult toolResult = executeTool(toolCall, runConfig, uploadedFileIds);
                     long toolDuration = System.currentTimeMillis() - toolStartTime;
 
+                    // Persist tool call result
+                    if (toolCallStore != null) {
+                        try {
+                            toolCallStore.saveResult(toolCall.id(), toolResult);
+                        } catch (Exception e) {
+                            log.warn("Failed to persist tool call result: {}", e.getMessage());
+                        }
+                    }
+
                     events.add(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
                             toolResult.result(),
                             Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(),
@@ -219,13 +288,17 @@ public class AgentLoop {
                                     "error", toolResult.error())));
 
                     history.add("Tool result (" + toolCall.toolName() + "): " + toolResult.result());
+                    stepToolResults.add(toolResult);
                 }
 
                 if (totalToolCalls >= config.maxToolCalls()) {
-                    stopReason = "MAX_TOOL_CALLS";
+                    stopReason = "MAX_TOOL_CALLS_REACHED";
                     events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                             "Max tool calls reached after " + totalToolCalls + " tool calls",
                             Map.of("stopReason", stopReason, "steps", step + 1, "totalToolCalls", totalToolCalls)));
+                    if (agentLoopRunStore != null) {
+                        agentLoopRunStore.markCompleted(runConfig.runId(), stopReason);
+                    }
                     stopped = true;
                     break;
                 }
@@ -241,6 +314,9 @@ public class AgentLoop {
                 events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                         "Max steps reached without final answer",
                         Map.of("stopReason", stopReason, "maxSteps", config.maxSteps(), "totalToolCalls", totalToolCalls)));
+                if (agentLoopRunStore != null) {
+                    agentLoopRunStore.markCompleted(runConfig.runId(), stopReason);
+                }
             }
 
             return Flux.fromIterable(events);

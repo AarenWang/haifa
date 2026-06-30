@@ -73,6 +73,6 @@ public class ThreadController {
 
     private static RunResponse toResponse(RunRecord record) {
         return new RunResponse(record.runId(), record.threadId(), record.modelName(), record.status(), record.error(),
-                record.createdAt(), record.updatedAt());
+                record.mode(), record.createdAt(), record.updatedAt());
     }
 }

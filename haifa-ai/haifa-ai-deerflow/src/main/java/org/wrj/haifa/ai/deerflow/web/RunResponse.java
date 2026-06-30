@@ -9,6 +9,7 @@ public record RunResponse(
         String modelName,
         RunStatus status,
         String error,
+        String mode,
         Instant createdAt,
         Instant updatedAt
 ) {

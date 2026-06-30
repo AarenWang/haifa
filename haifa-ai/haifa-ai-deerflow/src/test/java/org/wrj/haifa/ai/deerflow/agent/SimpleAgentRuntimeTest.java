@@ -4,11 +4,19 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.middleware.DynamicContextMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.TokenBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.ToolErrorHandlingMiddleware;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentEventStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunStatus;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
@@ -27,7 +35,33 @@ import reactor.test.StepVerifier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@SpringBootTest
+@ActiveProfiles("test")
 class SimpleAgentRuntimeTest {
+
+    @Autowired
+    private RunManager runManager;
+
+    @Autowired
+    private ThreadManager threadManager;
+
+    @Autowired
+    private MessageStore messageStore;
+
+    @Autowired
+    private AgentEventStore agentEventStore;
+
+    @Autowired
+    private ToolExecutionStore toolExecutionStore;
+
+    @Autowired
+    private ModelStepStore modelStepStore;
+
+    @Autowired
+    private ToolCallStore toolCallStore;
+
+    @Autowired
+    private AgentLoopRunStore agentLoopRunStore;
 
     @Test
     void streamsToolAndModelEvents() throws Exception {
@@ -40,15 +74,14 @@ class SimpleAgentRuntimeTest {
         properties.setMaxIterations(4);
 
         AgentModelClient modelClient = prompt -> Mono.just("model saw: " + prompt.userPrompt());
-        RunManager runManager = new RunManager();
-        ThreadManager threadManager = new ThreadManager();
-        MessageStore messageStore = new MessageStore();
         ToolRegistry tools = new ToolRegistry(List.of(
                 new CurrentTimeTool(),
                 new ListWorkspaceFilesTool(),
                 new ReadWorkspaceFileTool()));
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager, messageStore,
-                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()));
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore, toolExecutionStore,
+                modelStepStore, toolCallStore, agentLoopRunStore);
 
         List<AgentEvent> events = runtime.stream(new AgentRequest("thread-1",
                         "List workspace files and read \"note.md\"", null))
@@ -71,6 +104,10 @@ class SimpleAgentRuntimeTest {
         assertThat(threadManager.find("thread-1")).isPresent();
         assertThat(messageStore.listByThread("thread-1")).extracting(MessageRecord::role)
                 .contains(MessageRole.USER, MessageRole.TOOL, MessageRole.ASSISTANT);
+
+        // Verify persistence
+        assertThat(agentEventStore.findByRunId(runId)).isNotEmpty();
+        assertThat(toolExecutionStore.findByRunId(runId)).isNotEmpty();
     }
 
     @Test
@@ -80,12 +117,11 @@ class SimpleAgentRuntimeTest {
         properties.setSystemPrompt("test system");
 
         AgentModelClient modelClient = prompt -> Mono.error(new IllegalStateException("model down"));
-        RunManager runManager = new RunManager();
-        ThreadManager threadManager = new ThreadManager();
-        MessageStore messageStore = new MessageStore();
         ToolRegistry tools = new ToolRegistry(List.of());
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager, messageStore,
-                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()));
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore, toolExecutionStore,
+                modelStepStore, toolCallStore, agentLoopRunStore);
 
         StepVerifier.create(runtime.stream(new AgentRequest("thread-2", "hello", null)))
                 .recordWith(java.util.ArrayList::new)
@@ -100,6 +136,7 @@ class SimpleAgentRuntimeTest {
                             assertThat(run.status()).isEqualTo(RunStatus.FAILED));
                     assertThat(messageStore.listByThread("thread-2")).extracting(MessageRecord::role)
                             .contains(MessageRole.USER, MessageRole.SYSTEM);
+                    assertThat(agentEventStore.findByRunId(runId)).isNotEmpty();
                 })
                 .verifyComplete();
     }
@@ -111,12 +148,11 @@ class SimpleAgentRuntimeTest {
         properties.setSystemPrompt("test system");
 
         AgentModelClient modelClient = prompt -> Mono.just(prompt.userPrompt());
-        RunManager runManager = new RunManager();
-        ThreadManager threadManager = new ThreadManager();
-        MessageStore messageStore = new MessageStore();
         ToolRegistry tools = new ToolRegistry(List.of(new ExplodingTool()));
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager, messageStore,
-                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()));
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore, toolExecutionStore,
+                modelStepStore, toolCallStore, agentLoopRunStore);
 
         List<AgentEvent> events = runtime.stream(new AgentRequest("thread-3", "please explode", null))
                 .collectList()
@@ -146,12 +182,11 @@ class SimpleAgentRuntimeTest {
         properties.setCharBudget(5);
 
         AgentModelClient modelClient = prompt -> Mono.just("should not reach model");
-        RunManager runManager = new RunManager();
-        ThreadManager threadManager = new ThreadManager();
-        MessageStore messageStore = new MessageStore();
         ToolRegistry tools = new ToolRegistry(List.of());
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager, messageStore,
-                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()));
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore, toolExecutionStore,
+                modelStepStore, toolCallStore, agentLoopRunStore);
 
         StepVerifier.create(runtime.stream(new AgentRequest("thread-4", "this is a long message", null)))
                 .recordWith(java.util.ArrayList::new)
