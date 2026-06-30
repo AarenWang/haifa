@@ -21,6 +21,8 @@ function getPhaseFromEvent(type: string): AppPhase {
 export const initialState: AppState = {
   status: 'idle',
   phase: 'idle',
+  threads: [],
+  messages: [],
   events: [],
   uploads: [],
   selectedUploadIds: [],
@@ -44,6 +46,8 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         phase: 'preparing',
         lastRequest: action.payload,
         threadId: action.payload.threadId,
+        threads: state.threads,
+        messages: state.messages,
         uploads: state.uploads,
         selectedUploadIds: state.selectedUploadIds,
         runHistory: [entry, ...state.runHistory],
@@ -122,6 +126,21 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         status: 'failed',
         error: action.payload,
       };
+    case 'SET_THREAD_ID':
+      return {
+        ...state,
+        threadId: action.payload,
+      };
+    case 'SET_THREADS':
+      return {
+        ...state,
+        threads: action.payload,
+      };
+    case 'SET_MESSAGES':
+      return {
+        ...state,
+        messages: action.payload,
+      };
     case 'STOP_RUN':
       return {
         ...state,
@@ -132,6 +151,8 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       return {
         ...initialState,
         lastRequest: state.lastRequest,
+        threads: state.threads,
+        messages: state.threadId ? state.messages : [],
         uploads: state.uploads,
         selectedUploadIds: state.selectedUploadIds,
         runHistory: state.runHistory,
@@ -144,6 +165,8 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         phase: 'preparing',
         lastRequest: state.lastRequest,
         threadId: state.lastRequest.threadId,
+        threads: state.threads,
+        messages: state.messages,
         uploads: state.uploads,
         selectedUploadIds: state.selectedUploadIds,
         runHistory: state.runHistory,

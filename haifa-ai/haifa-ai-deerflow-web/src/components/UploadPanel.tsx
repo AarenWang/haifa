@@ -74,6 +74,10 @@ export default function UploadPanel({
 
   const uploadFiles = async (files: File[]) => {
     if (files.length === 0) return;
+    if (!threadId) {
+      setUploadError('Select a thread or send a message before uploading files.');
+      return;
+    }
     setUploading(true);
     setUploadError(null);
 
@@ -144,11 +148,17 @@ export default function UploadPanel({
       </div>
 
       <div
-        className={`upload-dropzone ${isDragging ? 'dragging' : ''} ${uploading ? 'uploading' : ''}`}
+        className={`upload-dropzone ${isDragging ? 'dragging' : ''} ${uploading ? 'uploading' : ''} ${!threadId ? 'disabled' : ''}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
+        onClick={() => {
+          if (threadId) {
+            fileInputRef.current?.click();
+          } else {
+            setUploadError('Select a thread or send a message before uploading files.');
+          }
+        }}
       >
         <input
           ref={fileInputRef}
@@ -165,7 +175,9 @@ export default function UploadPanel({
         ) : (
           <>
             <Upload size={20} className="upload-dropzone-icon" />
-            <span className="upload-dropzone-text">Drop files or click to upload</span>
+            <span className="upload-dropzone-text">
+              {threadId ? 'Drop files or click to upload' : 'Start a thread before uploading'}
+            </span>
           </>
         )}
       </div>

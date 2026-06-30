@@ -1,6 +1,8 @@
 package org.wrj.haifa.ai.deerflow.run;
 
 import java.time.Instant;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,6 +25,13 @@ public class RunManager {
 
     public Optional<RunRecord> find(String runId) {
         return Optional.ofNullable(this.runs.get(runId));
+    }
+
+    public List<RunRecord> listByThread(String threadId) {
+        return this.runs.values().stream()
+                .filter(record -> record.threadId().equals(threadId))
+                .sorted(Comparator.comparing(RunRecord::createdAt).reversed())
+                .toList();
     }
 
     public RunRecord markRunning(String runId) {

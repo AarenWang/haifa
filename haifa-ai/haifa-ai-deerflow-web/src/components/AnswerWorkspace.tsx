@@ -1,10 +1,12 @@
 import { useRef, useEffect, useState } from 'react';
 import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw } from 'lucide-react';
-import type { AppPhase, AppStatus } from '../types';
+import type { AppPhase, AppStatus, MessageRecord } from '../types';
+import { renderMarkdown } from '../utils/markdownRenderer';
 
 interface AnswerWorkspaceProps {
   phase: AppPhase;
   status: AppStatus;
+  messages: MessageRecord[];
   finalAnswer?: string;
   error?: string;
   onReRun?: () => void;
@@ -22,6 +24,7 @@ const phaseLabels: Record<AppPhase, string> = {
 export default function AnswerWorkspace({
   phase,
   status,
+  messages,
   finalAnswer,
   error,
   onReRun,
@@ -29,16 +32,26 @@ export default function AnswerWorkspace({
   const panelRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
 
+  const visibleMessages = messages.filter((message) =>
+    message.role === 'USER' || message.role === 'ASSISTANT'
+  );
+  const hasAssistantContent = visibleMessages.some((message) => message.role === 'ASSISTANT');
+
   useEffect(() => {
-    if (status === 'running' && panelRef.current) {
-      panelRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (panelRef.current) {
+      panelRef.current.scrollTop = panelRef.current.scrollHeight;
     }
-  }, [status]);
+  }, [visibleMessages.length, status]);
 
   const handleCopy = async () => {
-    if (!finalAnswer) return;
+    const assistantMessages = visibleMessages
+      .filter((message) => message.role === 'ASSISTANT')
+      .map((message) => message.content)
+      .join('\n\n');
+    const copyText = assistantMessages || finalAnswer;
+    if (!copyText) return;
     try {
-      await navigator.clipboard.writeText(finalAnswer);
+      await navigator.clipboard.writeText(copyText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -46,17 +59,16 @@ export default function AnswerWorkspace({
     }
   };
 
-  const isEmpty =
-    status === 'idle' && !finalAnswer && !error;
+  const isEmpty = status === 'idle' && visibleMessages.length === 0 && !finalAnswer && !error;
 
   return (
     <div className="answer-panel" ref={panelRef}>
       <div className="answer-panel-header">
-        <div className="answer-panel-title">Answer</div>
-        {finalAnswer && (
+        <div className="answer-panel-title">Conversation</div>
+        {hasAssistantContent && (
           <button type="button" className="btn btn-ghost" onClick={handleCopy}>
             {copied ? <Check size={16} /> : <Copy size={16} />}
-            {copied ? 'Copied' : 'Copy answer'}
+            {copied ? 'Copied' : 'Copy answers'}
           </button>
         )}
       </div>
@@ -64,12 +76,29 @@ export default function AnswerWorkspace({
       {isEmpty ? (
         <div className="answer-empty">
           <Inbox size={40} className="empty-icon" />
-          <span>
-            Enter a task above and click <strong>Run</strong> to get started.
-          </span>
+          <span>Select a thread or send a message to start a conversation.</span>
         </div>
       ) : (
         <>
+          {visibleMessages.length > 0 && (
+            <div className="conversation-list">
+              {visibleMessages.map((message) => (
+                <div
+                  key={message.messageId}
+                  className={`conversation-message ${message.role.toLowerCase()}`}
+                >
+                  <div className="conversation-message-role">
+                    {message.role === 'USER' ? 'You' : 'DeerFlow'}
+                  </div>
+                  <div
+                    className="conversation-message-content"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
           {status === 'running' && (
             <div className={`phase-indicator ${phase}`}>
               <div className="spinner" />
@@ -78,20 +107,7 @@ export default function AnswerWorkspace({
           )}
 
           {status === 'stopped' && (
-            <div
-              style={{
-                padding: '10px 12px',
-                borderRadius: 'var(--radius)',
-                background: 'var(--accent-amber-light)',
-                color: 'var(--accent-amber)',
-                fontSize: 14,
-                fontWeight: 600,
-                marginBottom: 12,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
+            <div className="stopped-card">
               <Loader2 size={16} style={{ opacity: 0.7 }} />
               Stopped locally
             </div>
@@ -119,11 +135,8 @@ export default function AnswerWorkspace({
             </div>
           )}
 
-          {finalAnswer && (
-            <div
-              className="answer-content"
-              style={{ whiteSpace: 'pre-wrap' }}
-            >
+          {visibleMessages.length === 0 && finalAnswer && (
+            <div className="answer-content" style={{ whiteSpace: 'pre-wrap' }}>
               {finalAnswer}
             </div>
           )}

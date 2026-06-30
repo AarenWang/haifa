@@ -1,7 +1,14 @@
 import { useReducer, useRef, useCallback, useEffect, useState } from 'react';
 import type { RunRequest, UploadRecord } from './types';
 import { deerflowReducer, initialState } from './state/deerflowReducer';
-import { readDeerFlowStream, checkBackendHealth, listUploads, deleteUpload } from './api/deerflowClient';
+import {
+  readDeerFlowStream,
+  checkBackendHealth,
+  listUploads,
+  deleteUpload,
+  listThreads,
+  listThreadMessages,
+} from './api/deerflowClient';
 import Header from './components/Header';
 import TaskComposer from './components/TaskComposer';
 import AnswerWorkspace from './components/AnswerWorkspace';
@@ -11,9 +18,40 @@ import WorkspaceSidebar from './components/WorkspaceSidebar';
 function App() {
   const [state, dispatch] = useReducer(deerflowReducer, initialState);
   const abortRef = useRef<AbortController | null>(null);
-  const defaultThreadIdRef = useRef(createDefaultThreadId());
-  const effectiveThreadId = state.threadId || defaultThreadIdRef.current;
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'unknown'>('unknown');
+
+  useEffect(() => {
+    const threadId = getThreadIdFromUrl();
+    if (threadId) {
+      dispatch({ type: 'SET_THREAD_ID', payload: threadId });
+    }
+  }, []);
+
+  useEffect(() => {
+    syncThreadIdToUrl(state.threadId);
+  }, [state.threadId]);
+
+  const refreshThreads = useCallback(async () => {
+    try {
+      const data = await listThreads();
+      dispatch({ type: 'SET_THREADS', payload: data.threads });
+    } catch {
+      // Threads are optional for offline development; runs will still upsert them.
+    }
+  }, []);
+
+  const refreshMessages = useCallback(async (threadId?: string) => {
+    if (!threadId) {
+      dispatch({ type: 'SET_MESSAGES', payload: [] });
+      return;
+    }
+    try {
+      const data = await listThreadMessages(threadId);
+      dispatch({ type: 'SET_MESSAGES', payload: data.messages });
+    } catch {
+      dispatch({ type: 'SET_MESSAGES', payload: [] });
+    }
+  }, []);
 
   // Poll backend health
   useEffect(() => {
@@ -32,12 +70,24 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    refreshThreads();
+  }, [refreshThreads]);
+
+  useEffect(() => {
+    refreshMessages(state.threadId);
+  }, [refreshMessages, state.threadId]);
+
   // Load uploads on mount
   useEffect(() => {
     let mounted = true;
     const load = async () => {
+      if (!state.threadId) {
+        dispatch({ type: 'SET_UPLOADS', payload: [] });
+        return;
+      }
       try {
-        const data = await listUploads(effectiveThreadId);
+        const data = await listUploads(state.threadId);
         if (mounted) {
           dispatch({ type: 'SET_UPLOADS', payload: data.uploads });
         }
@@ -49,7 +99,7 @@ function App() {
     return () => {
       mounted = false;
     };
-  }, [effectiveThreadId]);
+  }, [state.threadId]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -70,7 +120,7 @@ function App() {
 
       const fullReq: RunRequest = {
         ...req,
-        threadId: req.threadId || effectiveThreadId,
+        threadId: req.threadId || state.threadId || undefined,
         uploadedFileIds: state.selectedUploadIds.length > 0 ? state.selectedUploadIds : undefined,
       };
 
@@ -81,6 +131,15 @@ function App() {
         {
           onEvent: (evt) => {
             dispatch({ type: 'ADD_EVENT', payload: evt });
+            if (
+              evt.type === 'RUN_STARTED' ||
+              evt.type === 'MODEL_COMPLETED' ||
+              evt.type === 'RUN_COMPLETED' ||
+              evt.type === 'RUN_FAILED'
+            ) {
+              refreshThreads();
+              refreshMessages(evt.threadId);
+            }
           },
           onError: (err) => {
             dispatch({ type: 'SET_ERROR', payload: err });
@@ -97,7 +156,7 @@ function App() {
         abortRef.current = null;
       });
     },
-    [effectiveThreadId, state.selectedUploadIds]
+    [refreshMessages, refreshThreads, state.selectedUploadIds, state.threadId]
   );
 
   const handleStop = useCallback(() => {
@@ -131,15 +190,41 @@ function App() {
   }, []);
 
   const handleClearUploads = useCallback(async () => {
+    if (!state.threadId) {
+      dispatch({ type: 'SET_UPLOADS', payload: [] });
+      return;
+    }
     for (const upload of state.uploads) {
       try {
-        await deleteUpload(upload.fileId, effectiveThreadId);
+        await deleteUpload(upload.fileId, state.threadId);
       } catch (err) {
         console.error('Failed to delete upload', err);
       }
     }
     dispatch({ type: 'SET_UPLOADS', payload: [] });
-  }, [effectiveThreadId, state.uploads]);
+  }, [state.threadId, state.uploads]);
+
+  const handleSelectThread = useCallback((threadId: string) => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    dispatch({ type: 'CLEAR' });
+    dispatch({ type: 'SET_UPLOADS', payload: [] });
+    dispatch({ type: 'SET_MESSAGES', payload: [] });
+    dispatch({ type: 'SET_THREAD_ID', payload: threadId });
+  }, []);
+
+  const handleNewThread = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    dispatch({ type: 'CLEAR' });
+    dispatch({ type: 'SET_UPLOADS', payload: [] });
+    dispatch({ type: 'SET_MESSAGES', payload: [] });
+    dispatch({ type: 'SET_THREAD_ID' });
+  }, []);
 
   return (
     <div className="app">
@@ -149,8 +234,10 @@ function App() {
           backendStatus={backendStatus}
           uploads={state.uploads}
           selectedUploadIds={state.selectedUploadIds}
-          threadId={effectiveThreadId}
-          runHistory={state.runHistory}
+          threadId={state.threadId}
+          threads={state.threads}
+          onSelectThread={handleSelectThread}
+          onNewThread={handleNewThread}
           onUploadsChange={handleUploadsChange}
           onToggleUploadSelection={handleToggleUploadSelection}
           onRemoveUpload={handleRemoveUpload}
@@ -168,6 +255,7 @@ function App() {
           <AnswerWorkspace
             phase={state.phase}
             status={state.status}
+            messages={state.messages}
             finalAnswer={state.finalAnswer}
             error={state.error}
             onReRun={state.status === 'failed' ? handleReRun : undefined}
@@ -179,11 +267,24 @@ function App() {
   );
 }
 
-function createDefaultThreadId() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
+function getThreadIdFromUrl() {
+  if (typeof window === 'undefined') {
+    return undefined;
   }
-  return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return new URLSearchParams(window.location.search).get('threadId') || undefined;
+}
+
+function syncThreadIdToUrl(threadId?: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const url = new URL(window.location.href);
+  if (threadId) {
+    url.searchParams.set('threadId', threadId);
+  } else {
+    url.searchParams.delete('threadId');
+  }
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
 export default App;

@@ -1,14 +1,10 @@
 import {
   Server,
   Trash2,
-  Clock,
-  CheckCircle,
-  AlertTriangle,
-  Square,
-  XCircle,
-  Loader2,
+  MessageSquare,
+  Plus,
 } from 'lucide-react';
-import type { UploadRecord, RunHistoryEntry, AppStatus } from '../types';
+import type { UploadRecord, ThreadRecord } from '../types';
 import UploadPanel from './UploadPanel';
 
 interface WorkspaceSidebarProps {
@@ -16,42 +12,28 @@ interface WorkspaceSidebarProps {
   uploads: UploadRecord[];
   selectedUploadIds: string[];
   threadId?: string;
-  runHistory: RunHistoryEntry[];
+  threads: ThreadRecord[];
+  onSelectThread: (threadId: string) => void;
+  onNewThread: () => void;
   onUploadsChange: (uploads: UploadRecord[]) => void;
   onToggleUploadSelection: (fileId: string) => void;
   onRemoveUpload: (fileId: string) => void;
   onClearUploads: () => void;
 }
 
-const statusIcon: Record<AppStatus, React.ReactNode> = {
-  idle: <Square size={12} />,
-  running: <Loader2 size={12} className="spin-icon" />,
-  completed: <CheckCircle size={12} />,
-  failed: <XCircle size={12} />,
-  stopped: <AlertTriangle size={12} />,
-};
-
-const statusColor: Record<AppStatus, string> = {
-  idle: 'var(--text-muted)',
-  running: 'var(--accent-blue)',
-  completed: 'var(--accent-green)',
-  failed: 'var(--accent-red)',
-  stopped: 'var(--accent-amber)',
-};
-
 export default function WorkspaceSidebar({
   backendStatus,
   uploads,
   selectedUploadIds,
   threadId,
-  runHistory,
+  threads,
+  onSelectThread,
+  onNewThread,
   onUploadsChange,
   onToggleUploadSelection,
   onRemoveUpload,
   onClearUploads,
 }: WorkspaceSidebarProps) {
-  const recentRuns = runHistory.slice(0, 5);
-
   return (
     <aside className="workspace-sidebar">
       <div className="sidebar-section">
@@ -64,6 +46,42 @@ export default function WorkspaceSidebar({
           />
           <span className="backend-label">{backendStatus}</span>
         </div>
+      </div>
+
+      <div className="sidebar-section sidebar-thread-section">
+        <div className="sidebar-section-header">
+          <MessageSquare size={14} />
+          <span>Threads</span>
+          <span className="sidebar-count">{threads.length}</span>
+          <button
+            type="button"
+            className="sidebar-icon-btn"
+            onClick={onNewThread}
+            title="New thread"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+        {threads.length === 0 ? (
+          <div className="sidebar-empty">Send a message to create a thread</div>
+        ) : (
+          <div className="thread-list">
+            {threads.map((thread) => {
+              const selected = thread.threadId === threadId;
+              return (
+                <button
+                  type="button"
+                  key={thread.threadId}
+                  className={`thread-item ${selected ? 'selected' : ''}`}
+                  onClick={() => onSelectThread(thread.threadId)}
+                >
+                  <span className="thread-title">{thread.title || 'New thread'}</span>
+                  <span className="thread-meta">{formatDate(thread.updatedAt)}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="sidebar-section">
@@ -84,38 +102,6 @@ export default function WorkspaceSidebar({
             <Trash2 size={14} />
             Clear all uploads
           </button>
-        )}
-      </div>
-
-      <div className="sidebar-section">
-        <div className="sidebar-section-header">
-          <Clock size={14} />
-          <span>Recent Runs</span>
-          <span className="sidebar-count">{runHistory.length}</span>
-        </div>
-        {recentRuns.length === 0 ? (
-          <div className="sidebar-empty">No runs yet</div>
-        ) : (
-          <div className="run-history-list">
-            {recentRuns.map((run) => (
-              <div key={run.runId + run.startedAt} className="run-history-item">
-                <span
-                  className="run-history-icon"
-                  style={{ color: statusColor[run.status] }}
-                >
-                  {statusIcon[run.status]}
-                </span>
-                <div className="run-history-info">
-                  <div className="run-history-message" title={run.message}>
-                    {run.message}
-                  </div>
-                  <div className="run-history-meta">
-                    {run.model || 'default'} · {formatDate(run.startedAt)}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
         )}
       </div>
     </aside>

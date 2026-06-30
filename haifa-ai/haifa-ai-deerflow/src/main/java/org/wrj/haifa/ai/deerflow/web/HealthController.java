@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
+import org.wrj.haifa.ai.deerflow.thread.MessageStore;
+import org.wrj.haifa.ai.deerflow.thread.ThreadManager;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.upload.UploadStorageService;
 
@@ -21,13 +23,18 @@ public class HealthController {
     private final DeerFlowProperties properties;
     private final ToolRegistry toolRegistry;
     private final RunManager runManager;
+    private final ThreadManager threadManager;
+    private final MessageStore messageStore;
     private final UploadStorageService uploadStorageService;
 
     public HealthController(DeerFlowProperties properties, ToolRegistry toolRegistry,
-                            RunManager runManager, UploadStorageService uploadStorageService) {
+                            RunManager runManager, ThreadManager threadManager, MessageStore messageStore,
+                            UploadStorageService uploadStorageService) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.runManager = runManager;
+        this.threadManager = threadManager;
+        this.messageStore = messageStore;
         this.uploadStorageService = uploadStorageService;
     }
 
@@ -41,6 +48,8 @@ public class HealthController {
         body.put("maxUploadBytes", properties.getMaxUploadBytes());
         body.put("toolCount", toolRegistry.tools().size());
         body.put("runCount", runManager.count());
+        body.put("threadCount", threadManager.count());
+        body.put("messageCount", messageStore.count());
         body.put("uploadCount", uploadStorageService.count());
         return Mono.just(body);
     }

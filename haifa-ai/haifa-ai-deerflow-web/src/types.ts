@@ -35,6 +35,36 @@ export interface RunResponse {
   updatedAt: string;
 }
 
+export type ThreadStatus = 'ACTIVE' | 'ARCHIVED';
+export type MessageRole = 'USER' | 'ASSISTANT' | 'TOOL' | 'SYSTEM';
+
+export interface ThreadRecord {
+  threadId: string;
+  title: string;
+  status: ThreadStatus;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ThreadListResponse {
+  threads: ThreadRecord[];
+}
+
+export interface MessageRecord {
+  messageId: string;
+  threadId: string;
+  runId: string;
+  role: MessageRole;
+  content: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface MessageListResponse {
+  messages: MessageRecord[];
+}
+
 export type AppStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
 
 export type AppPhase =
@@ -92,6 +122,8 @@ export interface AppState {
   phase: AppPhase;
   runId?: string;
   threadId?: string;
+  threads: ThreadRecord[];
+  messages: MessageRecord[];
   events: DeerFlowEvent[];
   finalAnswer?: string;
   error?: string;
@@ -106,6 +138,9 @@ export type AppAction =
   | { type: 'ADD_EVENT'; payload: DeerFlowEvent }
   | { type: 'SET_FINAL_ANSWER'; payload: string }
   | { type: 'SET_ERROR'; payload: string }
+  | { type: 'SET_THREAD_ID'; payload?: string }
+  | { type: 'SET_THREADS'; payload: ThreadRecord[] }
+  | { type: 'SET_MESSAGES'; payload: MessageRecord[] }
   | { type: 'STOP_RUN' }
   | { type: 'CLEAR' }
   | { type: 'RE_RUN' }

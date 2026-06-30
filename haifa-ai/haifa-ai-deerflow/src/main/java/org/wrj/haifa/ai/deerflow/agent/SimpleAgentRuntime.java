@@ -23,6 +23,10 @@ import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.skill.SlashSkillResolver;
+import org.wrj.haifa.ai.deerflow.thread.MessageRole;
+import org.wrj.haifa.ai.deerflow.thread.MessageStore;
+import org.wrj.haifa.ai.deerflow.thread.ThreadManager;
+import org.wrj.haifa.ai.deerflow.thread.ThreadRecord;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
@@ -40,6 +44,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final ToolRegistry toolRegistry;
     private final AgentModelClient modelClient;
     private final RunManager runManager;
+    private final ThreadManager threadManager;
+    private final MessageStore messageStore;
     private final List<AgentMiddleware> middlewares;
 
     @Autowired(required = false)
@@ -49,11 +55,13 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private SlashSkillResolver slashSkillResolver;
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
-            RunManager runManager, List<AgentMiddleware> middlewares) {
+            RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
         this.runManager = runManager;
+        this.threadManager = threadManager;
+        this.messageStore = messageStore;
         this.middlewares = middlewares.stream()
                 .sorted(Comparator.comparingInt(m -> {
                     MiddlewareOrder order = m.getClass().getAnnotation(MiddlewareOrder.class);
@@ -66,11 +74,16 @@ public class SimpleAgentRuntime implements AgentRuntime {
     public Flux<AgentEvent> stream(AgentRequest request) {
         return Flux.defer(() -> {
             long runStartTime = System.currentTimeMillis();
-            String threadId = StringUtils.hasText(request.threadId()) ? request.threadId() : UUID.randomUUID().toString();
+            String requestedThreadId = StringUtils.hasText(request.threadId()) ? request.threadId() : UUID.randomUUID().toString();
+            ThreadRecord thread = this.threadManager.upsert(requestedThreadId,
+                    ThreadManager.titleFromMessage(request.message()), Map.of("source", "run"));
+            String threadId = thread.threadId();
             String modelName = StringUtils.hasText(request.model()) ? request.model() : this.properties.getModel();
             int uploadedFileCount = request.uploadedFileIds() == null ? 0 : request.uploadedFileIds().size();
             RunRecord run = this.runManager.create(threadId, modelName, Map.of("source", "sse", "uploadedFiles", uploadedFileCount));
             this.runManager.markRunning(run.runId());
+            this.messageStore.add(threadId, run.runId(), MessageRole.USER, request.message(),
+                    Map.of("uploadedFileCount", uploadedFileCount));
             log.info("Run started. runId={}, threadId={}, model={}, uploadedFileCount={}", run.runId(), threadId, nullToEmpty(modelName), uploadedFileCount);
 
             AgentRunConfig config = new AgentRunConfig(threadId, run.runId(), modelName, true, false,
@@ -83,6 +96,10 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
             List<Skill> activeSkills = resolveActiveSkills(request);
             List<ToolResult> toolResults = executePlannedTools(request, config, seq, prefixEvents, activeSkills);
+            for (ToolResult toolResult : toolResults) {
+                this.messageStore.add(threadId, run.runId(), MessageRole.TOOL, toolResult.content(),
+                        Map.of("tool", toolResult.toolName()));
+            }
 
             AgentRuntimeContext runtimeContext = AgentRuntimeContext.of(config, request, toolResults, this.properties, activeSkills);
             Mono<ModelPrompt> promptMono = new MiddlewareChain(this.middlewares).next(runtimeContext);
@@ -91,6 +108,10 @@ public class SimpleAgentRuntime implements AgentRuntime {
             Flux<AgentEvent> modelAndTerminalEvents = promptMono.flatMapMany(prompt -> {
                 if (prompt.userPrompt() != null && prompt.userPrompt().startsWith("BUDGET_EXCEEDED:")) {
                     this.runManager.markCompleted(run.runId());
+                    this.threadManager.touch(threadId);
+                    this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
+                            "Budget exceeded: request + observations too large.",
+                            Map.of("budgetExceeded", true, "toolCount", toolResults.size()));
                     long totalDuration = System.currentTimeMillis() - runStartTime;
                     log.info("Run completed with budget limit. runId={}, totalDurationMs={}, toolCount={}", run.runId(), totalDuration, toolResults.size());
                     return Flux.fromIterable(List.of(
@@ -107,6 +128,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
                         this.modelClient.generate(prompt)
                                 .flatMapMany(answer -> {
                                     this.runManager.markCompleted(run.runId());
+                                    this.threadManager.touch(threadId);
+                                    this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, answer,
+                                            Map.of("toolCount", toolResults.size()));
                                     long modelDuration = System.currentTimeMillis() - modelStartTime;
                                     long totalDuration = System.currentTimeMillis() - runStartTime;
                                     log.info("Run completed. runId={}, modelDurationMs={}, totalDurationMs={}, toolCount={}, answerLength={}",
@@ -124,6 +148,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                     log.error("DeerFlow run failed during model generation. runId={}, threadId={}, model={}, toolCount={}, totalDurationMs={}",
                                             run.runId(), threadId, nullToEmpty(modelName), toolResults.size(), totalDuration, ex);
                                     this.runManager.markFailed(run.runId(), errorMessage);
+                                    this.threadManager.touch(threadId);
+                                    this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
+                                            Map.of("status", "FAILED", "errorType", ex.getClass().getName()));
                                     return Flux.fromIterable(List.of(
                                             event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
                                                     Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))
@@ -137,6 +164,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
                         long totalDuration = System.currentTimeMillis() - runStartTime;
                         log.info("Run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
                         this.runManager.markCancelled(run.runId());
+                        this.threadManager.touch(threadId);
+                        this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, "Run cancelled",
+                                Map.of("status", "CANCELLED", "totalDurationMs", totalDuration));
                     });
         });
     }

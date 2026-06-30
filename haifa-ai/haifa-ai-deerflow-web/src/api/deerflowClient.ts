@@ -1,4 +1,11 @@
-import type { DeerFlowEvent, RunRequest } from '../types';
+import type {
+  DeerFlowEvent,
+  MessageListResponse,
+  RunRequest,
+  RunResponse,
+  ThreadListResponse,
+  ThreadRecord,
+} from '../types';
 
 export interface StreamHandlers {
   onEvent: (event: DeerFlowEvent) => void;
@@ -132,6 +139,49 @@ export async function readDeerFlowStream(
 
 export async function fetchRunStatus(runId: string): Promise<unknown> {
   const res = await fetch(`/api/deerflow/runs/${runId}`);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function createThread(payload: {
+  threadId?: string;
+  title?: string;
+  metadata?: Record<string, unknown>;
+} = {}): Promise<ThreadRecord> {
+  const res = await fetch('/api/deerflow/threads', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Thread creation failed');
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+export async function listThreads(): Promise<ThreadListResponse> {
+  const res = await fetch('/api/deerflow/threads', { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function listThreadRuns(threadId: string): Promise<{ runs: RunResponse[] }> {
+  const res = await fetch(`/api/deerflow/threads/${encodeURIComponent(threadId)}/runs`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function listThreadMessages(threadId: string): Promise<MessageListResponse> {
+  const res = await fetch(`/api/deerflow/threads/${encodeURIComponent(threadId)}/messages`, { method: 'GET' });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }
