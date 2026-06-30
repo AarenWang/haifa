@@ -5,16 +5,16 @@ import java.util.stream.Collectors;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.codec.multipart.FilePart;
+import org.springframework.http.codec.multipart.Part;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.server.ServerWebExchange;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.upload.ConversionStatus;
 import org.wrj.haifa.ai.deerflow.upload.DocumentConversionService;
@@ -40,13 +40,20 @@ public class UploadController {
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Mono<UploadResponse> upload(@RequestPart("file") FilePart filePart, @RequestParam(name = "threadId", required = false) String threadId) {
-        return Mono.fromCallable(() -> {
-            String requiredThreadId = requireThreadId(threadId);
-            UploadRecord record = uploadStorageService.store(filePart, requiredThreadId);
-            UploadRecord convertedRecord = documentConversionService.convert(record.getFileId());
-            return toResponse(convertedRecord);
-        }).subscribeOn(Schedulers.boundedElastic())
+    public Mono<UploadResponse> upload(ServerWebExchange exchange, @RequestParam(name = "threadId", required = false) String threadId) {
+        return exchange.getMultipartData()
+                .flatMap(parts -> {
+                    Part filePart = parts.getFirst("file");
+                    if (filePart == null) {
+                        return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "file part is required"));
+                    }
+                    return Mono.fromCallable(() -> {
+                        String requiredThreadId = requireThreadId(threadId);
+                        UploadRecord record = uploadStorageService.store(filePart, requiredThreadId);
+                        UploadRecord convertedRecord = documentConversionService.convert(record.getFileId());
+                        return toResponse(convertedRecord);
+                    }).subscribeOn(Schedulers.boundedElastic());
+                })
                 .onErrorMap(IllegalArgumentException.class, this::mapUploadException);
     }
 

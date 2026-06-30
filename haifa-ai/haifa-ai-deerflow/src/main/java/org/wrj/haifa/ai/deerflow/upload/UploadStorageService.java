@@ -15,7 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.core.io.buffer.DataBufferUtils;
-import org.springframework.http.codec.multipart.FilePart;
+import org.springframework.http.codec.multipart.Part;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
@@ -39,9 +39,9 @@ public class UploadStorageService {
                 .collect(Collectors.toSet());
     }
 
-    public UploadRecord store(FilePart filePart, String threadId) {
+    public UploadRecord store(Part filePart, String threadId) {
         long startTime = System.currentTimeMillis();
-        String originalFilename = filePart.filename();
+        String originalFilename = extractFilename(filePart);
 
         if (!StringUtils.hasText(threadId)) {
             throw new IllegalArgumentException("threadId is required for uploads");
@@ -118,6 +118,14 @@ public class UploadStorageService {
         } catch (IOException e) {
             throw new RuntimeException("Failed to store file: " + originalFilename, e);
         }
+    }
+
+    private static String extractFilename(Part part) {
+        if (part instanceof org.springframework.http.codec.multipart.FilePart) {
+            return ((org.springframework.http.codec.multipart.FilePart) part).filename();
+        }
+        String filename = part.headers().getContentDisposition().getFilename();
+        return filename != null ? filename : "unknown";
     }
 
     public UploadRecord find(String fileId) {

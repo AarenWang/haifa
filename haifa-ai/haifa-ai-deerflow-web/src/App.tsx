@@ -197,15 +197,35 @@ function App() {
     dispatch({ type: 'STOP_RUN' });
   }, []);
 
-  const handleClear = useCallback(() => {
-    dispatch({ type: 'CLEAR' });
-  }, []);
-
   const handleReRun = useCallback(() => {
     if (state.lastRequest) {
       handleRun(state.lastRequest);
     }
   }, [state.lastRequest, handleRun]);
+
+  const handleRefreshMessage = useCallback((messageId: string) => {
+    // Find the target assistant message in the full thread
+    const targetIndex = state.messages.findIndex((m) => m.messageId === messageId && m.role === 'ASSISTANT');
+    if (targetIndex === -1) return;
+    // Walk backwards to find the immediately preceding USER message
+    for (let i = targetIndex - 1; i >= 0; i--) {
+      const msg = state.messages[i];
+      if (msg.role === 'USER') {
+        const req: RunRequest = {
+          message: msg.content,
+          threadId: state.threadId,
+          model: state.lastRequest?.model,
+          mode: state.lastRequest?.mode || 'chat',
+          uploadedFileIds: state.selectedUploadIds.length > 0 ? state.selectedUploadIds : undefined,
+        };
+        if (state.lastRequest?.researchOptions) {
+          req.researchOptions = state.lastRequest.researchOptions;
+        }
+        handleRun(req);
+        return;
+      }
+    }
+  }, [state.messages, state.threadId, state.lastRequest, state.selectedUploadIds, handleRun]);
 
   const handleUploadsChange = useCallback((uploads: UploadRecord[]) => {
     dispatch({ type: 'SET_UPLOADS', payload: uploads });
@@ -243,6 +263,7 @@ function App() {
     dispatch({ type: 'SET_UPLOADS', payload: [] });
     dispatch({ type: 'SET_MESSAGES', payload: [] });
     dispatch({ type: 'SET_THREAD_ID', payload: threadId });
+    dispatch({ type: 'SET_LAST_REQUEST' });
   }, []);
 
   const handleNewThread = useCallback(() => {
@@ -254,6 +275,7 @@ function App() {
     dispatch({ type: 'SET_UPLOADS', payload: [] });
     dispatch({ type: 'SET_MESSAGES', payload: [] });
     dispatch({ type: 'SET_THREAD_ID' });
+    dispatch({ type: 'SET_LAST_REQUEST' });
   }, []);
 
   return (
@@ -274,14 +296,6 @@ function App() {
           onClearUploads={handleClearUploads}
         />
         <div className="workspace">
-          <TaskComposer
-            onRun={handleRun}
-            onStop={handleStop}
-            onClear={handleClear}
-            isRunning={state.status === 'running'}
-            lastRequest={state.lastRequest}
-            selectedUploadCount={state.selectedUploadIds.length}
-          />
           <AnswerWorkspace
             phase={state.phase}
             status={state.status}
@@ -289,6 +303,14 @@ function App() {
             finalAnswer={state.finalAnswer}
             error={state.error}
             onReRun={state.status === 'failed' ? handleReRun : undefined}
+            onRefreshMessage={handleRefreshMessage}
+          />
+          <TaskComposer
+            onRun={handleRun}
+            onStop={handleStop}
+            isRunning={state.status === 'running'}
+            lastRequest={state.lastRequest}
+            selectedUploadCount={state.selectedUploadIds.length}
           />
         </div>
         <ActivityTrace events={state.events} />

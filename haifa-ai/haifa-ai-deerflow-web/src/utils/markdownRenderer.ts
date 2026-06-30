@@ -19,7 +19,7 @@ export function renderMarkdown(text: string): string {
   // Code blocks (```) — must run before inline code
   html = html.replace(
     /```([\s\S]*?)```/g,
-    (_m, code) => `<pre><code>${code.trim()}</code></pre>`
+    (_m, code) => `<div class="code-block-wrapper"><div class="code-block-header"><button type="button" class="copy-code-btn" title="Copy code">复制</button></div><pre><code>${code.trim()}</code></pre></div>`
   );
 
   // Inline code (`)
@@ -102,7 +102,7 @@ export function renderMarkdown(text: string): string {
       }
       out.push(line);
     } else {
-      buffer += (buffer ? ' ' : '') + line;
+      buffer += (buffer ? '<br>' : '') + line;
     }
   }
   if (buffer.trim()) {

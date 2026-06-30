@@ -1,5 +1,5 @@
-import { useRef, useEffect, useState } from 'react';
-import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw } from 'lucide-react';
+import { useRef, useEffect, useState, useCallback } from 'react';
+import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw, RefreshCw } from 'lucide-react';
 import type { AppPhase, AppStatus, MessageRecord } from '../types';
 import { renderMarkdown } from '../utils/markdownRenderer';
 
@@ -10,6 +10,7 @@ interface AnswerWorkspaceProps {
   finalAnswer?: string;
   error?: string;
   onReRun?: () => void;
+  onRefreshMessage?: (messageId: string) => void;
 }
 
 const phaseLabels: Record<AppPhase, string> = {
@@ -28,9 +29,11 @@ export default function AnswerWorkspace({
   finalAnswer,
   error,
   onReRun,
+  onRefreshMessage,
 }: AnswerWorkspaceProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
 
   const visibleMessages = messages.filter((message) =>
     message.role === 'USER' || message.role === 'ASSISTANT'
@@ -43,7 +46,7 @@ export default function AnswerWorkspace({
     }
   }, [visibleMessages.length, status]);
 
-  const handleCopy = async () => {
+  const handleCopyAll = async () => {
     const assistantMessages = visibleMessages
       .filter((message) => message.role === 'ASSISTANT')
       .map((message) => message.content)
@@ -59,6 +62,33 @@ export default function AnswerWorkspace({
     }
   };
 
+  const handleCopyMessage = async (content: string, messageId: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMsgId(messageId);
+      setTimeout(() => setCopiedMsgId((id) => (id === messageId ? null : id)), 2000);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleCodeBlockClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    const btn = target.closest('.copy-code-btn') as HTMLButtonElement | null;
+    if (!btn) return;
+    const wrapper = btn.closest('.code-block-wrapper') as HTMLElement | null;
+    if (!wrapper) return;
+    const codeEl = wrapper.querySelector('pre code');
+    if (!codeEl) return;
+    const text = codeEl.textContent || '';
+    navigator.clipboard.writeText(text).catch(() => {});
+    const originalText = btn.textContent || '';
+    btn.textContent = '已复制';
+    setTimeout(() => {
+      btn.textContent = originalText;
+    }, 2000);
+  }, []);
+
   const isEmpty = status === 'idle' && visibleMessages.length === 0 && !finalAnswer && !error;
 
   return (
@@ -66,7 +96,7 @@ export default function AnswerWorkspace({
       <div className="answer-panel-header">
         <div className="answer-panel-title">Conversation</div>
         {hasAssistantContent && (
-          <button type="button" className="btn btn-ghost" onClick={handleCopy}>
+          <button type="button" className="btn btn-ghost" onClick={handleCopyAll}>
             {copied ? <Check size={16} /> : <Copy size={16} />}
             {copied ? 'Copied' : 'Copy answers'}
           </button>
@@ -81,7 +111,7 @@ export default function AnswerWorkspace({
       ) : (
         <>
           {visibleMessages.length > 0 && (
-            <div className="conversation-list">
+            <div className="conversation-list" onClick={handleCodeBlockClick}>
               {visibleMessages.map((message) => (
                 <div
                   key={message.messageId}
@@ -94,6 +124,30 @@ export default function AnswerWorkspace({
                     className="conversation-message-content"
                     dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
                   />
+                  {message.role === 'ASSISTANT' && (
+                    <div className="message-actions">
+                      <button
+                        type="button"
+                        className="message-action-btn"
+                        onClick={() => handleCopyMessage(message.content, message.messageId)}
+                        title="Copy markdown"
+                      >
+                        {copiedMsgId === message.messageId ? <Check size={14} /> : <Copy size={14} />}
+                        {copiedMsgId === message.messageId ? '已复制' : '复制'}
+                      </button>
+                      {onRefreshMessage && (
+                        <button
+                          type="button"
+                          className="message-action-btn"
+                          onClick={() => onRefreshMessage(message.messageId)}
+                          title="Regenerate"
+                        >
+                          <RefreshCw size={14} />
+                          刷新
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

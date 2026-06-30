@@ -177,7 +177,7 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 20px;
   gap: 20px;
   min-width: 0;
@@ -722,6 +722,7 @@ body {
   border-radius: var(--radius-lg);
   padding: 16px;
   box-shadow: var(--shadow-card);
+  flex-shrink: 0;
 }
 
 .composer-textarea {
@@ -894,9 +895,10 @@ body {
   padding: 20px;
   box-shadow: var(--shadow-card);
   flex: 1;
-  min-height: 180px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .answer-panel-header {
@@ -1089,6 +1091,73 @@ body {
   gap: 8px;
   margin-top: 12px;
   flex-wrap: wrap;
+}
+
+/* Code block copy button */
+.code-block-wrapper {
+  margin: 10px 0;
+  border-radius: var(--radius);
+  background: #1e1e1e;
+  overflow: hidden;
+}
+
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 10px;
+  background: #2d2d2d;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.copy-code-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #d4d4d4;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-family: var(--font-sans);
+  transition: background 0.15s, border-color 0.15s;
+}
+.copy-code-btn:hover {
+  background: #3c3c3c;
+  border-color: #888;
+}
+
+/* Message action buttons */
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding-left: 2px;
+}
+
+.message-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-family: var(--font-sans);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.message-action-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-color: var(--border);
 }
 
 /* ActivityTrace */

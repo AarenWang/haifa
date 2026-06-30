@@ -1,11 +1,10 @@
-import { Play, Square, RotateCcw, Trash2, ChevronDown, Copy, Check, Search, MessageCircle } from 'lucide-react';
+import { Play, Square, RotateCcw, ChevronDown, Copy, Check, Search, MessageCircle } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import type { RunRequest } from '../types';
 
 interface TaskComposerProps {
   onRun: (req: RunRequest) => void;
   onStop: () => void;
-  onClear: () => void;
   isRunning: boolean;
   lastRequest?: RunRequest;
   selectedUploadCount?: number;
@@ -14,7 +13,6 @@ interface TaskComposerProps {
 export default function TaskComposer({
   onRun,
   onStop,
-  onClear,
   isRunning,
   lastRequest,
   selectedUploadCount = 0,
@@ -126,15 +124,6 @@ export default function TaskComposer({
           )}
         </div>
         <div className="composer-right-actions">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={onClear}
-            title="Clear output"
-          >
-            <Trash2 size={16} />
-            Clear
-          </button>
           <button
             type="button"
             className={`advanced-toggle ${advancedOpen ? 'open' : ''}`}

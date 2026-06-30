@@ -247,11 +247,13 @@ export async function uploadFile(
 ): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append('file', file);
+
+  const url = new URL('/api/deerflow/uploads', window.location.origin);
   if (threadId) {
-    formData.append('threadId', threadId);
+    url.searchParams.set('threadId', threadId);
   }
 
-  const res = await fetch('/api/deerflow/uploads', {
+  const res = await fetch(url.toString(), {
     method: 'POST',
     body: formData,
   });

@@ -162,6 +162,11 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         ...state,
         events: action.payload,
       };
+    case 'SET_LAST_REQUEST':
+      return {
+        ...state,
+        lastRequest: action.payload,
+      };
     case 'STOP_RUN':
       return {
         ...state,
