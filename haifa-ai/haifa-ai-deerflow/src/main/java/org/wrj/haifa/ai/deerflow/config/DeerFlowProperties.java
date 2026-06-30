@@ -10,6 +10,10 @@ public class DeerFlowProperties {
     private String model;
     private String systemPrompt;
     private String workspaceRoot = ".";
+    private String skillsRoot = ".";
+    private boolean skillsEnabled = true;
+    private boolean mcpEnabled = false;
+    private boolean toolSearchEnabled = true;
 
     @Min(1)
     @Max(20)
@@ -40,6 +44,38 @@ public class DeerFlowProperties {
 
     public void setWorkspaceRoot(String workspaceRoot) {
         this.workspaceRoot = workspaceRoot;
+    }
+
+    public String getSkillsRoot() {
+        return skillsRoot;
+    }
+
+    public void setSkillsRoot(String skillsRoot) {
+        this.skillsRoot = skillsRoot;
+    }
+
+    public boolean isSkillsEnabled() {
+        return skillsEnabled;
+    }
+
+    public void setSkillsEnabled(boolean skillsEnabled) {
+        this.skillsEnabled = skillsEnabled;
+    }
+
+    public boolean isMcpEnabled() {
+        return mcpEnabled;
+    }
+
+    public void setMcpEnabled(boolean mcpEnabled) {
+        this.mcpEnabled = mcpEnabled;
+    }
+
+    public boolean isToolSearchEnabled() {
+        return toolSearchEnabled;
+    }
+
+    public void setToolSearchEnabled(boolean toolSearchEnabled) {
+        this.toolSearchEnabled = toolSearchEnabled;
     }
 
     public int getMaxIterations() {

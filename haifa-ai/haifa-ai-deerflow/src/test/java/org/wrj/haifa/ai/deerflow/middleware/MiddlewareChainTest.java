@@ -34,7 +34,7 @@ class MiddlewareChainTest {
         properties.setWorkspaceRoot(".");
         AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
         AgentRequest request = new AgentRequest("t", "hi", null);
-        AgentRuntimeContext context = new AgentRuntimeContext(config, request, List.of(), properties);
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, List.of(), properties);
 
         MiddlewareChain chain = new MiddlewareChain(List.of(first, second));
         StepVerifier.create(chain.next(context))
@@ -54,7 +54,7 @@ class MiddlewareChainTest {
 
         AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
         AgentRequest request = new AgentRequest("t", "hi", null);
-        AgentRuntimeContext context = new AgentRuntimeContext(config, request, List.of(), properties);
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, List.of(), properties);
 
         MiddlewareChain chain = new MiddlewareChain(List.of(
                 new DynamicContextMiddleware(),
@@ -81,7 +81,7 @@ class MiddlewareChainTest {
 
         AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
         AgentRequest request = new AgentRequest("t", "this is a long message", null);
-        AgentRuntimeContext context = new AgentRuntimeContext(config, request, List.of(), properties);
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, List.of(), properties);
 
         MiddlewareChain chain = new MiddlewareChain(List.of(
                 new DynamicContextMiddleware(),
@@ -105,7 +105,7 @@ class MiddlewareChainTest {
 
         AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
         AgentRequest request = new AgentRequest("t", "hi", null);
-        AgentRuntimeContext context = new AgentRuntimeContext(config, request, List.of(), properties);
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, List.of(), properties);
 
         MiddlewareChain chain = new MiddlewareChain(List.of(
                 new DynamicContextMiddleware(),
@@ -130,7 +130,7 @@ class MiddlewareChainTest {
 
         AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
         AgentRequest request = new AgentRequest("t", "a very long message that would exceed any small budget", null);
-        AgentRuntimeContext context = new AgentRuntimeContext(config, request, List.of(), properties);
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, List.of(), properties);
 
         MiddlewareChain chain = new MiddlewareChain(List.of(
                 new TokenBudgetMiddleware()
@@ -156,7 +156,7 @@ class MiddlewareChainTest {
 
         AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
         AgentRequest request = new AgentRequest("t", "hi", null);
-        AgentRuntimeContext context = new AgentRuntimeContext(config, request, results, properties);
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, results, properties);
 
         MiddlewareChain chain = new MiddlewareChain(List.of(
                 new ToolErrorHandlingMiddleware()

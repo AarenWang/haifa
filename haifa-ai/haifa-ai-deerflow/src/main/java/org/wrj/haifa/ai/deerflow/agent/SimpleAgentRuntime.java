@@ -9,6 +9,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
@@ -20,7 +21,10 @@ import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
+import org.wrj.haifa.ai.deerflow.skill.Skill;
+import org.wrj.haifa.ai.deerflow.skill.SlashSkillResolver;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
@@ -37,6 +41,12 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final AgentModelClient modelClient;
     private final RunManager runManager;
     private final List<AgentMiddleware> middlewares;
+
+    @Autowired(required = false)
+    private ToolPolicyService toolPolicyService;
+
+    @Autowired(required = false)
+    private SlashSkillResolver slashSkillResolver;
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
             RunManager runManager, List<AgentMiddleware> middlewares) {
@@ -68,9 +78,10 @@ public class SimpleAgentRuntime implements AgentRuntime {
             List<AgentEvent> prefixEvents = new ArrayList<>();
             prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Run started", Map.of()));
 
-            List<ToolResult> toolResults = executePlannedTools(request, config, seq, prefixEvents);
+            List<Skill> activeSkills = resolveActiveSkills(request);
+            List<ToolResult> toolResults = executePlannedTools(request, config, seq, prefixEvents, activeSkills);
 
-            AgentRuntimeContext runtimeContext = new AgentRuntimeContext(config, request, toolResults, this.properties);
+            AgentRuntimeContext runtimeContext = AgentRuntimeContext.of(config, request, toolResults, this.properties, activeSkills);
             Mono<ModelPrompt> promptMono = new MiddlewareChain(this.middlewares).next(runtimeContext);
 
             Flux<AgentEvent> modelAndTerminalEvents = promptMono.flatMapMany(prompt -> {
@@ -112,11 +123,26 @@ public class SimpleAgentRuntime implements AgentRuntime {
         });
     }
 
+    private List<Skill> resolveActiveSkills(AgentRequest request) {
+        if (this.slashSkillResolver == null || !this.properties.isSkillsEnabled()) {
+            return List.of();
+        }
+        return this.slashSkillResolver.resolve(request.message());
+    }
+
     private List<ToolResult> executePlannedTools(AgentRequest request, AgentRunConfig config, AtomicInteger seq,
-            List<AgentEvent> events) {
+            List<AgentEvent> events, List<Skill> activeSkills) {
         ToolRequest toolRequest = new ToolRequest(request.message(), config.workspaceRoot());
         List<ToolResult> results = new ArrayList<>();
         for (AgentTool tool : this.toolRegistry.plan(request.message(), config.maxIterations())) {
+            if (this.toolPolicyService != null && !this.toolPolicyService.isToolAllowed(tool.name(), activeSkills)) {
+                events.add(event(seq, config, AgentEventType.TOOL_STARTED, "Policy denied " + tool.name(),
+                        Map.of("tool", tool.name(), "denied", true)));
+                results.add(ToolResult.of(tool.name(), "Tool denied by policy: not in allowed-tools for active skills."));
+                events.add(event(seq, config, AgentEventType.TOOL_COMPLETED, "Tool denied by policy",
+                        Map.of("tool", tool.name(), "denied", true)));
+                continue;
+            }
             events.add(event(seq, config, AgentEventType.TOOL_STARTED, "Executing " + tool.name(),
                     Map.of("tool", tool.name(), "description", tool.description())));
             ToolResult result = executeToolSafely(tool, toolRequest);

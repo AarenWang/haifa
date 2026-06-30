@@ -5,7 +5,7 @@ import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import reactor.core.publisher.Mono;
 
 @Component
-@MiddlewareOrder(5)
+@MiddlewareOrder(20)
 public class TokenBudgetMiddleware implements AgentMiddleware {
 
     @Override
@@ -20,9 +20,9 @@ public class TokenBudgetMiddleware implements AgentMiddleware {
                 String msg = "Request + tool observations exceed the character budget ("
                         + total + "/" + budget + "). Please simplify your request.";
                 return new ModelPrompt(
-                        context.properties().getSystemPrompt(),
+                        prompt.systemPrompt(),
                         "BUDGET_EXCEEDED: " + msg,
-                        context.config().modelName()
+                        prompt.modelName()
                 );
             }
             return prompt;
