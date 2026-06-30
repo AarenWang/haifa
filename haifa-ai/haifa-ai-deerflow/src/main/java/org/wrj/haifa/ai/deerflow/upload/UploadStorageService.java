@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,10 @@ public class UploadStorageService {
         long startTime = System.currentTimeMillis();
         String originalFilename = filePart.filename();
 
+        if (!StringUtils.hasText(threadId)) {
+            throw new IllegalArgumentException("threadId is required for uploads");
+        }
+
         if (!StringUtils.hasText(originalFilename)) {
             throw new IllegalArgumentException("Filename must not be empty");
         }
@@ -50,7 +55,20 @@ public class UploadStorageService {
             throw new IllegalArgumentException("File extension not allowed: " + extension);
         }
 
-        DataBuffer joined = DataBufferUtils.join(filePart.content()).block();
+        // Pre-check size from Content-Length header if available
+        long contentLength = filePart.headers().getContentLength();
+        if (contentLength > 0 && contentLength > properties.getMaxUploadBytes()) {
+            throw new IllegalArgumentException(
+                    "File size exceeds maximum allowed: " + properties.getMaxUploadBytes() + " bytes");
+        }
+
+        DataBuffer joined;
+        try {
+            joined = DataBufferUtils.join(filePart.content(), maxUploadBytesAsInt()).block();
+        } catch (DataBufferLimitException e) {
+            throw new IllegalArgumentException(
+                    "File size exceeds maximum allowed: " + properties.getMaxUploadBytes() + " bytes", e);
+        }
         if (joined == null) {
             throw new IllegalArgumentException("Failed to read file content");
         }
@@ -105,17 +123,31 @@ public class UploadStorageService {
         return metadataStore.get(fileId);
     }
 
+    public UploadRecord findByFileIdAndThreadId(String fileId, String threadId) {
+        if (!StringUtils.hasText(threadId)) {
+            return null;
+        }
+        UploadRecord record = metadataStore.get(fileId);
+        if (record == null) {
+            return null;
+        }
+        if (!threadId.equals(record.getThreadId())) {
+            return null; // File does not belong to this thread
+        }
+        return record;
+    }
+
     public List<UploadRecord> list(String threadId) {
-        if (threadId == null) {
-            return List.copyOf(metadataStore.values());
+        if (!StringUtils.hasText(threadId)) {
+            return List.of(); // Return empty list instead of all files when no thread is specified
         }
         return metadataStore.values().stream()
                 .filter(r -> threadId.equals(r.getThreadId()))
                 .collect(Collectors.toList());
     }
 
-    public String readContent(String fileId) {
-        UploadRecord record = metadataStore.get(fileId);
+    public String readContent(String fileId, String threadId) {
+        UploadRecord record = findByFileIdAndThreadId(fileId, threadId);
         if (record == null) {
             throw new IllegalArgumentException("File not found: " + fileId);
         }
@@ -130,11 +162,12 @@ public class UploadStorageService {
         }
     }
 
-    public void delete(String fileId) {
-        UploadRecord record = metadataStore.remove(fileId);
+    public void delete(String fileId, String threadId) {
+        UploadRecord record = findByFileIdAndThreadId(fileId, threadId);
         if (record == null) {
             throw new IllegalArgumentException("File not found: " + fileId);
         }
+        metadataStore.remove(fileId);
         try {
             Path path = Path.of(record.getStoredPath());
             Files.deleteIfExists(path);
@@ -142,6 +175,10 @@ public class UploadStorageService {
         } catch (IOException e) {
             log.warn("Failed to delete file from disk: fileId={}, path={}", fileId, record.getStoredPath(), e);
         }
+    }
+
+    public int count() {
+        return metadataStore.size();
     }
 
     private static String getExtension(String filename) {
@@ -152,5 +189,9 @@ public class UploadStorageService {
     private static String sanitizeFilename(String filename) {
         String name = Path.of(filename).getFileName().toString();
         return name.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private int maxUploadBytesAsInt() {
+        return (int) Math.min(properties.getMaxUploadBytes(), Integer.MAX_VALUE);
     }
 }

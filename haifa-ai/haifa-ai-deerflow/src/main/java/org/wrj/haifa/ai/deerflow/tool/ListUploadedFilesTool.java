@@ -45,7 +45,7 @@ public class ListUploadedFilesTool implements AgentTool {
         }
 
         List<String> lines = fileIds.stream()
-                .map(uploadStorageService::find)
+                .map(fileId -> uploadStorageService.findByFileIdAndThreadId(fileId, request.threadId()))
                 .filter(r -> r != null)
                 .map(r -> "- " + r.getOriginalFilename() + " (id: " + r.getFileId() + ", size: " + r.getSize()
                         + " bytes, status: " + r.getConversionStatus() + ")")

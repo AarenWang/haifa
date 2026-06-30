@@ -45,6 +45,9 @@ local.properties
 # Log Files
 *.log
 
+# Runtime upload data
+haifa-ai/haifa-ai-deerflow/uploads/
+
 # Keystore files
 *.jks
 

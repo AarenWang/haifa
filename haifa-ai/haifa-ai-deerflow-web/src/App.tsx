@@ -1,7 +1,7 @@
 import { useReducer, useRef, useCallback, useEffect, useState } from 'react';
 import type { RunRequest, UploadRecord } from './types';
 import { deerflowReducer, initialState } from './state/deerflowReducer';
-import { readDeerFlowStream, checkBackendHealth, listUploads } from './api/deerflowClient';
+import { readDeerFlowStream, checkBackendHealth, listUploads, deleteUpload } from './api/deerflowClient';
 import Header from './components/Header';
 import TaskComposer from './components/TaskComposer';
 import AnswerWorkspace from './components/AnswerWorkspace';
@@ -11,6 +11,8 @@ import WorkspaceSidebar from './components/WorkspaceSidebar';
 function App() {
   const [state, dispatch] = useReducer(deerflowReducer, initialState);
   const abortRef = useRef<AbortController | null>(null);
+  const defaultThreadIdRef = useRef(createDefaultThreadId());
+  const effectiveThreadId = state.threadId || defaultThreadIdRef.current;
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'unknown'>('unknown');
 
   // Poll backend health
@@ -35,7 +37,7 @@ function App() {
     let mounted = true;
     const load = async () => {
       try {
-        const data = await listUploads(state.threadId);
+        const data = await listUploads(effectiveThreadId);
         if (mounted) {
           dispatch({ type: 'SET_UPLOADS', payload: data.uploads });
         }
@@ -47,7 +49,7 @@ function App() {
     return () => {
       mounted = false;
     };
-  }, [state.threadId]);
+  }, [effectiveThreadId]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -68,6 +70,7 @@ function App() {
 
       const fullReq: RunRequest = {
         ...req,
+        threadId: req.threadId || effectiveThreadId,
         uploadedFileIds: state.selectedUploadIds.length > 0 ? state.selectedUploadIds : undefined,
       };
 
@@ -94,7 +97,7 @@ function App() {
         abortRef.current = null;
       });
     },
-    [state.selectedUploadIds]
+    [effectiveThreadId, state.selectedUploadIds]
   );
 
   const handleStop = useCallback(() => {
@@ -127,10 +130,16 @@ function App() {
     dispatch({ type: 'REMOVE_UPLOAD', payload: fileId });
   }, []);
 
-  const handleClearUploads = useCallback(() => {
+  const handleClearUploads = useCallback(async () => {
+    for (const upload of state.uploads) {
+      try {
+        await deleteUpload(upload.fileId, effectiveThreadId);
+      } catch (err) {
+        console.error('Failed to delete upload', err);
+      }
+    }
     dispatch({ type: 'SET_UPLOADS', payload: [] });
-    // Stale selectedUploadIds are harmless; they will not match any uploads.
-  }, []);
+  }, [effectiveThreadId, state.uploads]);
 
   return (
     <div className="app">
@@ -140,7 +149,7 @@ function App() {
           backendStatus={backendStatus}
           uploads={state.uploads}
           selectedUploadIds={state.selectedUploadIds}
-          threadId={state.threadId}
+          threadId={effectiveThreadId}
           runHistory={state.runHistory}
           onUploadsChange={handleUploadsChange}
           onToggleUploadSelection={handleToggleUploadSelection}
@@ -168,6 +177,13 @@ function App() {
       </div>
     </div>
   );
+}
+
+function createDefaultThreadId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 export default App;

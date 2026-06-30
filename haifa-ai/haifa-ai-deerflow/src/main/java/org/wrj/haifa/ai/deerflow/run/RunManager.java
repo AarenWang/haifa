@@ -44,4 +44,8 @@ public class RunManager {
     private RunRecord updateStatus(String runId, RunStatus status) {
         return this.runs.computeIfPresent(runId, (ignored, existing) -> existing.withStatus(status));
     }
+
+    public int count() {
+        return this.runs.size();
+    }
 }

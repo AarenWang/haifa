@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.upload.ConversionStatus;
 import org.wrj.haifa.ai.deerflow.upload.DocumentConversionService;
 import org.wrj.haifa.ai.deerflow.upload.UploadContentResponse;
@@ -41,38 +42,45 @@ public class UploadController {
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Mono<UploadResponse> upload(@RequestPart("file") FilePart filePart, @RequestParam(name = "threadId", required = false) String threadId) {
         return Mono.fromCallable(() -> {
-            UploadRecord record = uploadStorageService.store(filePart, threadId);
+            String requiredThreadId = requireThreadId(threadId);
+            UploadRecord record = uploadStorageService.store(filePart, requiredThreadId);
             documentConversionService.convert(record.getFileId());
             return toResponse(record);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).subscribeOn(Schedulers.boundedElastic())
+                .onErrorMap(IllegalArgumentException.class, this::mapUploadException);
     }
 
     @GetMapping
     public Mono<UploadListResponse> list(@RequestParam(name = "threadId", required = false) String threadId) {
         return Mono.fromCallable(() -> {
-            List<UploadRecord> records = uploadStorageService.list(threadId);
+            String requiredThreadId = requireThreadId(threadId);
+            List<UploadRecord> records = uploadStorageService.list(requiredThreadId);
             List<UploadResponse> responses = records.stream()
                     .map(this::toResponse)
                     .collect(Collectors.toList());
             return new UploadListResponse(responses);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).subscribeOn(Schedulers.boundedElastic())
+                .onErrorMap(IllegalArgumentException.class, this::mapUploadException);
     }
 
     @GetMapping("/{fileId}")
-    public Mono<UploadResponse> get(@PathVariable String fileId) {
+    public Mono<UploadResponse> get(@PathVariable String fileId, @RequestParam(name = "threadId", required = false) String threadId) {
         return Mono.fromCallable(() -> {
-            UploadRecord record = uploadStorageService.find(fileId);
+            String requiredThreadId = requireThreadId(threadId);
+            UploadRecord record = uploadStorageService.findByFileIdAndThreadId(fileId, requiredThreadId);
             if (record == null) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found: " + fileId);
             }
             return toResponse(record);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).subscribeOn(Schedulers.boundedElastic())
+                .onErrorMap(IllegalArgumentException.class, this::mapUploadException);
     }
 
     @GetMapping("/{fileId}/content")
-    public Mono<UploadContentResponse> content(@PathVariable String fileId) {
+    public Mono<UploadContentResponse> content(@PathVariable String fileId, @RequestParam(name = "threadId", required = false) String threadId) {
         return Mono.fromCallable(() -> {
-            UploadRecord record = uploadStorageService.find(fileId);
+            String requiredThreadId = requireThreadId(threadId);
+            UploadRecord record = uploadStorageService.findByFileIdAndThreadId(fileId, requiredThreadId);
             if (record == null) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found: " + fileId);
             }
@@ -84,15 +92,22 @@ public class UploadController {
                     record.getFileId(),
                     record.getOriginalFilename(),
                     content);
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).subscribeOn(Schedulers.boundedElastic())
+                .onErrorMap(IllegalArgumentException.class, this::mapUploadException);
     }
 
     @DeleteMapping("/{fileId}")
-    public Mono<Void> delete(@PathVariable String fileId) {
+    public Mono<Void> delete(@PathVariable String fileId, @RequestParam(name = "threadId", required = false) String threadId) {
         return Mono.<Void>fromCallable(() -> {
-            uploadStorageService.delete(fileId);
+            String requiredThreadId = requireThreadId(threadId);
+            UploadRecord record = uploadStorageService.findByFileIdAndThreadId(fileId, requiredThreadId);
+            if (record == null) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found: " + fileId);
+            }
+            uploadStorageService.delete(fileId, requiredThreadId);
             return null;
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).subscribeOn(Schedulers.boundedElastic())
+                .onErrorMap(IllegalArgumentException.class, this::mapUploadException);
     }
 
     private UploadResponse toResponse(UploadRecord record) {
@@ -116,5 +131,19 @@ public class UploadController {
             case FAILED -> "failed";
             case UNSUPPORTED -> "failed";
         };
+    }
+
+    private static String requireThreadId(String threadId) {
+        if (!StringUtils.hasText(threadId)) {
+            throw new IllegalArgumentException("threadId is required");
+        }
+        return threadId.trim();
+    }
+
+    private ResponseStatusException mapUploadException(IllegalArgumentException ex) {
+        HttpStatus status = ex.getMessage() != null && ex.getMessage().contains("exceeds maximum allowed")
+                ? HttpStatus.PAYLOAD_TOO_LARGE
+                : HttpStatus.BAD_REQUEST;
+        return new ResponseStatusException(status, ex.getMessage(), ex);
     }
 }

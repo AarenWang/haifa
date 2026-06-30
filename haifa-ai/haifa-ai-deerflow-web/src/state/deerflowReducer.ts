@@ -31,7 +31,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'START_RUN': {
       const entry: AppState['runHistory'][0] = {
-        runId: state.runId || '',
+        runId: '',
         threadId: action.payload.threadId,
         message: action.payload.message,
         status: 'running',
@@ -152,6 +152,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         uploads: action.payload,
+        selectedUploadIds: action.payload.length === 0 ? [] : state.selectedUploadIds,
       };
     case 'ADD_UPLOAD':
       return {

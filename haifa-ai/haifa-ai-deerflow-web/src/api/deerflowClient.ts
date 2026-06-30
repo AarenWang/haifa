@@ -219,24 +219,36 @@ export async function listUploads(threadId?: string): Promise<UploadListResponse
   return res.json();
 }
 
-export async function getUpload(fileId: string): Promise<UploadRecord> {
-  const res = await fetch(`/api/deerflow/uploads/${fileId}`, { method: 'GET' });
+export async function getUpload(fileId: string, threadId?: string): Promise<UploadRecord> {
+  const url = new URL(`/api/deerflow/uploads/${fileId}`, window.location.origin);
+  if (threadId) {
+    url.searchParams.set('threadId', threadId);
+  }
+  const res = await fetch(url.toString(), { method: 'GET' });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }
   return res.json();
 }
 
-export async function getUploadContent(fileId: string): Promise<UploadContentResponse> {
-  const res = await fetch(`/api/deerflow/uploads/${fileId}/content`, { method: 'GET' });
+export async function getUploadContent(fileId: string, threadId?: string): Promise<UploadContentResponse> {
+  const url = new URL(`/api/deerflow/uploads/${fileId}/content`, window.location.origin);
+  if (threadId) {
+    url.searchParams.set('threadId', threadId);
+  }
+  const res = await fetch(url.toString(), { method: 'GET' });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }
   return res.json();
 }
 
-export async function deleteUpload(fileId: string): Promise<void> {
-  const res = await fetch(`/api/deerflow/uploads/${fileId}`, { method: 'DELETE' });
+export async function deleteUpload(fileId: string, threadId?: string): Promise<void> {
+  const url = new URL(`/api/deerflow/uploads/${fileId}`, window.location.origin);
+  if (threadId) {
+    url.searchParams.set('threadId', threadId);
+  }
+  const res = await fetch(url.toString(), { method: 'DELETE' });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }

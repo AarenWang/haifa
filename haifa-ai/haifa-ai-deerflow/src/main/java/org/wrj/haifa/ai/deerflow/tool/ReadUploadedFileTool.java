@@ -63,13 +63,13 @@ public class ReadUploadedFileTool implements AgentTool {
             return ToolResult.of(name(), "File ID not found in the current request's uploaded files: " + fileId);
         }
 
-        UploadRecord record = uploadStorageService.find(fileId);
+        UploadRecord record = uploadStorageService.findByFileIdAndThreadId(fileId, request.threadId());
         if (record == null) {
             return ToolResult.of(name(), "File not found: " + fileId);
         }
 
         try {
-            String content = uploadStorageService.readContent(fileId);
+            String content = uploadStorageService.readContent(fileId, request.threadId());
             if (content.length() > MAX_CHARS) {
                 content = content.substring(0, MAX_CHARS) + "\n...[truncated]";
             }

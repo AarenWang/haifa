@@ -150,9 +150,25 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
     private List<ToolResult> executePlannedTools(AgentRequest request, AgentRunConfig config, AtomicInteger seq,
             List<AgentEvent> events, List<Skill> activeSkills) {
-        ToolRequest toolRequest = new ToolRequest(request.message(), config.workspaceRoot(), request.uploadedFileIds());
+        ToolRequest toolRequest = new ToolRequest(request.message(), config.workspaceRoot(), request.uploadedFileIds(),
+                config.threadId());
         List<ToolResult> results = new ArrayList<>();
-        for (AgentTool tool : this.toolRegistry.plan(request.message(), config.maxIterations())) {
+
+        List<AgentTool> plannedTools = new ArrayList<>(this.toolRegistry.plan(request.message(), config.maxIterations()));
+
+        // If user has uploaded files, automatically include upload-related tools
+        if (request.uploadedFileIds() != null && !request.uploadedFileIds().isEmpty()) {
+            for (AgentTool tool : this.toolRegistry.tools()) {
+                String name = tool.name();
+                if ("read_uploaded_file".equals(name) || "list_uploaded_files".equals(name)) {
+                    if (!plannedTools.contains(tool)) {
+                        plannedTools.add(tool);
+                    }
+                }
+            }
+        }
+
+        for (AgentTool tool : plannedTools) {
             if (this.toolPolicyService != null && !this.toolPolicyService.isToolAllowed(tool.name(), activeSkills)) {
                 events.add(event(seq, config, AgentEventType.TOOL_STARTED, "Policy denied " + tool.name(),
                         Map.of("tool", tool.name(), "denied", true)));

@@ -104,7 +104,7 @@ export default function UploadPanel({
 
   const handleDelete = async (fileId: string) => {
     try {
-      await deleteUpload(fileId);
+      await deleteUpload(fileId, threadId);
       onRemoveUpload(fileId);
     } catch (err) {
       setUploadError(`Failed to delete: ${(err as Error).message}`);
@@ -114,7 +114,7 @@ export default function UploadPanel({
   const handlePreview = async (fileId: string, fileName: string) => {
     setPreviewLoading(true);
     try {
-      const data = await getUploadContent(fileId);
+      const data = await getUploadContent(fileId, threadId);
       setPreviewFile({ fileId, fileName, content: data.content });
     } catch (err) {
       setUploadError(`Failed to preview: ${(err as Error).message}`);
