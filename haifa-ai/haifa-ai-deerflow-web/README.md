@@ -6,9 +6,11 @@ A minimal, developer-friendly web interface for the DeerFlow agent runtime.
 
 ### 1. Start the backend
 
+From the repository root:
+
 ```bash
-cd haifa-ai/haifa-ai-deerflow
-mvn -pl haifa-ai/haifa-ai-deerflow spring-boot:run
+mvn -pl haifa-ai/haifa-ai-deerflow -am -Popenai clean install -DskipTests
+mvn -pl haifa-ai/haifa-ai-deerflow -Popenai spring-boot:run
 ```
 
 The backend runs at `http://localhost:8095`.
@@ -46,7 +48,7 @@ Navigate to `http://localhost:5173`.
 
 ## API Proxy
 
-`vite.config.ts` forwards `/api` to `http://localhost:8095` so the frontend uses relative paths.
+`vite.config.ts` forwards `/api` to `http://127.0.0.1:8095` so the frontend uses relative paths.
 
 ## Build
 

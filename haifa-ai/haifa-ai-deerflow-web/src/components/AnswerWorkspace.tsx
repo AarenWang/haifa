@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw } from 'lucide-react';
 import type { AppPhase, AppStatus } from '../types';
+import { renderMarkdown } from '../utils/markdownRenderer';
 
 interface AnswerWorkspaceProps {
   phase: AppPhase;
@@ -120,7 +121,10 @@ export default function AnswerWorkspace({
           )}
 
           {finalAnswer && (
-            <div className="answer-content">{finalAnswer}</div>
+            <div
+              className="answer-content"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(finalAnswer) }}
+            />
           )}
         </>
       )}

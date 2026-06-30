@@ -35,6 +35,7 @@ export async function readDeerFlowStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let currentData = '';
 
   try {
     while (!signal.aborted) {
@@ -44,8 +45,6 @@ export async function readDeerFlowStream(
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
-
-      let currentData = '';
 
       for (const line of lines) {
         if (line.startsWith('data:')) {
@@ -76,7 +75,6 @@ export async function readDeerFlowStream(
     // Process remaining buffer
     if (buffer.trim()) {
       const lines = buffer.split('\n');
-      let currentData = '';
       for (const line of lines) {
         if (line.startsWith('data:')) {
           currentData += (currentData ? '\n' : '') + line.slice(5).trim();
@@ -115,11 +113,11 @@ export async function fetchRunStatus(runId: string): Promise<unknown> {
 
 export async function checkBackendHealth(): Promise<boolean> {
   try {
-    const res = await fetch('/api/deerflow/runs', {
-      method: 'HEAD',
+    const res = await fetch('/api/deerflow/runs/health-check-dummy', {
+      method: 'GET',
       signal: AbortSignal.timeout(3000),
     });
-    return res.ok || res.status === 404 || res.status === 405;
+    return res.ok || res.status === 404;
   } catch {
     return false;
   }
