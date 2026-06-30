@@ -12,6 +12,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 
@@ -24,6 +25,7 @@ public class FileSystemSkillStorage implements SkillStorage {
     private final Path customRoot;
     private final boolean enabled;
 
+    @Autowired
     public FileSystemSkillStorage(DeerFlowProperties properties) {
         this(Path.of(properties.getSkillsRoot()).resolve("public"),
                 Path.of(properties.getSkillsRoot()).resolve("custom"),

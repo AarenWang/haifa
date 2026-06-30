@@ -90,6 +90,18 @@ public final class SkillParser {
             if (line.isEmpty()) {
                 continue;
             }
+            // Check inline format: - allowed-tools: tool1, tool2
+            Matcher inlineMatcher = ALLOWED_TOOLS_INLINE.matcher(line);
+            if (inlineMatcher.matches()) {
+                String csv = inlineMatcher.group(1);
+                for (String t : csv.split(",")) {
+                    String trimmed = t.trim();
+                    if (!trimmed.isEmpty()) {
+                        tools.add(trimmed);
+                    }
+                }
+                continue;
+            }
             // Check for "## Allowed tools" section header
             if (ALLOWED_TOOLS_SECTION.matcher(line).matches()) {
                 inSection = true;
@@ -109,17 +121,6 @@ public final class SkillParser {
                         continue;
                     } else {
                         inSection = false;
-                    }
-                }
-            }
-            // Check inline format: - allowed-tools: tool1, tool2
-            Matcher inlineMatcher = ALLOWED_TOOLS_INLINE.matcher(line);
-            if (inlineMatcher.matches()) {
-                String csv = inlineMatcher.group(1);
-                for (String t : csv.split(",")) {
-                    String trimmed = t.trim();
-                    if (!trimmed.isEmpty()) {
-                        tools.add(trimmed);
                     }
                 }
             }

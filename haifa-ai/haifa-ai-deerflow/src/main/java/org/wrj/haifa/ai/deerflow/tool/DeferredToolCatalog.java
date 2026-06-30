@@ -1,6 +1,7 @@
 package org.wrj.haifa.ai.deerflow.tool;
 
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
@@ -14,6 +15,7 @@ public class DeferredToolCatalog {
     private ToolRegistry toolRegistry;
     private SkillStorage skillStorage;
 
+    @Autowired
     public DeferredToolCatalog(@Lazy ToolRegistry toolRegistry, SkillStorage skillStorage) {
         this.toolRegistry = toolRegistry;
         this.skillStorage = skillStorage;

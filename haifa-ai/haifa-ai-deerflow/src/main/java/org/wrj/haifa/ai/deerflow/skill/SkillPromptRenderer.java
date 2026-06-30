@@ -20,7 +20,11 @@ public final class SkillPromptRenderer {
             }
             sb.append("\n");
             if (skill.allowedTools() != null && !skill.allowedTools().isEmpty()) {
-                sb.append("  Allowed tools: ").append(String.join(", ", skill.allowedTools())).append("\n");
+                sb.append("  Allowed tools: ")
+                        .append(String.join(", ", skill.allowedTools().stream()
+                                .sorted((left, right) -> right.compareTo(left))
+                                .toList()))
+                        .append("\n");
             }
         }
         sb.append("\n");
