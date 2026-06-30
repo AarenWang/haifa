@@ -3,6 +3,8 @@ package org.wrj.haifa.ai.deerflow.config;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType;
+import org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType;
 
 @ConfigurationProperties(prefix = "haifa.ai.deerflow")
 public class DeerFlowProperties {
@@ -16,6 +18,10 @@ public class DeerFlowProperties {
     private boolean toolSearchEnabled = true;
 
     private String uploadsRoot = "${user.dir}/uploads";
+    private String outputsRoot = "${user.dir}/outputs";
+    private boolean writeFileEnabled = true;
+    private boolean strReplaceEnabled = true;
+    private boolean bashEnabled = false;
     private long maxUploadBytes = 10_485_760;
     private int maxConvertedChars = 60_000;
     private String allowedUploadExtensions = "txt,md,json,csv,log,xml,yml,yaml,properties";
@@ -51,6 +57,9 @@ public class DeerFlowProperties {
     // Persistence configuration
     private Persistence persistence = new Persistence();
 
+    // Tool provider configuration
+    private Tools tools = new Tools();
+
     public static class Persistence {
         private Sqlite sqlite = new Sqlite();
 
@@ -75,12 +84,73 @@ public class DeerFlowProperties {
         }
     }
 
+    public static class Tools {
+        private WebSearchToolConfig webSearch = new WebSearchToolConfig();
+        private WebFetchToolConfig webFetch = new WebFetchToolConfig();
+
+        public WebSearchToolConfig getWebSearch() {
+            return webSearch;
+        }
+
+        public void setWebSearch(WebSearchToolConfig webSearch) {
+            this.webSearch = webSearch;
+        }
+
+        public WebFetchToolConfig getWebFetch() {
+            return webFetch;
+        }
+
+        public void setWebFetch(WebFetchToolConfig webFetch) {
+            this.webFetch = webFetch;
+        }
+    }
+
+    public static class WebSearchToolConfig {
+        private String provider = WebSearchProviderType.defaultType().id();
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider;
+        }
+    }
+
+    public static class WebFetchToolConfig {
+        private String provider = WebFetchProviderType.defaultType().id();
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider;
+        }
+    }
+
     public Persistence getPersistence() {
         return persistence;
     }
 
     public void setPersistence(Persistence persistence) {
         this.persistence = persistence;
+    }
+
+    public Tools getTools() {
+        return tools;
+    }
+
+    public void setTools(Tools tools) {
+        this.tools = tools;
+    }
+
+    public String getWebSearchProvider() {
+        return tools != null && tools.webSearch != null ? tools.webSearch.getProvider() : WebSearchProviderType.defaultType().id();
+    }
+
+    public String getWebFetchProvider() {
+        return tools != null && tools.webFetch != null ? tools.webFetch.getProvider() : WebFetchProviderType.defaultType().id();
     }
 
     public String getModel() {
@@ -242,5 +312,37 @@ public class DeerFlowProperties {
 
     public void setResearchEnabled(boolean researchEnabled) {
         this.researchEnabled = researchEnabled;
+    }
+
+    public String getOutputsRoot() {
+        return outputsRoot;
+    }
+
+    public void setOutputsRoot(String outputsRoot) {
+        this.outputsRoot = outputsRoot;
+    }
+
+    public boolean isWriteFileEnabled() {
+        return writeFileEnabled;
+    }
+
+    public void setWriteFileEnabled(boolean writeFileEnabled) {
+        this.writeFileEnabled = writeFileEnabled;
+    }
+
+    public boolean isStrReplaceEnabled() {
+        return strReplaceEnabled;
+    }
+
+    public void setStrReplaceEnabled(boolean strReplaceEnabled) {
+        this.strReplaceEnabled = strReplaceEnabled;
+    }
+
+    public boolean isBashEnabled() {
+        return bashEnabled;
+    }
+
+    public void setBashEnabled(boolean bashEnabled) {
+        this.bashEnabled = bashEnabled;
     }
 }

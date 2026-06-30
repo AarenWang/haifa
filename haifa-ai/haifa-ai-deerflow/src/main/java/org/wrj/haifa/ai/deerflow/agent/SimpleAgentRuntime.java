@@ -61,6 +61,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final ModelStepStore modelStepStore;
     private final ToolCallStore toolCallStore;
     private final AgentLoopRunStore agentLoopRunStore;
+    private final org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage;
 
     @Autowired(required = false)
     private ToolPolicyService toolPolicyService;
@@ -71,7 +72,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
             RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
             AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
-            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore) {
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
@@ -90,6 +92,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this.modelStepStore = modelStepStore;
         this.toolCallStore = toolCallStore;
         this.agentLoopRunStore = agentLoopRunStore;
+        this.skillStorage = skillStorage;
     }
 
     @Override
@@ -241,17 +244,42 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     Map.of("depth", researchOptions.depth().name(), "timeWindow", researchOptions.timeWindow().name(),
                             "maxSources", researchOptions.maxSources(), "outputFormat", researchOptions.outputFormat().name())));
 
-            String researchSystemPrompt = this.properties.getResearchSystemPrompt() != null
+            List<Skill> activeSkills = new java.util.ArrayList<>(resolveActiveSkills(request));
+            boolean hasDeepResearch = activeSkills.stream().anyMatch(s -> "deep-research".equals(s.name()));
+            if (!hasDeepResearch) {
+                this.skillStorage.findAny("deep-research").ifPresent(activeSkills::add);
+            }
+
+            List<Skill> availableSkills = this.skillStorage.listAll();
+            String skillsSection = org.wrj.haifa.ai.deerflow.skill.SkillPromptRenderer.renderSkillSystem(
+                    availableSkills,
+                    activeSkills,
+                    this.properties.getSkillsRoot()
+            );
+
+            String uploadsPath = this.properties.getUploadsRoot();
+            String workspacePath = this.properties.getWorkspaceRoot();
+            String outputsPath = this.properties.getOutputsRoot();
+
+            String customResearchSystemPrompt = this.properties.getResearchSystemPrompt() != null
                     ? this.properties.getResearchSystemPrompt()
                     : this.properties.getSystemPrompt();
+
+            String researchSystemPrompt = org.wrj.haifa.ai.deerflow.prompt.ResearchPromptTemplate.build(
+                    modelName,
+                    researchOptions,
+                    skillsSection,
+                    uploadsPath,
+                    workspacePath,
+                    outputsPath,
+                    customResearchSystemPrompt
+            );
 
             LoopConfig loopConfig = new LoopConfig(
                     this.properties.getMaxResearchSteps(),
                     this.properties.getMaxFetchesPerRun(),
                     this.properties.getResearchTimeout(),
                     researchOptions);
-
-            List<Skill> activeSkills = resolveActiveSkills(request);
 
             // Run the agent loop with full context (policy, skills, uploads)
             Flux<AgentEvent> loopEvents = this.agentLoop.run(loopConfig, config, researchSystemPrompt, request.message(), seq,

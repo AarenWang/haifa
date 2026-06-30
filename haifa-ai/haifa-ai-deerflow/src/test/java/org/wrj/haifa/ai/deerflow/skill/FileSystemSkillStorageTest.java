@@ -65,6 +65,30 @@ class FileSystemSkillStorageTest {
         assertThat(storage.listPublicSkills()).isEmpty();
     }
 
+    @Test
+    void autoUnpacksPublicSkillsFromClasspath(@TempDir Path tmp) {
+        org.wrj.haifa.ai.deerflow.config.DeerFlowProperties properties = new org.wrj.haifa.ai.deerflow.config.DeerFlowProperties();
+        properties.setSkillsRoot(tmp.resolve("skills").toString());
+        properties.setSkillsEnabled(true);
+
+        FileSystemSkillStorage storage = new FileSystemSkillStorage(properties);
+        List<Skill> publicSkills = storage.listPublicSkills();
+        assertThat(publicSkills).isNotEmpty();
+        assertThat(publicSkills).extracting(Skill::name).contains("deep-research");
+    }
+
+    @Test
+    void bundledDeepResearchIncludesAllowedResearchTools(@TempDir Path tmp) {
+        org.wrj.haifa.ai.deerflow.config.DeerFlowProperties properties = new org.wrj.haifa.ai.deerflow.config.DeerFlowProperties();
+        properties.setSkillsRoot(tmp.resolve("skills").toString());
+        properties.setSkillsEnabled(true);
+
+        FileSystemSkillStorage storage = new FileSystemSkillStorage(properties);
+        Skill skill = storage.findAny("deep-research").orElseThrow();
+
+        assertThat(skill.allowedTools()).contains("web_search", "web_fetch", "image_search");
+    }
+
     private static void createSkill(Path root, String name, String content) throws IOException {
         Path dir = root.resolve(name);
         Files.createDirectories(dir);

@@ -16,10 +16,10 @@ class SkillPromptRendererTest {
 
         String section = SkillPromptRenderer.renderActiveSkills(List.of(skill1, skill2));
 
-        assertThat(section).contains("[Active skills]");
-        assertThat(section).contains("- research: Do research");
-        assertThat(section).contains("Allowed tools: web_search, summarize");
-        assertThat(section).contains("- writer: Write text");
+        assertThat(section).contains("<skill_system>");
+        assertThat(section).contains("research");
+        assertThat(section).contains("writer");
+        assertThat(section).contains("SKILL CONTENT START: research");
     }
 
     @Test
@@ -30,19 +30,19 @@ class SkillPromptRendererTest {
 
     @Test
     void injectsSkillsSectionIntoSystemPrompt() {
-        String section = "[Active skills]\n- research\n";
+        String section = "<skill_system>active skills</skill_system>";
         String result = SkillPromptRenderer.injectIntoSystemPrompt("You are helpful.", section);
 
         assertThat(result).startsWith("You are helpful.");
-        assertThat(result).contains("[Active skills]");
+        assertThat(result).contains("<skill_system>");
     }
 
     @Test
     void returnsSkillsSectionWhenSystemPromptIsNull() {
-        String section = "[Active skills]\n- research\n";
+        String section = "<skill_system>active skills</skill_system>";
         String result = SkillPromptRenderer.injectIntoSystemPrompt(null, section);
 
-        assertThat(result).isEqualTo("[Active skills]\n- research");
+        assertThat(result).isEqualTo("<skill_system>active skills</skill_system>");
     }
 
     @Test

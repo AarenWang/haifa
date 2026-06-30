@@ -45,6 +45,28 @@ class SkillParserTest {
     }
 
     @Test
+    void parsesSkillWithYamlFrontMatter(@TempDir Path tmp) throws IOException {
+        Path skillDir = tmp.resolve("yaml-skill");
+        Files.createDirectories(skillDir);
+        String md = """
+                ---
+                name: custom-deep-research
+                description: Custom description for research.
+                allowed-tools: [web_search, web_fetch, present_files]
+                ---
+                
+                # Title
+                Body text.
+                """;
+        Files.writeString(skillDir.resolve("SKILL.md"), md);
+
+        Skill skill = SkillParser.parse(skillDir, "public");
+        assertThat(skill.name()).isEqualTo("custom-deep-research");
+        assertThat(skill.description()).isEqualTo("Custom description for research.");
+        assertThat(skill.allowedTools()).containsExactlyInAnyOrder("web_search", "web_fetch", "present_files");
+    }
+
+    @Test
     void fallsBackToFirstLineWhenNoH1(@TempDir Path tmp) throws IOException {
         Path skillDir = tmp.resolve("plain");
         Files.createDirectories(skillDir);

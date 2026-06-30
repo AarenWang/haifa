@@ -1,9 +1,13 @@
 package org.wrj.haifa.ai.deerflow.tool;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.skill.FileSystemSkillStorage;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,6 +56,48 @@ class ToolPolicyServiceTest {
     void allowedToolsForSkillsWithEmptySkillsReturnsOnlyBuiltin() {
         Set<String> allowed = policy.allowedToolsForSkills(List.of());
         assertThat(allowed).containsExactlyInAnyOrder("builtin_a", "builtin_b");
+    }
+
+    @Test
+    void standardToolsAreNotMarkedAsBuiltinsAndRequireSkills() {
+        AgentTool webSearch = new DummyTool("web_search", "search");
+        AgentTool writeFile = new DummyTool("write_file", "write");
+        AgentTool current = new DummyTool("current_time", "time");
+
+        ToolPolicyService localPolicy = new ToolPolicyService(List.of(webSearch, writeFile, current));
+
+        // current_time is a standard built-in, so it is allowed
+        assertThat(localPolicy.isToolAllowed("current_time", List.of())).isTrue();
+
+        // web_search and write_file are standard configured tools, NOT built-ins, so disallowed by default
+        assertThat(localPolicy.isToolAllowed("web_search", List.of())).isFalse();
+        assertThat(localPolicy.isToolAllowed("write_file", List.of())).isFalse();
+
+        // But allowed if a skill allows them
+        Skill skill = new Skill("research", "Do research", "public", "md", Map.of(), Set.of("web_search"));
+        assertThat(localPolicy.isToolAllowed("web_search", List.of(skill))).isTrue();
+        assertThat(localPolicy.isToolAllowed("write_file", List.of(skill))).isFalse();
+    }
+
+    @Test
+    void bundledDeepResearchAllowsWebResearchTools(@TempDir Path tmp) {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setSkillsRoot(tmp.resolve("skills").toString());
+        properties.setSkillsEnabled(true);
+
+        FileSystemSkillStorage storage = new FileSystemSkillStorage(properties);
+        Skill deepResearch = storage.findAny("deep-research").orElseThrow();
+
+        AgentTool webSearch = new DummyTool("web_search", "search");
+        AgentTool webFetch = new DummyTool("web_fetch", "fetch");
+        AgentTool imageSearch = new DummyTool("image_search", "images");
+        AgentTool current = new DummyTool("current_time", "time");
+
+        ToolPolicyService localPolicy = new ToolPolicyService(List.of(webSearch, webFetch, imageSearch, current));
+
+        assertThat(localPolicy.isToolAllowed("web_search", List.of(deepResearch))).isTrue();
+        assertThat(localPolicy.isToolAllowed("web_fetch", List.of(deepResearch))).isTrue();
+        assertThat(localPolicy.isToolAllowed("image_search", List.of(deepResearch))).isTrue();
     }
 
     private static final class DummyTool implements AgentTool {

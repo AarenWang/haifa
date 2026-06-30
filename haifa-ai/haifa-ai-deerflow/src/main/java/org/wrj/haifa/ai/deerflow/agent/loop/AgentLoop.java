@@ -353,6 +353,12 @@ public class AgentLoop {
                 return tool;
             }
         }
+        if ("mock_search".equals(toolName)) {
+            return findTool("web_search");
+        }
+        if ("mock_fetch".equals(toolName)) {
+            return findTool("web_fetch");
+        }
         return null;
     }
 

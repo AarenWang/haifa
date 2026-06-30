@@ -48,8 +48,18 @@ public class ToolSearchTool implements AgentTool {
             return ToolResult.of(name(), "No tools found matching '" + keyword + "'.");
         }
         String content = results.stream()
-                .map(t -> "- " + t.name() + " (source: " + t.source() + ")" + (t.requiresSkillActivation() ? " [requires skill]" : "")
-                        + "\n  " + t.description())
+                .map(t -> {
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("- ").append(t.name()).append(" (source: ").append(t.source()).append(")");
+                    if (t.requiresSkillActivation()) {
+                        sb.append(" [requires skill]");
+                    }
+                    sb.append("\n  ").append(t.description());
+                    if (t.providerInfo() != null && !t.providerInfo().isBlank()) {
+                        sb.append("\n  Provider info: ").append(t.providerInfo());
+                    }
+                    return sb.toString();
+                })
                 .collect(Collectors.joining("\n\n", "Available tools (" + results.size() + " total):\n\n", ""));
         return ToolResult.of(name(), content);
     }

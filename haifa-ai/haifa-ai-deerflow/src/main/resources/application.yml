@@ -54,7 +54,12 @@ haifa:
         You are the Java DeerFlow lead agent prototype. Use the provided
         local tool observations when they are relevant, be concise, and name
         any files you used.
-      # Research mode configuration
+      # Tool provider configuration (defaults are duckduckgo / jina)
+      # tools:
+      #   web-search:
+      #     provider: duckduckgo   # or tavily, brave, exa, firecrawl, infoquest, groundroute, serper, searxng, fastcrw
+      #   web-fetch:
+      #     provider: jina         # or exa, firecrawl, infoquest, groundroute, browserless, fastcrw
       max-research-steps: 20
       max-research-sources: 20
       max-fetches-per-run: 10

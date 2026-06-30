@@ -26,8 +26,23 @@ public class MiddlewareChain {
     }
 
     private static ModelPrompt terminalPrompt(AgentRuntimeContext context) {
+        String customPrompt = context.properties().getSystemPrompt();
+        String uploadsPath = context.properties().getUploadsRoot();
+        String workspacePath = context.properties().getWorkspaceRoot();
+        String outputsPath = context.properties().getOutputsRoot();
+
+        String systemPrompt = org.wrj.haifa.ai.deerflow.prompt.LeadAgentPromptTemplate.build(
+                context.config().modelName(),
+                null, // soul
+                null, // skillsSection will be injected by SkillActivationMiddleware
+                uploadsPath,
+                workspacePath,
+                outputsPath,
+                customPrompt
+        );
+
         return new ModelPrompt(
-                context.properties().getSystemPrompt(),
+                systemPrompt,
                 buildUserPrompt(context.request().message(), context.toolResults()),
                 context.config().modelName()
         );

@@ -63,6 +63,9 @@ class SimpleAgentRuntimeTest {
     @Autowired
     private AgentLoopRunStore agentLoopRunStore;
 
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage;
+
     @Test
     void streamsToolAndModelEvents() throws Exception {
         Path workspace = Files.createTempDirectory("deerflow-runtime-test");
@@ -81,7 +84,7 @@ class SimpleAgentRuntimeTest {
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager, messageStore,
                 List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
                 agentEventStore, toolExecutionStore,
-                modelStepStore, toolCallStore, agentLoopRunStore);
+                modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
 
         List<AgentEvent> events = runtime.stream(new AgentRequest("thread-1",
                         "List workspace files and read \"note.md\"", null))
@@ -121,7 +124,7 @@ class SimpleAgentRuntimeTest {
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager, messageStore,
                 List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
                 agentEventStore, toolExecutionStore,
-                modelStepStore, toolCallStore, agentLoopRunStore);
+                modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
 
         StepVerifier.create(runtime.stream(new AgentRequest("thread-2", "hello", null)))
                 .recordWith(java.util.ArrayList::new)
@@ -152,7 +155,7 @@ class SimpleAgentRuntimeTest {
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager, messageStore,
                 List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
                 agentEventStore, toolExecutionStore,
-                modelStepStore, toolCallStore, agentLoopRunStore);
+                modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
 
         List<AgentEvent> events = runtime.stream(new AgentRequest("thread-3", "please explode", null))
                 .collectList()
@@ -186,7 +189,7 @@ class SimpleAgentRuntimeTest {
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager, messageStore,
                 List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
                 agentEventStore, toolExecutionStore,
-                modelStepStore, toolCallStore, agentLoopRunStore);
+                modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
 
         StepVerifier.create(runtime.stream(new AgentRequest("thread-4", "this is a long message", null)))
                 .recordWith(java.util.ArrayList::new)

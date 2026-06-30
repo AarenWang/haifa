@@ -10,18 +10,19 @@ public class MockFetchTool implements AgentTool {
 
     @Override
     public String name() {
-        return "mock_fetch";
+        return "web_fetch";
     }
 
     @Override
     public String description() {
-        return "Mock web fetch tool that returns hardcoded content for URLs. Use for testing the agent loop.";
+        return "Mock web fetch tool. Arguments: {\"url\": \"url to fetch\"}";
     }
 
     @Override
     public boolean supports(String userMessage) {
-        // Only match explicit mock_fetch trigger to avoid interfering with normal chat
-        return userMessage != null && userMessage.toLowerCase().contains("mock_fetch");
+        if (userMessage == null) return false;
+        String lower = userMessage.toLowerCase();
+        return lower.contains("web_fetch") || lower.contains("mock_fetch");
     }
 
     @Override

@@ -40,12 +40,75 @@ public class DeferredToolCatalog {
         return allSkills;
     }
 
+    public static String getSource(String toolName) {
+        if (toolName.startsWith("mcp__")) {
+            return "mcp";
+        }
+        return switch (toolName) {
+            case "present_files", "ask_clarification", "view_image" -> "builtin";
+            case "web_search", "web_fetch", "image_search", "ls", "read_file", "glob", "grep", "write_file", "str_replace", "bash", "list_workspace_files", "read_workspace_file", "list_uploaded_files", "read_uploaded_file" -> "configured";
+            case "task" -> "delegation";
+            case "current_time", "tool_search" -> "builtin";
+            default -> "configured";
+        };
+    }
+
+    public static String getCategory(String toolName) {
+        if (toolName.startsWith("mcp__")) {
+            return "MCP 动态工具";
+        }
+        return switch (toolName) {
+            case "present_files", "ask_clarification", "view_image", "current_time", "tool_search" -> "展示/人机交互";
+            case "web_search", "web_fetch", "image_search" -> "Web/检索";
+            case "ls", "read_file", "glob", "grep", "read_uploaded_file", "list_uploaded_files", "list_workspace_files", "read_workspace_file" -> "文件读取";
+            case "write_file", "str_replace" -> "文件写入/编辑";
+            case "bash" -> "Shell 执行";
+            case "task" -> "子 Agent 委派";
+            default -> "展示/人机交互";
+        };
+    }
+
+    private List<ToolDescriptor> standardDescriptors() {
+        String webSearchProviders = "Available: " + String.join(", ", org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType.allIds());
+        String webFetchProviders = "Available: " + String.join(", ", org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType.allIds());
+        return List.of(
+                new ToolDescriptor("present_files", "Present final output files to the user.", "builtin", "展示/人机交互", false),
+                new ToolDescriptor("ask_clarification", "Ask the user for clarification about ambiguous requirements.", "builtin", "展示/人机交互", false),
+                new ToolDescriptor("view_image", "View an image file from the workspace.", "builtin", "展示/人机交互", false),
+                new ToolDescriptor("current_time", "Get the current date and time.", "builtin", "展示/人机交互", false),
+                new ToolDescriptor("tool_search", "Search available tools and skills.", "builtin", "展示/人机交互", false),
+                
+                new ToolDescriptor("web_search", "Search the web for queries to find relevant sources and snippets.", "configured", "Web/检索", false,
+                        "Default provider: duckduckgo. " + webSearchProviders),
+                new ToolDescriptor("web_fetch", "Fetch and read the full markdown content of a URL.", "configured", "Web/检索", false,
+                        "Default provider: jina. " + webFetchProviders),
+                new ToolDescriptor("image_search", "Search the web for images.", "configured", "Web/检索", false),
+                
+                new ToolDescriptor("ls", "List files and directories in the workspace.", "configured", "文件读取", false),
+                new ToolDescriptor("read_file", "Read the content of a file in the workspace.", "configured", "文件读取", false),
+                new ToolDescriptor("glob", "Find files in the workspace matching a glob pattern.", "configured", "文件读取", false),
+                new ToolDescriptor("grep", "Search for patterns inside workspace files.", "configured", "文件读取", false),
+                new ToolDescriptor("list_workspace_files", "Lists files directly under the configured workspace root.", "configured", "文件读取", false),
+                new ToolDescriptor("read_workspace_file", "Reads a UTF-8 text file inside the configured workspace root.", "configured", "文件读取", false),
+                new ToolDescriptor("list_uploaded_files", "Lists files uploaded by the user.", "configured", "文件读取", false),
+                new ToolDescriptor("read_uploaded_file", "Reads the content of an uploaded file.", "configured", "文件读取", false),
+                
+                new ToolDescriptor("write_file", "Write content to a file in the workspace.", "configured", "文件写入/编辑", false),
+                new ToolDescriptor("str_replace", "Find and replace a string in a workspace file.", "configured", "文件写入/编辑", false),
+                new ToolDescriptor("bash", "Run a shell command inside the workspace sandbox.", "configured", "Shell 执行", false),
+                
+                new ToolDescriptor("task", "Delegate a sub-task to a subagent.", "delegation", "子 Agent 委派", false),
+                
+                new ToolDescriptor("mcp__placeholder", "Dynamic MCP tool placeholder. Runs MCP server tools.", "mcp", "MCP 动态工具", false)
+        );
+    }
+
     public List<ToolDescriptor> search(String keyword) {
         String lower = keyword == null ? "" : keyword.toLowerCase();
         List<ToolDescriptor> results = new java.util.ArrayList<>();
-        for (AgentTool tool : builtinTools()) {
-            if (matches(tool.name(), tool.description(), lower)) {
-                results.add(new ToolDescriptor(tool.name(), tool.description(), "builtin", false));
+        for (ToolDescriptor td : standardDescriptors()) {
+            if (matches(td.name(), td.description(), lower)) {
+                results.add(td);
             }
         }
         for (Skill skill : allSkills()) {
@@ -55,7 +118,8 @@ public class DeferredToolCatalog {
                         results.add(new ToolDescriptor(
                                 toolName,
                                 "Provided by skill: " + skill.name() + " (" + skill.description() + ")",
-                                "skill:" + skill.name(),
+                                getSource(toolName),
+                                getCategory(toolName),
                                 true
                         ));
                     }
@@ -66,17 +130,15 @@ public class DeferredToolCatalog {
     }
 
     public List<ToolDescriptor> listAll() {
-        List<ToolDescriptor> results = new java.util.ArrayList<>();
-        for (AgentTool tool : builtinTools()) {
-            results.add(new ToolDescriptor(tool.name(), tool.description(), "builtin", false));
-        }
+        List<ToolDescriptor> results = new java.util.ArrayList<>(standardDescriptors());
         for (Skill skill : allSkills()) {
             if (skill.allowedTools() != null) {
                 for (String toolName : skill.allowedTools()) {
                     results.add(new ToolDescriptor(
                             toolName,
                             "Provided by skill: " + skill.name(),
-                            "skill:" + skill.name(),
+                            getSource(toolName),
+                            getCategory(toolName),
                             true
                     ));
                 }

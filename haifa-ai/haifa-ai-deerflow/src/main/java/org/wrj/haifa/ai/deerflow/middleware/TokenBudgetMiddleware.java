@@ -5,7 +5,7 @@ import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import reactor.core.publisher.Mono;
 
 @Component
-@MiddlewareOrder(20)
+@MiddlewareOrder(1)
 public class TokenBudgetMiddleware implements AgentMiddleware {
 
     @Override

@@ -11,9 +11,23 @@ public class ToolPolicyService {
     private final Set<String> builtinToolNames;
 
     public ToolPolicyService(List<AgentTool> builtinTools) {
-        this.builtinToolNames = builtinTools.stream()
-                .map(AgentTool::name)
-                .collect(java.util.HashSet::new, java.util.HashSet::add, java.util.HashSet::addAll);
+        this.builtinToolNames = new java.util.HashSet<>();
+        for (AgentTool tool : builtinTools) {
+            String name = tool.name();
+            String source = DeferredToolCatalog.getSource(name);
+            if ("builtin".equals(source) || (!isStandardToolName(name) && !name.startsWith("mcp__"))) {
+                this.builtinToolNames.add(name);
+            }
+        }
+    }
+
+    private static boolean isStandardToolName(String name) {
+        return switch (name) {
+            case "web_search", "web_fetch", "image_search", "ls", "read_file", "glob", "grep",
+                 "write_file", "str_replace", "bash", "list_workspace_files", "read_workspace_file",
+                 "list_uploaded_files", "read_uploaded_file", "task" -> true;
+            default -> false;
+        };
     }
 
     public boolean isToolAllowed(String toolName, List<Skill> activeSkills) {

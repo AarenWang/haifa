@@ -129,7 +129,7 @@ class MiddlewareChainTest {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setSystemPrompt("sys");
         properties.setWorkspaceRoot(".");
-        properties.setCharBudget(1000);
+        properties.setCharBudget(10000);
 
         AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
         AgentRequest request = new AgentRequest("t", "hi", null);
@@ -195,6 +195,37 @@ class MiddlewareChainTest {
                     assertThat(prompt.userPrompt()).contains("fine");
                     assertThat(prompt.userPrompt()).contains("handled gracefully");
                     assertThat(prompt.userPrompt()).doesNotContain("<tool name=\"bad_tool\">\nTool failed:");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void tokenBudgetMiddlewareMeasuresFinalEnrichedPrompt() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setSystemPrompt("base system");
+        properties.setWorkspaceRoot(".");
+        properties.setSkillsEnabled(true);
+        // Set budget small enough that base passes, but base + dynamic context + skills fails
+        properties.setCharBudget(200);
+
+        org.wrj.haifa.ai.deerflow.skill.SkillStorage mockStorage = new org.wrj.haifa.ai.deerflow.skill.FileSystemSkillStorage(null, null);
+        org.wrj.haifa.ai.deerflow.skill.SlashSkillResolver mockResolver = new org.wrj.haifa.ai.deerflow.skill.SlashSkillResolver(mockStorage);
+
+        AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
+        AgentRequest request = new AgentRequest("t", "hi", null);
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, List.of(), properties);
+
+        // Chain with budget first (order 1), then skills (order 5), then dynamic context (order 10)
+        MiddlewareChain chain = new MiddlewareChain(List.of(
+                new TokenBudgetMiddleware(),
+                new SkillActivationMiddleware(mockResolver, mockStorage, properties),
+                new DynamicContextMiddleware()
+        ));
+
+        StepVerifier.create(chain.next(context))
+                .assertNext(prompt -> {
+                    assertThat(prompt.userPrompt()).startsWith("BUDGET_EXCEEDED:");
+                    assertThat(prompt.userPrompt()).contains("exceed the character budget");
                 })
                 .verifyComplete();
     }

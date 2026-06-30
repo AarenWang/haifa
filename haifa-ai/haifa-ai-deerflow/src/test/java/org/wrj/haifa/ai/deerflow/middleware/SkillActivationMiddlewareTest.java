@@ -29,7 +29,7 @@ class SkillActivationMiddlewareTest {
 
         FileSystemSkillStorage storage = new FileSystemSkillStorage(publicDir, null);
         SlashSkillResolver resolver = new SlashSkillResolver(storage);
-        SkillActivationMiddleware middleware = new SkillActivationMiddleware(resolver, properties);
+        SkillActivationMiddleware middleware = new SkillActivationMiddleware(resolver, storage, properties);
 
         AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
         AgentRequest request = new AgentRequest("t", "/research summarize this", null);
@@ -39,9 +39,9 @@ class SkillActivationMiddlewareTest {
         StepVerifier.create(chain.next(context))
                 .assertNext(prompt -> {
                     assertThat(prompt.systemPrompt()).contains("You are helpful.");
-                    assertThat(prompt.systemPrompt()).contains("[Active skills]");
+                    assertThat(prompt.systemPrompt()).contains("<skill_system>");
                     assertThat(prompt.systemPrompt()).contains("research");
-                    assertThat(prompt.systemPrompt()).contains("Allowed tools: web_search");
+                    assertThat(prompt.systemPrompt()).contains("<location>");
                     assertThat(prompt.userPrompt()).contains("User request:");
                 })
                 .verifyComplete();
@@ -53,8 +53,9 @@ class SkillActivationMiddlewareTest {
         properties.setSystemPrompt("base prompt");
         properties.setWorkspaceRoot(".");
 
-        SlashSkillResolver resolver = new SlashSkillResolver(new FileSystemSkillStorage(null, null));
-        SkillActivationMiddleware middleware = new SkillActivationMiddleware(resolver, properties);
+        FileSystemSkillStorage storage = new FileSystemSkillStorage(null, null);
+        SlashSkillResolver resolver = new SlashSkillResolver(storage);
+        SkillActivationMiddleware middleware = new SkillActivationMiddleware(resolver, storage, properties);
 
         AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
         AgentRequest request = new AgentRequest("t", "hello", null);
@@ -63,7 +64,7 @@ class SkillActivationMiddlewareTest {
         MiddlewareChain chain = new MiddlewareChain(List.of(middleware));
         StepVerifier.create(chain.next(context))
                 .assertNext(prompt -> {
-                    assertThat(prompt.systemPrompt()).isEqualTo("base prompt");
+                    assertThat(prompt.systemPrompt()).contains("base prompt");
                     assertThat(prompt.userPrompt()).contains("User request:");
                 })
                 .verifyComplete();
@@ -82,7 +83,7 @@ class SkillActivationMiddlewareTest {
 
         FileSystemSkillStorage storage = new FileSystemSkillStorage(publicDir, null);
         SlashSkillResolver resolver = new SlashSkillResolver(storage);
-        SkillActivationMiddleware skillMw = new SkillActivationMiddleware(resolver, properties);
+        SkillActivationMiddleware skillMw = new SkillActivationMiddleware(resolver, storage, properties);
 
         AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
         AgentRequest request = new AgentRequest("t", "/research do a very long thing with many words", null);
@@ -92,7 +93,7 @@ class SkillActivationMiddlewareTest {
         StepVerifier.create(chain.next(context))
                 .assertNext(prompt -> {
                     assertThat(prompt.systemPrompt()).contains("base");
-                    assertThat(prompt.systemPrompt()).contains("[Active skills]");
+                    assertThat(prompt.systemPrompt()).contains("<skill_system>");
                     assertThat(prompt.userPrompt()).startsWith("BUDGET_EXCEEDED:");
                 })
                 .verifyComplete();

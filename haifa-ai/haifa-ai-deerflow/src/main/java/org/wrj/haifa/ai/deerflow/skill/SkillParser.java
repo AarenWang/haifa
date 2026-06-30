@@ -27,9 +27,67 @@ public final class SkillParser {
         Path skillMd = skillDir.resolve("SKILL.md");
         String content = Files.readString(skillMd, StandardCharsets.UTF_8);
         String name = skillDir.getFileName().toString();
-        String description = extractDescription(content);
+        String description = null;
+        java.util.Set<String> allowedTools = null;
+
+        String frontMatter = "";
+        String body = content;
+        String trimmedContent = content.trim();
+        if (trimmedContent.startsWith("---")) {
+            int firstIdx = content.indexOf("---");
+            int secondIdx = content.indexOf("---", firstIdx + 3);
+            if (secondIdx > 0) {
+                frontMatter = content.substring(firstIdx + 3, secondIdx);
+                body = content.substring(secondIdx + 3);
+            }
+        }
+
+        if (!frontMatter.isEmpty()) {
+            String[] lines = frontMatter.split("\r?\n");
+            for (String line : lines) {
+                int colIdx = line.indexOf(':');
+                if (colIdx > 0) {
+                    String key = line.substring(0, colIdx).trim().toLowerCase();
+                    String val = line.substring(colIdx + 1).trim();
+                    if ("name".equals(key)) {
+                        if (!val.isEmpty()) {
+                            name = val;
+                        }
+                    } else if ("description".equals(key)) {
+                        if (!val.isEmpty()) {
+                            description = val;
+                        }
+                    } else if ("allowed-tools".equals(key) || "allowed_tools".equals(key)) {
+                        if (!val.isEmpty()) {
+                            if (allowedTools == null) {
+                                allowedTools = new java.util.HashSet<>();
+                            }
+                            if (val.startsWith("[") && val.endsWith("]")) {
+                                val = val.substring(1, val.length() - 1);
+                            }
+                            for (String t : val.split(",")) {
+                                String trimmed = t.trim();
+                                if (!trimmed.isEmpty()) {
+                                    allowedTools.add(trimmed);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (description == null || description.isEmpty()) {
+            description = extractDescription(body);
+        }
+        Set<String> bodyTools = extractAllowedTools(body);
+        if (allowedTools == null) {
+            allowedTools = bodyTools;
+        } else {
+            allowedTools.addAll(bodyTools);
+        }
+
         Map<String, List<String>> directories = scanSubdirectories(skillDir);
-        Set<String> allowedTools = extractAllowedTools(content);
         return new Skill(name, description, source, content, directories, allowedTools);
     }
 

@@ -11,18 +11,19 @@ public class MockSearchTool implements AgentTool {
 
     @Override
     public String name() {
-        return "mock_search";
+        return "web_search";
     }
 
     @Override
     public String description() {
-        return "Mock search tool that returns hardcoded search results. Use for testing the agent loop.";
+        return "Mock web search tool. Arguments: {\"query\": \"search query\"}";
     }
 
     @Override
     public boolean supports(String userMessage) {
-        // Only match explicit mock_search trigger to avoid interfering with normal chat
-        return userMessage != null && userMessage.toLowerCase().contains("mock_search");
+        if (userMessage == null) return false;
+        String lower = userMessage.toLowerCase();
+        return lower.contains("web_search") || lower.contains("mock_search");
     }
 
     @Override
