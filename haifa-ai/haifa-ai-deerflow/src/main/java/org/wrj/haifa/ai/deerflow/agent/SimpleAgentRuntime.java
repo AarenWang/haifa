@@ -109,10 +109,13 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                     ));
                                 })
                                 .onErrorResume(ex -> {
-                                    this.runManager.markFailed(run.runId(), ex.getMessage());
+                                    String errorMessage = describeException(ex);
+                                    log.error("DeerFlow run failed during model generation. runId={}, threadId={}, model={}, toolCount={}",
+                                            run.runId(), threadId, nullToEmpty(modelName), toolResults.size(), ex);
+                                    this.runManager.markFailed(run.runId(), errorMessage);
                                     return Flux.fromIterable(List.of(
-                                            event(seq, config, AgentEventType.RUN_FAILED, ex.getMessage(),
-                                                    Map.of("status", "FAILED"))
+                                            event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
+                                                    Map.of("status", "FAILED", "errorType", ex.getClass().getName()))
                                     ));
                                 })
                 );
@@ -171,5 +174,13 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
     private static String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private static String describeException(Throwable ex) {
+        String message = ex.getMessage();
+        if (StringUtils.hasText(message)) {
+            return ex.getClass().getName() + ": " + message;
+        }
+        return ex.getClass().getName();
     }
 }

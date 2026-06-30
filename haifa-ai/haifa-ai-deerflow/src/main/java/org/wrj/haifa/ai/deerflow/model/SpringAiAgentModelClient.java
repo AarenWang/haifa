@@ -1,5 +1,7 @@
 package org.wrj.haifa.ai.deerflow.model;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.beans.factory.ObjectProvider;
@@ -10,6 +12,8 @@ import reactor.core.scheduler.Schedulers;
 
 @Component
 public class SpringAiAgentModelClient implements AgentModelClient {
+
+    private static final Logger log = LoggerFactory.getLogger(SpringAiAgentModelClient.class);
 
     private final ObjectProvider<ChatClient.Builder> chatClientBuilderProvider;
 
@@ -24,6 +28,11 @@ public class SpringAiAgentModelClient implements AgentModelClient {
             return Mono.just(fallbackAnswer(prompt));
         }
         return Mono.fromCallable(() -> callSpringAi(builder, prompt))
+                .doOnError(ex -> log.error("Spring AI chat call failed. model={}, systemPromptChars={}, userPromptChars={}",
+                        safe(prompt.modelName()),
+                        length(prompt.systemPrompt()),
+                        length(prompt.userPrompt()),
+                        ex))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
@@ -49,5 +58,13 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                 Prompt sent to the model adapter:
                 %s
                 """.formatted(prompt.userPrompt());
+    }
+
+    private static int length(String value) {
+        return value == null ? 0 : value.length();
+    }
+
+    private static String safe(String value) {
+        return StringUtils.hasText(value) ? value : "<backend-default>";
     }
 }

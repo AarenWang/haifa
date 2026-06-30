@@ -12,6 +12,13 @@ spring:
         options:
           model: gpt-4o-mini
 
+logging:
+  level:
+    org.wrj.haifa.ai.deerflow: DEBUG
+    org.springframework.ai: DEBUG
+    org.springframework.retry: DEBUG
+    reactor.netty.http.client: DEBUG
+
 haifa:
   ai:
     deerflow:
