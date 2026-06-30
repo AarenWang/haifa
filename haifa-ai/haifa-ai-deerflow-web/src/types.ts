@@ -22,6 +22,7 @@ export interface RunRequest {
   threadId?: string;
   message: string;
   model?: string;
+  uploadedFileIds?: string[];
 }
 
 export interface RunResponse {
@@ -44,6 +45,48 @@ export type AppPhase =
   | 'answering'
   | 'done';
 
+export type ConversionStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface UploadRecord {
+  fileId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  threadId?: string;
+  status: ConversionStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UploadResponse {
+  fileId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  status: ConversionStatus;
+  createdAt: string;
+}
+
+export interface UploadListResponse {
+  uploads: UploadRecord[];
+}
+
+export interface UploadContentResponse {
+  fileId: string;
+  fileName: string;
+  content: string;
+}
+
+export interface RunHistoryEntry {
+  runId: string;
+  threadId?: string;
+  message: string;
+  status: AppStatus;
+  startedAt: string;
+  completedAt?: string;
+  model?: string;
+}
+
 export interface AppState {
   status: AppStatus;
   phase: AppPhase;
@@ -53,6 +96,9 @@ export interface AppState {
   finalAnswer?: string;
   error?: string;
   lastRequest?: RunRequest;
+  uploads: UploadRecord[];
+  selectedUploadIds: string[];
+  runHistory: RunHistoryEntry[];
 }
 
 export type AppAction =
@@ -62,4 +108,9 @@ export type AppAction =
   | { type: 'SET_ERROR'; payload: string }
   | { type: 'STOP_RUN' }
   | { type: 'CLEAR' }
-  | { type: 'RE_RUN' };
+  | { type: 'RE_RUN' }
+  | { type: 'SET_UPLOADS'; payload: UploadRecord[] }
+  | { type: 'ADD_UPLOAD'; payload: UploadRecord }
+  | { type: 'REMOVE_UPLOAD'; payload: string }
+  | { type: 'TOGGLE_UPLOAD_SELECTION'; payload: string }
+  | { type: 'ADD_RUN_HISTORY'; payload: RunHistoryEntry };

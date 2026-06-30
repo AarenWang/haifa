@@ -9,8 +9,8 @@ A minimal, developer-friendly web interface for the DeerFlow agent runtime.
 From the repository root:
 
 ```bash
-mvn -pl haifa-ai/haifa-ai-deerflow -am -Popenai clean install -DskipTests
-mvn -pl haifa-ai/haifa-ai-deerflow -Popenai spring-boot:run
+mvn -pl haifa-ai/haifa-ai-deerflow -am clean install -DskipTests
+mvn -pl haifa-ai/haifa-ai-deerflow spring-boot:run
 ```
 
 The backend runs at `http://localhost:8095`.

@@ -22,18 +22,33 @@ export const initialState: AppState = {
   status: 'idle',
   phase: 'idle',
   events: [],
+  uploads: [],
+  selectedUploadIds: [],
+  runHistory: [],
 };
 
 export function deerflowReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
-    case 'START_RUN':
+    case 'START_RUN': {
+      const entry: AppState['runHistory'][0] = {
+        runId: state.runId || '',
+        threadId: action.payload.threadId,
+        message: action.payload.message,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        model: action.payload.model,
+      };
       return {
         ...initialState,
         status: 'running',
         phase: 'preparing',
         lastRequest: action.payload,
         threadId: action.payload.threadId,
+        uploads: state.uploads,
+        selectedUploadIds: state.selectedUploadIds,
+        runHistory: [entry, ...state.runHistory],
       };
+    }
     case 'ADD_EVENT': {
       const event = action.payload;
       const nextEvents = [...state.events, event];
@@ -64,6 +79,26 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         nextThreadId = event.threadId;
       }
 
+      // Update runHistory entry status if matching runId
+      const nextRunHistory = state.runHistory.map((h) => {
+        if (h.runId === event.runId || (h.runId === '' && !state.runId)) {
+          const updated: typeof h = { ...h };
+          if (event.type === 'RUN_COMPLETED') {
+            updated.status = 'completed';
+            updated.completedAt = new Date().toISOString();
+          } else if (event.type === 'RUN_FAILED') {
+            updated.status = 'failed';
+            updated.completedAt = new Date().toISOString();
+          } else if (event.type === 'RUN_CANCELLED') {
+            updated.status = 'stopped';
+            updated.completedAt = new Date().toISOString();
+          }
+          if (event.runId) updated.runId = event.runId;
+          return updated;
+        }
+        return h;
+      });
+
       return {
         ...state,
         status: nextStatus,
@@ -73,6 +108,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         threadId: nextThreadId,
         finalAnswer: nextFinalAnswer,
         error: nextError,
+        runHistory: nextRunHistory,
       };
     }
     case 'SET_FINAL_ANSWER':
@@ -96,6 +132,9 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       return {
         ...initialState,
         lastRequest: state.lastRequest,
+        uploads: state.uploads,
+        selectedUploadIds: state.selectedUploadIds,
+        runHistory: state.runHistory,
       };
     case 'RE_RUN':
       if (!state.lastRequest) return state;
@@ -105,6 +144,42 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         phase: 'preparing',
         lastRequest: state.lastRequest,
         threadId: state.lastRequest.threadId,
+        uploads: state.uploads,
+        selectedUploadIds: state.selectedUploadIds,
+        runHistory: state.runHistory,
+      };
+    case 'SET_UPLOADS':
+      return {
+        ...state,
+        uploads: action.payload,
+      };
+    case 'ADD_UPLOAD':
+      return {
+        ...state,
+        uploads: [action.payload, ...state.uploads],
+      };
+    case 'REMOVE_UPLOAD':
+      return {
+        ...state,
+        uploads: state.uploads.filter((u) => u.fileId !== action.payload),
+        selectedUploadIds: state.selectedUploadIds.filter(
+          (id) => id !== action.payload
+        ),
+      };
+    case 'TOGGLE_UPLOAD_SELECTION': {
+      const id = action.payload;
+      const isSelected = state.selectedUploadIds.includes(id);
+      return {
+        ...state,
+        selectedUploadIds: isSelected
+          ? state.selectedUploadIds.filter((x) => x !== id)
+          : [...state.selectedUploadIds, id],
+      };
+    }
+    case 'ADD_RUN_HISTORY':
+      return {
+        ...state,
+        runHistory: [action.payload, ...state.runHistory],
       };
     default:
       return state;

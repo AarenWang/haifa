@@ -8,6 +8,7 @@ interface TaskComposerProps {
   onClear: () => void;
   isRunning: boolean;
   lastRequest?: RunRequest;
+  selectedUploadCount?: number;
 }
 
 export default function TaskComposer({
@@ -16,6 +17,7 @@ export default function TaskComposer({
   onClear,
   isRunning,
   lastRequest,
+  selectedUploadCount = 0,
 }: TaskComposerProps) {
   const [message, setMessage] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -98,6 +100,11 @@ export default function TaskComposer({
               <RotateCcw size={16} />
               Re-run
             </button>
+          )}
+          {selectedUploadCount > 0 && (
+            <span className="selected-files-badge composer-badge">
+              {selectedUploadCount} file{selectedUploadCount > 1 ? 's' : ''} selected
+            </span>
           )}
         </div>
         <div className="composer-right-actions">

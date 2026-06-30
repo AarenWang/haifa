@@ -1,11 +1,12 @@
 import { useReducer, useRef, useCallback, useEffect, useState } from 'react';
-import type { RunRequest } from './types';
+import type { RunRequest, UploadRecord } from './types';
 import { deerflowReducer, initialState } from './state/deerflowReducer';
-import { readDeerFlowStream, checkBackendHealth } from './api/deerflowClient';
+import { readDeerFlowStream, checkBackendHealth, listUploads } from './api/deerflowClient';
 import Header from './components/Header';
 import TaskComposer from './components/TaskComposer';
 import AnswerWorkspace from './components/AnswerWorkspace';
 import ActivityTrace from './components/ActivityTrace';
+import WorkspaceSidebar from './components/WorkspaceSidebar';
 
 function App() {
   const [state, dispatch] = useReducer(deerflowReducer, initialState);
@@ -29,6 +30,25 @@ function App() {
     };
   }, []);
 
+  // Load uploads on mount
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const data = await listUploads(state.threadId);
+        if (mounted) {
+          dispatch({ type: 'SET_UPLOADS', payload: data.uploads });
+        }
+      } catch {
+        // ignore — uploads are optional
+      }
+    };
+    load();
+    return () => {
+      mounted = false;
+    };
+  }, [state.threadId]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -46,10 +66,15 @@ function App() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      dispatch({ type: 'START_RUN', payload: req });
+      const fullReq: RunRequest = {
+        ...req,
+        uploadedFileIds: state.selectedUploadIds.length > 0 ? state.selectedUploadIds : undefined,
+      };
+
+      dispatch({ type: 'START_RUN', payload: fullReq });
 
       readDeerFlowStream(
-        req,
+        fullReq,
         {
           onEvent: (evt) => {
             dispatch({ type: 'ADD_EVENT', payload: evt });
@@ -69,7 +94,7 @@ function App() {
         abortRef.current = null;
       });
     },
-    []
+    [state.selectedUploadIds]
   );
 
   const handleStop = useCallback(() => {
@@ -90,10 +115,38 @@ function App() {
     }
   }, [state.lastRequest, handleRun]);
 
+  const handleUploadsChange = useCallback((uploads: UploadRecord[]) => {
+    dispatch({ type: 'SET_UPLOADS', payload: uploads });
+  }, []);
+
+  const handleToggleUploadSelection = useCallback((fileId: string) => {
+    dispatch({ type: 'TOGGLE_UPLOAD_SELECTION', payload: fileId });
+  }, []);
+
+  const handleRemoveUpload = useCallback((fileId: string) => {
+    dispatch({ type: 'REMOVE_UPLOAD', payload: fileId });
+  }, []);
+
+  const handleClearUploads = useCallback(() => {
+    dispatch({ type: 'SET_UPLOADS', payload: [] });
+    // Stale selectedUploadIds are harmless; they will not match any uploads.
+  }, []);
+
   return (
     <div className="app">
       <Header backendStatus={backendStatus} runStatus={state.status} />
       <div className="main">
+        <WorkspaceSidebar
+          backendStatus={backendStatus}
+          uploads={state.uploads}
+          selectedUploadIds={state.selectedUploadIds}
+          threadId={state.threadId}
+          runHistory={state.runHistory}
+          onUploadsChange={handleUploadsChange}
+          onToggleUploadSelection={handleToggleUploadSelection}
+          onRemoveUpload={handleRemoveUpload}
+          onClearUploads={handleClearUploads}
+        />
         <div className="workspace">
           <TaskComposer
             onRun={handleRun}
@@ -101,6 +154,7 @@ function App() {
             onClear={handleClear}
             isRunning={state.status === 'running'}
             lastRequest={state.lastRequest}
+            selectedUploadCount={state.selectedUploadIds.length}
           />
           <AnswerWorkspace
             phase={state.phase}
