@@ -20,10 +20,8 @@ public class AgentEventStore {
     public AgentEventStore(AgentEventRepository agentEventRepository, AgentEventMapper agentEventMapper) {
         this.agentEventRepository = agentEventRepository;
         this.agentEventMapper = agentEventMapper;
-        Integer maxSeq = agentEventRepository.findAll().stream()
+        Integer maxSeq = agentEventRepository.findTopByOrderBySequenceNoDesc()
                 .map(AgentEventEntity::getSequenceNo)
-                .filter(n -> n != null)
-                .max(Integer::compare)
                 .orElse(0);
         this.sequenceCounter = new AtomicInteger(maxSeq);
     }

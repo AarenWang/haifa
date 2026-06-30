@@ -1,7 +1,7 @@
 package org.wrj.haifa.ai.deerflow.persistence.store;
 
+import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -23,7 +23,14 @@ public class UploadStore {
 
     @Transactional
     public UploadRecord save(UploadRecord record) {
-        UploadEntity entity = uploadMapper.toEntity(record);
+        UploadEntity entity = uploadRepository.findByFileId(record.getFileId())
+                .orElseGet(UploadEntity::new);
+        uploadMapper.updateEntity(entity, record);
+        Instant now = Instant.now();
+        if (entity.getCreatedAt() == null) {
+            entity.setCreatedAt(record.getCreatedAt() != null ? record.getCreatedAt() : now);
+        }
+        entity.setUpdatedAt(now);
         uploadRepository.save(entity);
         return uploadMapper.toRecord(entity);
     }

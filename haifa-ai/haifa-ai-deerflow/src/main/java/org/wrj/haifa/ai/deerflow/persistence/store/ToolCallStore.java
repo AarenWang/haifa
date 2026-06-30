@@ -15,11 +15,15 @@ public class ToolCallStore {
 
     private final ToolCallRepository toolCallRepository;
     private final ToolCallMapper toolCallMapper;
-    private final AtomicInteger sequenceCounter = new AtomicInteger(0);
+    private final AtomicInteger sequenceCounter;
 
     public ToolCallStore(ToolCallRepository toolCallRepository, ToolCallMapper toolCallMapper) {
         this.toolCallRepository = toolCallRepository;
         this.toolCallMapper = toolCallMapper;
+        Integer maxSeq = toolCallRepository.findTopByOrderBySequenceNoDesc()
+                .map(ToolCallEntity::getSequenceNo)
+                .orElse(0);
+        this.sequenceCounter = new AtomicInteger(maxSeq);
     }
 
     @Transactional

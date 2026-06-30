@@ -60,6 +60,9 @@ public class UploadEntity {
     @Column(name = "metadata_json", length = 4000)
     private String metadataJson;
 
+    @Column(name = "converted_content", columnDefinition = "TEXT")
+    private String convertedContent;
+
     public UploadEntity() {
     }
 
@@ -173,5 +176,13 @@ public class UploadEntity {
 
     public void setMetadataJson(String metadataJson) {
         this.metadataJson = metadataJson;
+    }
+
+    public String getConvertedContent() {
+        return convertedContent;
+    }
+
+    public void setConvertedContent(String convertedContent) {
+        this.convertedContent = convertedContent;
     }
 }

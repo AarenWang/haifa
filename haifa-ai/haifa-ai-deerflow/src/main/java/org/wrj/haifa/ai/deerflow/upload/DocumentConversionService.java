@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.persistence.store.UploadStore;
 
 @Service
 public class DocumentConversionService {
@@ -18,13 +19,16 @@ public class DocumentConversionService {
 
     private final UploadStorageService uploadStorageService;
     private final DeerFlowProperties properties;
+    private final UploadStore uploadStore;
 
     private static final Set<String> TEXT_EXTENSIONS = Set.of("txt", "md", "json", "csv", "log", "xml", "yml", "yaml",
             "properties");
 
-    public DocumentConversionService(UploadStorageService uploadStorageService, DeerFlowProperties properties) {
+    public DocumentConversionService(UploadStorageService uploadStorageService, DeerFlowProperties properties,
+            UploadStore uploadStore) {
         this.uploadStorageService = uploadStorageService;
         this.properties = properties;
+        this.uploadStore = uploadStore;
     }
 
     public UploadRecord convert(String fileId) {
@@ -40,7 +44,7 @@ public class DocumentConversionService {
             record.setConverted(true);
             record.setError("Unsupported file type for conversion: " + extension);
             log.warn("Unsupported conversion for fileId={}, extension={}", fileId, extension);
-            return record;
+            return uploadStore.save(record);
         }
 
         try {
@@ -61,13 +65,13 @@ public class DocumentConversionService {
             record.setConverted(true);
             log.info("Converted fileId={}, originalSize={}, convertedSize={}, durationMs={}", fileId, content.length(),
                     convertedContent.length(), System.currentTimeMillis() - startTime);
-            return record;
+            return uploadStore.save(record);
         } catch (IOException e) {
             record.setConversionStatus(ConversionStatus.FAILED);
             record.setConverted(true);
             record.setError("Failed to read file for conversion: " + e.getMessage());
             log.error("Conversion failed for fileId={}", fileId, e);
-            return record;
+            return uploadStore.save(record);
         }
     }
 }

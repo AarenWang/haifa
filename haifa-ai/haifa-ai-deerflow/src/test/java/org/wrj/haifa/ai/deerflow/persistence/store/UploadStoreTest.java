@@ -80,4 +80,26 @@ class UploadStoreTest {
         assertThat(uploadStore.findByFileIdAndThreadId("file-own", "owner-thread")).isNotNull();
         assertThat(uploadStore.findByFileIdAndThreadId("file-own", "wrong-thread")).isNull();
     }
+
+    @Test
+    void persistsConvertedContentAndPreview() {
+        UploadRecord record = new UploadRecord();
+        record.setFileId("file-converted");
+        record.setOriginalFilename("converted.txt");
+        record.setThreadId("thread-converted");
+        record.setStoredPath("/tmp/converted.txt");
+        record.setConverted(true);
+        record.setConvertedContent("full converted content");
+        record.setContentPreview("preview");
+        record.setConversionStatus(org.wrj.haifa.ai.deerflow.upload.ConversionStatus.COMPLETED);
+
+        uploadStore.save(record);
+
+        UploadRecord found = uploadStore.find("file-converted");
+        assertThat(found).isNotNull();
+        assertThat(found.isConverted()).isTrue();
+        assertThat(found.getConversionStatus()).isEqualTo(org.wrj.haifa.ai.deerflow.upload.ConversionStatus.COMPLETED);
+        assertThat(found.getConvertedContent()).isEqualTo("full converted content");
+        assertThat(found.getContentPreview()).isEqualTo("preview");
+    }
 }

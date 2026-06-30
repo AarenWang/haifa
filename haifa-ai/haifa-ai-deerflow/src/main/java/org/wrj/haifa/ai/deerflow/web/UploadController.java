@@ -44,8 +44,8 @@ public class UploadController {
         return Mono.fromCallable(() -> {
             String requiredThreadId = requireThreadId(threadId);
             UploadRecord record = uploadStorageService.store(filePart, requiredThreadId);
-            documentConversionService.convert(record.getFileId());
-            return toResponse(record);
+            UploadRecord convertedRecord = documentConversionService.convert(record.getFileId());
+            return toResponse(convertedRecord);
         }).subscribeOn(Schedulers.boundedElastic())
                 .onErrorMap(IllegalArgumentException.class, this::mapUploadException);
     }
@@ -84,10 +84,7 @@ public class UploadController {
             if (record == null) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found: " + fileId);
             }
-            String content = record.getConvertedContent();
-            if (content == null) {
-                content = "";
-            }
+            String content = uploadStorageService.readContent(fileId, requiredThreadId);
             return new UploadContentResponse(
                     record.getFileId(),
                     record.getOriginalFilename(),

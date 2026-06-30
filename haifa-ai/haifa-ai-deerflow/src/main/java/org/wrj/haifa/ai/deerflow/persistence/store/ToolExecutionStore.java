@@ -21,10 +21,8 @@ public class ToolExecutionStore {
     public ToolExecutionStore(ToolExecutionRepository toolExecutionRepository, JsonMapper jsonMapper) {
         this.toolExecutionRepository = toolExecutionRepository;
         this.jsonMapper = jsonMapper;
-        Integer maxSeq = toolExecutionRepository.findAll().stream()
+        Integer maxSeq = toolExecutionRepository.findTopByOrderBySequenceNoDesc()
                 .map(ToolExecutionEntity::getSequenceNo)
-                .filter(n -> n != null)
-                .max(Integer::compare)
                 .orElse(0);
         this.sequenceCounter = new AtomicInteger(maxSeq);
     }

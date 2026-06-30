@@ -25,10 +25,8 @@ public class MessageStore {
         this.messageRepository = messageRepository;
         this.messageMapper = messageMapper;
         this.jsonMapper = jsonMapper;
-        Integer maxSeq = messageRepository.findAll().stream()
+        Integer maxSeq = messageRepository.findTopByOrderBySequenceNoDesc()
                 .map(MessageEntity::getSequenceNo)
-                .filter(n -> n != null)
-                .max(Integer::compare)
                 .orElse(0);
         this.sequenceCounter = new AtomicInteger(maxSeq);
     }
