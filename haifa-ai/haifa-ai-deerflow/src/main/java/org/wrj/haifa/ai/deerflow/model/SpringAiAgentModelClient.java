@@ -25,14 +25,27 @@ public class SpringAiAgentModelClient implements AgentModelClient {
     public Mono<String> generate(ModelPrompt prompt) {
         ChatClient.Builder builder = this.chatClientBuilderProvider.getIfAvailable();
         if (builder == null) {
+            log.warn("Spring AI ChatClient.Builder is not available. Returning fallback answer.");
             return Mono.just(fallbackAnswer(prompt));
         }
+        long startTime = System.currentTimeMillis();
+        log.info("Spring AI model call starting. model={}, systemPromptChars={}, userPromptChars={}",
+                safe(prompt.modelName()), length(prompt.systemPrompt()), length(prompt.userPrompt()));
         return Mono.fromCallable(() -> callSpringAi(builder, prompt))
-                .doOnError(ex -> log.error("Spring AI chat call failed. model={}, systemPromptChars={}, userPromptChars={}",
-                        safe(prompt.modelName()),
-                        length(prompt.systemPrompt()),
-                        length(prompt.userPrompt()),
-                        ex))
+                .doOnSuccess(answer -> {
+                    long duration = System.currentTimeMillis() - startTime;
+                    log.info("Spring AI model call succeeded. model={}, durationMs={}, answerLength={}",
+                            safe(prompt.modelName()), duration, answer.length());
+                })
+                .doOnError(ex -> {
+                    long duration = System.currentTimeMillis() - startTime;
+                    log.error("Spring AI chat call failed. model={}, systemPromptChars={}, userPromptChars={}, durationMs={}",
+                            safe(prompt.modelName()),
+                            length(prompt.systemPrompt()),
+                            length(prompt.userPrompt()),
+                            duration,
+                            ex);
+                })
                 .subscribeOn(Schedulers.boundedElastic());
     }
 

@@ -15,6 +15,11 @@ public class DeerFlowProperties {
     private boolean mcpEnabled = false;
     private boolean toolSearchEnabled = true;
 
+    private String uploadsRoot = "${user.dir}/uploads";
+    private long maxUploadBytes = 10_485_760;
+    private int maxConvertedChars = 60_000;
+    private String allowedUploadExtensions = "txt,md,json,csv,log,xml,yml,yaml,properties";
+
     @Min(1)
     @Max(20)
     private int maxIterations = 4;
@@ -76,6 +81,38 @@ public class DeerFlowProperties {
 
     public void setToolSearchEnabled(boolean toolSearchEnabled) {
         this.toolSearchEnabled = toolSearchEnabled;
+    }
+
+    public String getUploadsRoot() {
+        return uploadsRoot;
+    }
+
+    public void setUploadsRoot(String uploadsRoot) {
+        this.uploadsRoot = uploadsRoot;
+    }
+
+    public long getMaxUploadBytes() {
+        return maxUploadBytes;
+    }
+
+    public void setMaxUploadBytes(long maxUploadBytes) {
+        this.maxUploadBytes = maxUploadBytes;
+    }
+
+    public int getMaxConvertedChars() {
+        return maxConvertedChars;
+    }
+
+    public void setMaxConvertedChars(int maxConvertedChars) {
+        this.maxConvertedChars = maxConvertedChars;
+    }
+
+    public String getAllowedUploadExtensions() {
+        return allowedUploadExtensions;
+    }
+
+    public void setAllowedUploadExtensions(String allowedUploadExtensions) {
+        this.allowedUploadExtensions = allowedUploadExtensions;
     }
 
     public int getMaxIterations() {

@@ -65,10 +65,13 @@ public class SimpleAgentRuntime implements AgentRuntime {
     @Override
     public Flux<AgentEvent> stream(AgentRequest request) {
         return Flux.defer(() -> {
+            long runStartTime = System.currentTimeMillis();
             String threadId = StringUtils.hasText(request.threadId()) ? request.threadId() : UUID.randomUUID().toString();
             String modelName = StringUtils.hasText(request.model()) ? request.model() : this.properties.getModel();
-            RunRecord run = this.runManager.create(threadId, modelName, Map.of("source", "sse"));
+            int uploadedFileCount = request.uploadedFileIds() == null ? 0 : request.uploadedFileIds().size();
+            RunRecord run = this.runManager.create(threadId, modelName, Map.of("source", "sse", "uploadedFiles", uploadedFileCount));
             this.runManager.markRunning(run.runId());
+            log.info("Run started. runId={}, threadId={}, model={}, uploadedFileCount={}", run.runId(), threadId, nullToEmpty(modelName), uploadedFileCount);
 
             AgentRunConfig config = new AgentRunConfig(threadId, run.runId(), modelName, true, false,
                     this.properties.getMaxIterations(), Path.of(this.properties.getWorkspaceRoot()),
@@ -76,7 +79,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             AtomicInteger seq = new AtomicInteger();
 
             List<AgentEvent> prefixEvents = new ArrayList<>();
-            prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Run started", Map.of()));
+            prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Run started", Map.of("uploadedFileCount", uploadedFileCount)));
 
             List<Skill> activeSkills = resolveActiveSkills(request);
             List<ToolResult> toolResults = executePlannedTools(request, config, seq, prefixEvents, activeSkills);
@@ -84,15 +87,18 @@ public class SimpleAgentRuntime implements AgentRuntime {
             AgentRuntimeContext runtimeContext = AgentRuntimeContext.of(config, request, toolResults, this.properties, activeSkills);
             Mono<ModelPrompt> promptMono = new MiddlewareChain(this.middlewares).next(runtimeContext);
 
+            long modelStartTime = System.currentTimeMillis();
             Flux<AgentEvent> modelAndTerminalEvents = promptMono.flatMapMany(prompt -> {
                 if (prompt.userPrompt() != null && prompt.userPrompt().startsWith("BUDGET_EXCEEDED:")) {
                     this.runManager.markCompleted(run.runId());
+                    long totalDuration = System.currentTimeMillis() - runStartTime;
+                    log.info("Run completed with budget limit. runId={}, totalDurationMs={}, toolCount={}", run.runId(), totalDuration, toolResults.size());
                     return Flux.fromIterable(List.of(
                             event(seq, config, AgentEventType.MODEL_COMPLETED,
                                     "Budget exceeded: request + observations too large.",
                                     Map.of("budgetExceeded", true, "toolCount", toolResults.size())),
                             event(seq, config, AgentEventType.RUN_COMPLETED, "Run completed with budget limit",
-                                    Map.of("status", "BUDGET_LIMITED"))
+                                    Map.of("status", "BUDGET_LIMITED", "totalDurationMs", totalDuration))
                     ));
                 }
                 return Flux.concat(
@@ -101,28 +107,37 @@ public class SimpleAgentRuntime implements AgentRuntime {
                         this.modelClient.generate(prompt)
                                 .flatMapMany(answer -> {
                                     this.runManager.markCompleted(run.runId());
+                                    long modelDuration = System.currentTimeMillis() - modelStartTime;
+                                    long totalDuration = System.currentTimeMillis() - runStartTime;
+                                    log.info("Run completed. runId={}, modelDurationMs={}, totalDurationMs={}, toolCount={}, answerLength={}",
+                                            run.runId(), modelDuration, totalDuration, toolResults.size(), answer.length());
                                     return Flux.fromIterable(List.of(
                                             event(seq, config, AgentEventType.MODEL_COMPLETED, answer,
-                                                    Map.of("toolCount", toolResults.size())),
+                                                    Map.of("toolCount", toolResults.size(), "modelDurationMs", modelDuration)),
                                             event(seq, config, AgentEventType.RUN_COMPLETED, "Run completed",
-                                                    Map.of("status", "COMPLETED"))
+                                                    Map.of("status", "COMPLETED", "totalDurationMs", totalDuration))
                                     ));
                                 })
                                 .onErrorResume(ex -> {
                                     String errorMessage = describeException(ex);
-                                    log.error("DeerFlow run failed during model generation. runId={}, threadId={}, model={}, toolCount={}",
-                                            run.runId(), threadId, nullToEmpty(modelName), toolResults.size(), ex);
+                                    long totalDuration = System.currentTimeMillis() - runStartTime;
+                                    log.error("DeerFlow run failed during model generation. runId={}, threadId={}, model={}, toolCount={}, totalDurationMs={}",
+                                            run.runId(), threadId, nullToEmpty(modelName), toolResults.size(), totalDuration, ex);
                                     this.runManager.markFailed(run.runId(), errorMessage);
                                     return Flux.fromIterable(List.of(
                                             event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
-                                                    Map.of("status", "FAILED", "errorType", ex.getClass().getName()))
+                                                    Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))
                                     ));
                                 })
                 );
             });
 
             return Flux.concat(Flux.fromIterable(prefixEvents), modelAndTerminalEvents)
-                    .doOnCancel(() -> this.runManager.markCancelled(run.runId()));
+                    .doOnCancel(() -> {
+                        long totalDuration = System.currentTimeMillis() - runStartTime;
+                        log.info("Run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+                        this.runManager.markCancelled(run.runId());
+                    });
         });
     }
 
@@ -135,7 +150,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
     private List<ToolResult> executePlannedTools(AgentRequest request, AgentRunConfig config, AtomicInteger seq,
             List<AgentEvent> events, List<Skill> activeSkills) {
-        ToolRequest toolRequest = new ToolRequest(request.message(), config.workspaceRoot());
+        ToolRequest toolRequest = new ToolRequest(request.message(), config.workspaceRoot(), request.uploadedFileIds());
         List<ToolResult> results = new ArrayList<>();
         for (AgentTool tool : this.toolRegistry.plan(request.message(), config.maxIterations())) {
             if (this.toolPolicyService != null && !this.toolPolicyService.isToolAllowed(tool.name(), activeSkills)) {
@@ -146,12 +161,15 @@ public class SimpleAgentRuntime implements AgentRuntime {
                         Map.of("tool", tool.name(), "denied", true)));
                 continue;
             }
+            long toolStartTime = System.currentTimeMillis();
             events.add(event(seq, config, AgentEventType.TOOL_STARTED, "Executing " + tool.name(),
                     Map.of("tool", tool.name(), "description", tool.description())));
             ToolResult result = executeToolSafely(tool, toolRequest);
+            long toolDuration = System.currentTimeMillis() - toolStartTime;
+            log.info("Tool executed. tool={}, runId={}, durationMs={}, resultLength={}", tool.name(), config.runId(), toolDuration, result.content().length());
             results.add(result);
             events.add(event(seq, config, AgentEventType.TOOL_COMPLETED, result.content(),
-                    Map.of("tool", result.toolName())));
+                    Map.of("tool", result.toolName(), "durationMs", toolDuration)));
         }
         return results;
     }

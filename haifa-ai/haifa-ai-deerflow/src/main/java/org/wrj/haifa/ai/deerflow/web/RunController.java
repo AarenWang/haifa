@@ -33,7 +33,7 @@ public class RunController {
 
     @PostMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<AgentEvent>> stream(@Valid @RequestBody RunCreateRequest request) {
-        return this.agentRuntime.stream(new AgentRequest(request.threadId(), request.message(), request.model()))
+        return this.agentRuntime.stream(new AgentRequest(request.threadId(), request.message(), request.model(), request.uploadedFileIds()))
                 .map(event -> ServerSentEvent.<AgentEvent>builder(event)
                         .id(event.runId() + ":" + event.eventId())
                         .event(event.type().name().toLowerCase())
