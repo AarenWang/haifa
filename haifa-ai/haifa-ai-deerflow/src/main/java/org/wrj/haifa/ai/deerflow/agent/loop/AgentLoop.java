@@ -3,21 +3,26 @@ package org.wrj.haifa.ai.deerflow.agent.loop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
+import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
-import org.wrj.haifa.ai.deerflow.persistence.entity.AgentLoopRunEntity;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
+import org.wrj.haifa.ai.deerflow.research.CitationProcessingResult;
+import org.wrj.haifa.ai.deerflow.research.FetchProcessingResult;
+import org.wrj.haifa.ai.deerflow.research.RegisteredSourceContent;
+import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
+import org.wrj.haifa.ai.deerflow.research.SearchIngestionResult;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
@@ -25,7 +30,6 @@ import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -50,19 +54,27 @@ public class AgentLoop {
     private final ModelStepStore modelStepStore;
     private final ToolCallStore toolCallStore;
     private final AgentLoopRunStore agentLoopRunStore;
+    private final ResearchRuntimeSupport researchRuntimeSupport;
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry) {
-        this(modelClient, toolRegistry, null, null, null);
+        this(modelClient, toolRegistry, null, null, null, null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore) {
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, null);
+    }
+
+    public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            ResearchRuntimeSupport researchRuntimeSupport) {
         this.modelClient = modelClient;
         this.toolRegistry = toolRegistry;
         this.toolCallParser = new ToolCallParser();
         this.modelStepStore = modelStepStore;
         this.toolCallStore = toolCallStore;
         this.agentLoopRunStore = agentLoopRunStore;
+        this.researchRuntimeSupport = researchRuntimeSupport;
     }
 
     /**
@@ -197,11 +209,16 @@ public class AgentLoop {
 
                 // Check for final answer
                 if (toolCallParser.hasFinalAnswer(modelResponse.content())) {
-                    String finalAnswer = toolCallParser.extractFinalAnswer(modelResponse.content());
+                    CitationProcessingResult citationProcessingResult = finalizeResearchAnswer(
+                            runConfig, toolCallParser.extractFinalAnswer(modelResponse.content()));
                     stopReason = "FINAL_ANSWER";
                     events.add(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
-                            finalAnswer,
-                            Map.of("step", step + 1, "modelDurationMs", modelDuration, "stopReason", stopReason)));
+                            citationProcessingResult.finalAnswer(),
+                            Map.of("step", step + 1, "modelDurationMs", modelDuration, "stopReason", stopReason,
+                                    "citedSources", citationProcessingResult.citedSources().stream()
+                                            .map(source -> source.sourceId()).toList(),
+                                    "citedEvidence", citationProcessingResult.citations().stream()
+                                            .flatMap(citation -> citation.evidenceIds().stream()).distinct().toList())));
                     events.add(event(seq, runConfig, AgentEventType.RESEARCH_STEP_COMPLETED,
                             "Research completed after " + (step + 1) + " steps",
                             Map.of("steps", step + 1, "totalToolCalls", totalToolCalls, "stopReason", stopReason)));
@@ -244,13 +261,14 @@ public class AgentLoop {
 
                 if (loopToolCalls.isEmpty()) {
                     // No tool calls, no final answer — treat as completed
-                    stopReason = runConfig.mode() == org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT ? "ASSISTANT_COMPLETED" : "NO_TOOL_CALLS";
-                    String completionMsg = runConfig.mode() == org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT 
+                    stopReason = runConfig.mode() == RunMode.CHAT ? "ASSISTANT_COMPLETED" : "NO_TOOL_CALLS";
+                    String completionMsg = runConfig.mode() == RunMode.CHAT
                         ? "Chat completed" 
                         : "Research completed after " + (step + 1) + " steps (no tool calls)";
+                    CitationProcessingResult citationProcessingResult = finalizeResearchAnswer(runConfig, modelResponse.content());
 
                     events.add(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
-                            modelResponse.content(),
+                            citationProcessingResult.finalAnswer(),
                             Map.of("step", step + 1, "modelDurationMs", modelDuration, "stopReason", stopReason)));
                     events.add(event(seq, runConfig, AgentEventType.RESEARCH_STEP_COMPLETED,
                             completionMsg,
@@ -331,6 +349,7 @@ public class AgentLoop {
                                     "error", toolResult.error() != null ? toolResult.error() : "")));
 
                     history.add("Tool result (" + toolCall.toolName() + "): " + toolResult.result());
+                    appendResearchObservations(runConfig, toolCall, toolResult, events, seq, history);
                     stepToolResults.add(toolResult);
                 }
 
@@ -370,6 +389,19 @@ public class AgentLoop {
         String toolName = toolCall.toolName();
         String args = toolCall.arguments();
 
+        if (isResearchMode(runConfig) && "web_fetch".equals(toolName) && this.researchRuntimeSupport != null) {
+            String url = extractJsonValue(args, "url");
+            if (!url.isBlank()) {
+                Optional<RegisteredSourceContent> cached = this.researchRuntimeSupport.reuseFetched(url);
+                if (cached.isPresent()) {
+                    RegisteredSourceContent stored = cached.get();
+                    return new ToolCallResult(toolCall.id(), toolCall.toolName(), toolCall.arguments(),
+                            ToolCallResult.Status.SUCCESS, stored.rawContent(), "", 0,
+                            Map.of("url", url, "cached", true, "sourceId", stored.source().sourceId()));
+                }
+            }
+        }
+
         AgentTool tool = findTool(toolName);
         if (tool == null) {
             log.warn("Tool not found: {}. Available: {}", toolName, toolRegistry.tools().stream().map(AgentTool::name).toList());
@@ -382,7 +414,8 @@ public class AgentLoop {
         try {
             ToolResult result = tool.execute(request);
             long duration = System.currentTimeMillis() - startTime;
-            return ToolCallResult.from(toolCall, result.content(), duration);
+            return new ToolCallResult(toolCall.id(), toolCall.toolName(), toolCall.arguments(),
+                    ToolCallResult.Status.SUCCESS, result.content(), "", duration, result.metadata());
         } catch (RuntimeException ex) {
             long duration = System.currentTimeMillis() - startTime;
             log.warn("Tool {} failed: {}", toolName, ex.getMessage());
@@ -414,5 +447,97 @@ public class AgentLoop {
             Map<String, Object> metadata) {
         return AgentEvent.of(Integer.toString(seq.incrementAndGet()), config.runId(), config.threadId(), type, content,
                 metadata);
+    }
+
+    private void appendResearchObservations(AgentRunConfig runConfig, ToolCall toolCall, ToolCallResult toolResult,
+            List<AgentEvent> events, AtomicInteger seq, List<String> history) {
+        if (!isResearchMode(runConfig) || this.researchRuntimeSupport == null || toolResult.status() != ToolCallResult.Status.SUCCESS) {
+            return;
+        }
+        if ("web_search".equals(toolCall.toolName())) {
+            SearchIngestionResult ingestionResult = this.researchRuntimeSupport.ingestSearchResults(
+                    runConfig.threadId(), runConfig.runId(), toolResult.result());
+            for (var registration : ingestionResult.registrations()) {
+                events.add(event(seq, runConfig, AgentEventType.SOURCE_FOUND,
+                        registration.source().title(),
+                        Map.of("sourceId", registration.source().sourceId(),
+                                "url", registration.source().url(),
+                                "domain", registration.source().domain(),
+                                "deduplicated", registration.deduplicated())));
+            }
+            if (!ingestionResult.observation().isBlank()) {
+                history.add(ingestionResult.observation());
+            }
+            return;
+        }
+        if ("web_fetch".equals(toolCall.toolName())) {
+            String url = stringValue(toolResult.metadata().get("url"));
+            if (url.isBlank()) {
+                url = extractJsonValue(toolCall.arguments(), "url");
+            }
+            if (url.isBlank()) {
+                return;
+            }
+            FetchProcessingResult fetchProcessingResult = this.researchRuntimeSupport.ingestFetchedContent(
+                    runConfig.threadId(), runConfig.runId(), url, toolResult.result());
+            events.add(event(seq, runConfig, AgentEventType.SOURCE_FETCHED,
+                    fetchProcessingResult.registration().stored().source().title(),
+                    Map.of("sourceId", fetchProcessingResult.registration().stored().source().sourceId(),
+                            "url", fetchProcessingResult.registration().stored().source().url(),
+                            "domain", fetchProcessingResult.registration().stored().source().domain(),
+                            "cached", fetchProcessingResult.registration().cached(),
+                            "deduplicatedByUrl", fetchProcessingResult.registration().deduplicatedByUrl(),
+                            "deduplicatedByContentHash", fetchProcessingResult.registration().deduplicatedByContentHash())));
+            for (var evidenceItem : fetchProcessingResult.evidenceItems()) {
+                events.add(event(seq, runConfig, AgentEventType.EVIDENCE_EXTRACTED,
+                        evidenceItem.claim(),
+                        Map.of("evidenceId", evidenceItem.evidenceId(),
+                                "sourceId", evidenceItem.sourceId(),
+                                "dimension", evidenceItem.dimension(),
+                                "confidence", evidenceItem.confidence())));
+            }
+            if (!fetchProcessingResult.observation().isBlank()) {
+                history.add(fetchProcessingResult.observation());
+            }
+        }
+    }
+
+    private CitationProcessingResult finalizeResearchAnswer(AgentRunConfig runConfig, String answer) {
+        if (!isResearchMode(runConfig) || this.researchRuntimeSupport == null) {
+            return new CitationProcessingResult(answer, List.of(), List.of());
+        }
+        return this.researchRuntimeSupport.finalizeAnswer(runConfig.threadId(), runConfig.runId(), answer);
+    }
+
+    private static boolean isResearchMode(AgentRunConfig runConfig) {
+        return runConfig.mode() == RunMode.RESEARCH;
+    }
+
+    private static String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static String extractJsonValue(String json, String fieldName) {
+        if (json == null || json.isBlank()) {
+            return "";
+        }
+        String quotedField = "\"" + fieldName + "\"";
+        int keyIndex = json.indexOf(quotedField);
+        if (keyIndex < 0) {
+            return "";
+        }
+        int colonIndex = json.indexOf(':', keyIndex);
+        if (colonIndex < 0) {
+            return "";
+        }
+        int firstQuote = json.indexOf('"', colonIndex + 1);
+        if (firstQuote < 0) {
+            return "";
+        }
+        int secondQuote = json.indexOf('"', firstQuote + 1);
+        if (secondQuote < 0) {
+            return "";
+        }
+        return json.substring(firstQuote + 1, secondQuote).trim();
     }
 }

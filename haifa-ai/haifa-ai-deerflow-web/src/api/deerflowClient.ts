@@ -1,6 +1,8 @@
 import type {
   DeerFlowEvent,
+  EvidenceItem,
   MessageListResponse,
+  ResearchSource,
   RunRequest,
   RunResponse,
   ThreadListResponse,
@@ -147,6 +149,22 @@ export async function fetchRunStatus(runId: string): Promise<unknown> {
 
 export async function fetchRunEvents(runId: string): Promise<DeerFlowEvent[]> {
   const res = await fetch(`/api/deerflow/runs/${encodeURIComponent(runId)}/events`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunSources(runId: string): Promise<ResearchSource[]> {
+  const res = await fetch(`/api/deerflow/runs/${encodeURIComponent(runId)}/sources`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunEvidence(runId: string): Promise<EvidenceItem[]> {
+  const res = await fetch(`/api/deerflow/runs/${encodeURIComponent(runId)}/evidence`, { method: 'GET' });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }

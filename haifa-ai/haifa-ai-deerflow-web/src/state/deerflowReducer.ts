@@ -40,6 +40,8 @@ export const initialState: AppState = {
   threads: [],
   messages: [],
   events: [],
+  researchSources: [],
+  evidenceItems: [],
   uploads: [],
   selectedUploadIds: [],
   runHistory: [],
@@ -64,6 +66,8 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         threadId: action.payload.threadId,
         threads: state.threads,
         messages: state.messages,
+        researchSources: state.researchSources,
+        evidenceItems: state.evidenceItems,
         uploads: state.uploads,
         selectedUploadIds: state.selectedUploadIds,
         runHistory: [entry, ...state.runHistory],
@@ -142,6 +146,16 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         status: 'failed',
         error: action.payload,
       };
+    case 'SET_RESEARCH_SOURCES':
+      return {
+        ...state,
+        researchSources: action.payload,
+      };
+    case 'SET_EVIDENCE_ITEMS':
+      return {
+        ...state,
+        evidenceItems: action.payload,
+      };
     case 'SET_THREAD_ID':
       return {
         ...state,
@@ -179,6 +193,8 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         lastRequest: state.lastRequest,
         threads: state.threads,
         messages: state.threadId ? state.messages : [],
+        researchSources: state.threadId ? state.researchSources : [],
+        evidenceItems: state.threadId ? state.evidenceItems : [],
         uploads: state.uploads,
         selectedUploadIds: state.selectedUploadIds,
         runHistory: state.runHistory,
@@ -193,6 +209,8 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         threadId: state.lastRequest.threadId,
         threads: state.threads,
         messages: state.messages,
+        researchSources: state.researchSources,
+        evidenceItems: state.evidenceItems,
         uploads: state.uploads,
         selectedUploadIds: state.selectedUploadIds,
         runHistory: state.runHistory,

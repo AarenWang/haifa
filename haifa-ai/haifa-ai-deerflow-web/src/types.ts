@@ -60,6 +60,33 @@ export interface RunResponse {
   updatedAt: string;
 }
 
+export interface ResearchSource {
+  sourceId: string;
+  title: string;
+  url: string;
+  domain: string;
+  publishedAt?: string | null;
+  fetchedAt?: string | null;
+  sourceType: string;
+  credibility: number;
+  snippet: string;
+  contentHash: string;
+  fetched: boolean;
+  citationCount: number;
+}
+
+export interface EvidenceItem {
+  evidenceId: string;
+  sourceId: string;
+  sourceTitle: string;
+  sourceUrl: string;
+  quoteOrParaphrase: string;
+  claim: string;
+  dimension: string;
+  confidence: number;
+  extractedAt?: string | null;
+}
+
 export type ThreadStatus = 'ACTIVE' | 'ARCHIVED';
 export type MessageRole = 'USER' | 'ASSISTANT' | 'TOOL' | 'SYSTEM';
 
@@ -153,6 +180,8 @@ export interface AppState {
   finalAnswer?: string;
   error?: string;
   lastRequest?: RunRequest;
+  researchSources: ResearchSource[];
+  evidenceItems: EvidenceItem[];
   uploads: UploadRecord[];
   selectedUploadIds: string[];
   runHistory: RunHistoryEntry[];
@@ -163,6 +192,8 @@ export type AppAction =
   | { type: 'ADD_EVENT'; payload: DeerFlowEvent }
   | { type: 'SET_FINAL_ANSWER'; payload: string }
   | { type: 'SET_ERROR'; payload: string }
+  | { type: 'SET_RESEARCH_SOURCES'; payload: ResearchSource[] }
+  | { type: 'SET_EVIDENCE_ITEMS'; payload: EvidenceItem[] }
   | { type: 'SET_THREAD_ID'; payload?: string }
   | { type: 'SET_THREADS'; payload: ThreadRecord[] }
   | { type: 'SET_MESSAGES'; payload: MessageRecord[] }

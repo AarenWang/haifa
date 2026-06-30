@@ -13,6 +13,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
+import org.wrj.haifa.ai.deerflow.research.EvidenceItem;
+import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
+import org.wrj.haifa.ai.deerflow.research.ResearchSource;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
 import org.wrj.haifa.ai.deerflow.agent.AgentRuntime;
@@ -39,16 +42,19 @@ public class RunController {
     private final ToolExecutionStore toolExecutionStore;
     private final ToolCallStore toolCallStore;
     private final ModelStepStore modelStepStore;
+    private final ResearchRuntimeSupport researchRuntimeSupport;
 
     public RunController(AgentRuntime agentRuntime, RunManager runManager,
             AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
-            ToolCallStore toolCallStore, ModelStepStore modelStepStore) {
+            ToolCallStore toolCallStore, ModelStepStore modelStepStore,
+            ResearchRuntimeSupport researchRuntimeSupport) {
         this.agentRuntime = agentRuntime;
         this.runManager = runManager;
         this.agentEventStore = agentEventStore;
         this.toolExecutionStore = toolExecutionStore;
         this.toolCallStore = toolCallStore;
         this.modelStepStore = modelStepStore;
+        this.researchRuntimeSupport = researchRuntimeSupport;
     }
 
     @PostMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -89,8 +95,57 @@ public class RunController {
         return Mono.just(this.modelStepStore.findByRunId(runId));
     }
 
+    @GetMapping("/{runId}/sources")
+    public Mono<List<ResearchSourceResponse>> sources(@PathVariable String runId) {
+        return Mono.just(this.researchRuntimeSupport.listSourcesByRun(runId).stream()
+                .map(source -> toResearchSourceResponse(runId, source))
+                .toList());
+    }
+
+    @GetMapping("/{runId}/evidence")
+    public Mono<List<EvidenceItemResponse>> evidence(@PathVariable String runId) {
+        return Mono.just(this.researchRuntimeSupport.listEvidenceByRun(runId).stream()
+                .map(this::toEvidenceItemResponse)
+                .toList());
+    }
+
     private static RunResponse toResponse(RunRecord record) {
         return new RunResponse(record.runId(), record.threadId(), record.modelName(), record.status(), record.error(),
                 record.mode(), record.createdAt(), record.updatedAt());
+    }
+
+    private ResearchSourceResponse toResearchSourceResponse(String runId, ResearchSource source) {
+        return new ResearchSourceResponse(
+                source.sourceId(),
+                source.title(),
+                source.url(),
+                source.domain(),
+                source.publishedAt(),
+                source.fetchedAt(),
+                source.sourceType().name(),
+                source.credibility(),
+                source.snippet(),
+                source.contentHash(),
+                source.fetched(),
+                this.researchRuntimeSupport.citationCount(runId, source.sourceId())
+        );
+    }
+
+    private EvidenceItemResponse toEvidenceItemResponse(EvidenceItem evidenceItem) {
+        ResearchSource source = this.researchRuntimeSupport.listSourcesByRun(evidenceItem.runId()).stream()
+                .filter(candidate -> candidate.sourceId().equals(evidenceItem.sourceId()))
+                .findFirst()
+                .orElse(null);
+        return new EvidenceItemResponse(
+                evidenceItem.evidenceId(),
+                evidenceItem.sourceId(),
+                source == null ? "" : source.title(),
+                source == null ? "" : source.url(),
+                evidenceItem.quoteOrParaphrase(),
+                evidenceItem.claim(),
+                evidenceItem.dimension(),
+                evidenceItem.confidence(),
+                evidenceItem.extractedAt()
+        );
     }
 }

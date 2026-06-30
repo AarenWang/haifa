@@ -9,12 +9,15 @@ import {
   listThreads,
   listThreadMessages,
   listThreadRuns,
+  fetchRunEvidence,
   fetchRunEvents,
+  fetchRunSources,
 } from './api/deerflowClient';
 import Header from './components/Header';
 import TaskComposer from './components/TaskComposer';
 import AnswerWorkspace from './components/AnswerWorkspace';
 import ActivityTrace from './components/ActivityTrace';
+import ResearchInspector from './components/ResearchInspector';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
 
 function App() {
@@ -55,6 +58,26 @@ function App() {
     }
   }, []);
 
+  const refreshResearchData = useCallback(async (runId?: string) => {
+    if (!runId) {
+      dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
+      dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
+      return;
+    }
+    try {
+      const [sources, evidenceItems] = await Promise.all([
+        fetchRunSources(runId),
+        fetchRunEvidence(runId),
+      ]);
+      dispatch({ type: 'SET_RESEARCH_SOURCES', payload: sources });
+      dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: evidenceItems });
+    } catch (err) {
+      console.error('Failed to load research artifacts', err);
+      dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
+      dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
+    }
+  }, []);
+
   const refreshEvents = useCallback(async (threadId?: string) => {
     if (!threadId) {
       dispatch({ type: 'SET_EVENTS', payload: [] });
@@ -70,14 +93,17 @@ function App() {
         const latestRun = sorted[0];
         const events = await fetchRunEvents(latestRun.runId);
         dispatch({ type: 'SET_EVENTS', payload: events });
+        refreshResearchData(latestRun.runId);
       } else {
         dispatch({ type: 'SET_EVENTS', payload: [] });
+        refreshResearchData();
       }
     } catch (err) {
       console.error('Failed to load historical events', err);
       dispatch({ type: 'SET_EVENTS', payload: [] });
+      refreshResearchData();
     }
-  }, []);
+  }, [refreshResearchData]);
 
   // Poll backend health
   useEffect(() => {
@@ -170,6 +196,15 @@ function App() {
               refreshThreads();
               refreshMessages(evt.threadId);
             }
+            if (
+              evt.type === 'SOURCE_FOUND' ||
+              evt.type === 'SOURCE_FETCHED' ||
+              evt.type === 'EVIDENCE_EXTRACTED' ||
+              evt.type === 'MODEL_COMPLETED' ||
+              evt.type === 'RUN_COMPLETED'
+            ) {
+              refreshResearchData(evt.runId);
+            }
           },
           onError: (err) => {
             dispatch({ type: 'SET_ERROR', payload: err });
@@ -186,7 +221,7 @@ function App() {
         abortRef.current = null;
       });
     },
-    [refreshMessages, refreshThreads, state.selectedUploadIds, state.threadId]
+    [refreshMessages, refreshResearchData, refreshThreads, state.selectedUploadIds, state.threadId]
   );
 
   const handleStop = useCallback(() => {
@@ -262,6 +297,8 @@ function App() {
     dispatch({ type: 'CLEAR' });
     dispatch({ type: 'SET_UPLOADS', payload: [] });
     dispatch({ type: 'SET_MESSAGES', payload: [] });
+    dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
+    dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
     dispatch({ type: 'SET_THREAD_ID', payload: threadId });
     dispatch({ type: 'SET_LAST_REQUEST' });
   }, []);
@@ -274,6 +311,8 @@ function App() {
     dispatch({ type: 'CLEAR' });
     dispatch({ type: 'SET_UPLOADS', payload: [] });
     dispatch({ type: 'SET_MESSAGES', payload: [] });
+    dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
+    dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
     dispatch({ type: 'SET_THREAD_ID' });
     dispatch({ type: 'SET_LAST_REQUEST' });
   }, []);
@@ -304,6 +343,10 @@ function App() {
             error={state.error}
             onReRun={state.status === 'failed' ? handleReRun : undefined}
             onRefreshMessage={handleRefreshMessage}
+          />
+          <ResearchInspector
+            sources={state.researchSources}
+            evidenceItems={state.evidenceItems}
           />
           <TaskComposer
             onRun={handleRun}

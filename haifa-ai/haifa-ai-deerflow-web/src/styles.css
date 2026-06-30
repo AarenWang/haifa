@@ -1468,6 +1468,213 @@ body {
 .event-card-icon.orange { color: #f76707; }
 .event-card-icon.violet { color: #7048e8; }
 .event-card-icon.pink { color: #d63384; }
+
+.research-panel {
+  margin: 0 24px 16px;
+  border: 1px solid rgba(120, 145, 190, 0.24);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(18, 30, 50, 0.92), rgba(11, 19, 33, 0.98));
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.research-panel-header {
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid rgba(120, 145, 190, 0.16);
+}
+
+.research-panel-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f3f7fd;
+}
+
+.research-panel-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #8ea0bc;
+}
+
+.research-panel-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.95fr) minmax(320px, 1.05fr);
+  gap: 0;
+}
+
+.research-source-list {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  border-right: 1px solid rgba(120, 145, 190, 0.16);
+  max-height: 320px;
+  overflow: auto;
+}
+
+.research-source-card {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(120, 145, 190, 0.16);
+  border-radius: 14px;
+  background: rgba(16, 25, 42, 0.78);
+  padding: 12px 14px;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+}
+
+.research-source-card:hover,
+.research-source-card.active {
+  border-color: rgba(93, 180, 255, 0.55);
+  background: rgba(18, 35, 56, 0.98);
+  transform: translateY(-1px);
+}
+
+.research-source-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: #8ea0bc;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.research-source-title {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #eef4ff;
+  line-height: 1.4;
+}
+
+.research-source-meta {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #8ea0bc;
+  font-size: 12px;
+}
+
+.research-source-snippet {
+  margin-top: 8px;
+  color: #b6c4da;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.research-evidence-drawer {
+  padding: 18px 18px 16px;
+  min-height: 240px;
+}
+
+.research-evidence-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.research-evidence-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f3f7fd;
+  line-height: 1.4;
+}
+
+.research-evidence-link {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #7ec6ff;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.research-evidence-score {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(93, 180, 255, 0.12);
+  color: #a9d9ff;
+  font-size: 12px;
+}
+
+.research-evidence-list {
+  display: grid;
+  gap: 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.research-evidence-card {
+  border: 1px solid rgba(120, 145, 190, 0.16);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(12, 21, 36, 0.7);
+}
+
+.research-evidence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(128, 178, 255, 0.12);
+  color: #bad5ff;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.research-evidence-badge span {
+  color: #8ea0bc;
+}
+
+.research-evidence-claim {
+  margin-top: 10px;
+  color: #e6edf9;
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.research-evidence-details {
+  margin-top: 10px;
+  color: #9fb0ca;
+  font-size: 12px;
+}
+
+.research-evidence-details summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.research-evidence-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.research-evidence-details[open] summary svg {
+  transform: rotate(90deg);
+}
+
+.research-evidence-details > div {
+  margin-top: 8px;
+  color: #c7d3e8;
+  line-height: 1.6;
+}
+
+.research-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #8ea0bc;
+  font-size: 13px;
+}
+
 @media (max-width: 1024px) {
   .workspace-sidebar {
     width: 240px;
@@ -1476,6 +1683,17 @@ body {
   .trace-panel {
     width: 300px;
     min-width: 260px;
+  }
+  .research-panel-grid {
+    grid-template-columns: 1fr;
+  }
+  .research-source-list {
+    border-right: 0;
+    border-bottom: 1px solid rgba(120, 145, 190, 0.16);
+    max-height: none;
+  }
+  .research-evidence-list {
+    max-height: none;
   }
 }
 

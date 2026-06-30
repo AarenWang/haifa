@@ -26,6 +26,7 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
+import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
@@ -62,6 +63,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final ToolCallStore toolCallStore;
     private final AgentLoopRunStore agentLoopRunStore;
     private final org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage;
+    private final ResearchRuntimeSupport researchRuntimeSupport;
 
     @Autowired(required = false)
     private ToolPolicyService toolPolicyService;
@@ -74,6 +76,17 @@ public class SimpleAgentRuntime implements AgentRuntime {
             AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage) {
+        this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
+                agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage, null);
+    }
+
+    @Autowired
+    public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
+            RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
+            AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage,
+            @Autowired(required = false) ResearchRuntimeSupport researchRuntimeSupport) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
@@ -86,13 +99,15 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     return order == null ? Integer.MAX_VALUE : order.value();
                 }))
                 .toList();
-        this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore);
+        this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
+                researchRuntimeSupport);
         this.agentEventStore = agentEventStore;
         this.toolExecutionStore = toolExecutionStore;
         this.modelStepStore = modelStepStore;
         this.toolCallStore = toolCallStore;
         this.agentLoopRunStore = agentLoopRunStore;
         this.skillStorage = skillStorage;
+        this.researchRuntimeSupport = researchRuntimeSupport;
     }
 
     @Override
