@@ -55,11 +55,25 @@ haifa:
         local tool observations when they are relevant, be concise, and name
         any files you used.
       # Tool provider configuration (defaults are duckduckgo / jina)
+      #
+      # IMPORTANT: Only providers with a registered Spring bean can be used.
+      # Currently registered: duckduckgo (web-search), jina (web-fetch).
+      # Configuring an unregistered provider will cause the application to fail at startup.
+      #
+      # For providers that require an API key, set the corresponding api-key property.
+      # Missing api-key for a requiresApiKey=true provider will also fail at startup.
+      #
       # tools:
       #   web-search:
-      #     provider: duckduckgo   # or tavily, brave, exa, firecrawl, infoquest, groundroute, serper, searxng, fastcrw
+      #     provider: duckduckgo   # default; no api key needed
+      #     # provider: tavily    # requires api-key (env: TAVILY_API_KEY)
+      #     # provider: brave     # requires api-key (env: BRAVE_SEARCH_API_KEY)
+      #     # api-key: ${TAVILY_API_KEY:}
       #   web-fetch:
-      #     provider: jina         # or exa, firecrawl, infoquest, groundroute, browserless, fastcrw
+      #     provider: jina         # default; anonymous usage supported
+      #     # provider: exa        # requires api-key (env: EXA_API_KEY)
+      #     # provider: firecrawl  # requires api-key (env: FIRECRAWL_API_KEY)
+      #     # api-key: ${JINA_API_KEY:}
       max-research-steps: 20
       max-research-sources: 20
       max-fetches-per-run: 10

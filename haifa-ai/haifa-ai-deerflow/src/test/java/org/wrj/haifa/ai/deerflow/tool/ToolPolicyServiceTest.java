@@ -59,24 +59,24 @@ class ToolPolicyServiceTest {
     }
 
     @Test
-    void standardToolsAreNotMarkedAsBuiltinsAndRequireSkills() {
+    void standardToolsAreAllowedWithoutSkillActivation() {
         AgentTool webSearch = new DummyTool("web_search", "search");
         AgentTool writeFile = new DummyTool("write_file", "write");
         AgentTool current = new DummyTool("current_time", "time");
 
         ToolPolicyService localPolicy = new ToolPolicyService(List.of(webSearch, writeFile, current));
 
-        // current_time is a standard built-in, so it is allowed
+        // current_time is a standard built-in, so it is always allowed
         assertThat(localPolicy.isToolAllowed("current_time", List.of())).isTrue();
 
-        // web_search and write_file are standard configured tools, NOT built-ins, so disallowed by default
-        assertThat(localPolicy.isToolAllowed("web_search", List.of())).isFalse();
-        assertThat(localPolicy.isToolAllowed("write_file", List.of())).isFalse();
+        // web_search and write_file are standard configured tools, allowed without skill activation
+        assertThat(localPolicy.isToolAllowed("web_search", List.of())).isTrue();
+        assertThat(localPolicy.isToolAllowed("write_file", List.of())).isTrue();
 
-        // But allowed if a skill allows them
+        // Still allowed if a skill explicitly mentions them
         Skill skill = new Skill("research", "Do research", "public", "md", Map.of(), Set.of("web_search"));
         assertThat(localPolicy.isToolAllowed("web_search", List.of(skill))).isTrue();
-        assertThat(localPolicy.isToolAllowed("write_file", List.of(skill))).isFalse();
+        assertThat(localPolicy.isToolAllowed("write_file", List.of(skill))).isTrue();
     }
 
     @Test

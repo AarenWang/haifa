@@ -31,11 +31,34 @@ public class ToolPolicyService {
     }
 
     public boolean isToolAllowed(String toolName, List<Skill> activeSkills) {
+        return isToolAllowed(toolName, activeSkills, org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH);
+    }
+
+    public boolean isToolAllowed(String toolName, List<Skill> activeSkills, org.wrj.haifa.ai.deerflow.agent.RunMode mode) {
         if (toolName == null || toolName.isBlank()) {
             return false;
         }
         // Built-in tools are always allowed
         if (builtinToolNames.contains(toolName)) {
+            return true;
+        }
+
+        // In CHAT mode, modifying/unsafe tools (write_file, str_replace, bash) always require skill activation
+        if (mode == org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT && isModifyingTool(toolName)) {
+            if (activeSkills == null || activeSkills.isEmpty()) {
+                return false;
+            }
+            for (Skill skill : activeSkills) {
+                Set<String> allowed = skill.allowedTools();
+                if (allowed != null && allowed.contains(toolName)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Standard configured tools (web_search, web_fetch, file ops, etc.) do not require skill activation
+        if (isStandardToolName(toolName)) {
             return true;
         }
         // No active skills => no extra permissions, unknown tool is disallowed
@@ -50,6 +73,10 @@ public class ToolPolicyService {
             }
         }
         return false;
+    }
+
+    private static boolean isModifyingTool(String name) {
+        return "write_file".equals(name) || "str_replace".equals(name) || "bash".equals(name);
     }
 
     public Set<String> allowedToolsForSkills(List<Skill> activeSkills) {

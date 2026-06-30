@@ -1,9 +1,12 @@
 package org.wrj.haifa.ai.deerflow.tool;
 
 import java.util.List;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
+import org.wrj.haifa.ai.deerflow.provider.WebFetchProviderRegistry;
+import org.wrj.haifa.ai.deerflow.provider.WebSearchProviderRegistry;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.skill.SkillStorage;
 
@@ -14,16 +17,26 @@ public class DeferredToolCatalog {
     private List<Skill> allSkills;
     private ToolRegistry toolRegistry;
     private SkillStorage skillStorage;
+    private final WebSearchProviderRegistry searchRegistry;
+    private final WebFetchProviderRegistry fetchRegistry;
 
     @Autowired
-    public DeferredToolCatalog(@Lazy ToolRegistry toolRegistry, SkillStorage skillStorage) {
+    public DeferredToolCatalog(@Lazy ToolRegistry toolRegistry, SkillStorage skillStorage,
+            @Autowired(required = false) WebSearchProviderRegistry searchRegistry,
+            @Autowired(required = false) WebFetchProviderRegistry fetchRegistry) {
         this.toolRegistry = toolRegistry;
         this.skillStorage = skillStorage;
+        this.searchRegistry = searchRegistry;
+        this.fetchRegistry = fetchRegistry;
     }
 
     public DeferredToolCatalog(List<AgentTool> builtinTools, List<Skill> allSkills) {
         this.builtinTools = List.copyOf(builtinTools);
         this.allSkills = List.copyOf(allSkills);
+        this.toolRegistry = null;
+        this.skillStorage = null;
+        this.searchRegistry = null;
+        this.fetchRegistry = null;
     }
 
     private List<AgentTool> builtinTools() {
@@ -68,9 +81,29 @@ public class DeferredToolCatalog {
         };
     }
 
+    private String buildWebSearchProviderInfo() {
+        List<String> allIds = org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType.allIds();
+        List<String> registeredIds = searchRegistry != null
+                ? searchRegistry.allProviders().stream().map(p -> p.type().id()).toList()
+                : List.of(org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType.defaultType().id());
+        return "Default: " + org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType.defaultType().id()
+                + ". Registered: " + String.join(", ", registeredIds)
+                + ". All supported: " + String.join(", ", allIds)
+                + (registeredIds.size() < allIds.size() ? " (unregistered are placeholder-only)" : "");
+    }
+
+    private String buildWebFetchProviderInfo() {
+        List<String> allIds = org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType.allIds();
+        List<String> registeredIds = fetchRegistry != null
+                ? fetchRegistry.allProviders().stream().map(p -> p.type().id()).toList()
+                : List.of(org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType.defaultType().id());
+        return "Default: " + org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType.defaultType().id()
+                + ". Registered: " + String.join(", ", registeredIds)
+                + ". All supported: " + String.join(", ", allIds)
+                + (registeredIds.size() < allIds.size() ? " (unregistered are placeholder-only)" : "");
+    }
+
     private List<ToolDescriptor> standardDescriptors() {
-        String webSearchProviders = "Available: " + String.join(", ", org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType.allIds());
-        String webFetchProviders = "Available: " + String.join(", ", org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType.allIds());
         return List.of(
                 new ToolDescriptor("present_files", "Present final output files to the user.", "builtin", "展示/人机交互", false),
                 new ToolDescriptor("ask_clarification", "Ask the user for clarification about ambiguous requirements.", "builtin", "展示/人机交互", false),
@@ -79,9 +112,9 @@ public class DeferredToolCatalog {
                 new ToolDescriptor("tool_search", "Search available tools and skills.", "builtin", "展示/人机交互", false),
                 
                 new ToolDescriptor("web_search", "Search the web for queries to find relevant sources and snippets.", "configured", "Web/检索", false,
-                        "Default provider: duckduckgo. " + webSearchProviders),
+                        buildWebSearchProviderInfo()),
                 new ToolDescriptor("web_fetch", "Fetch and read the full markdown content of a URL.", "configured", "Web/检索", false,
-                        "Default provider: jina. " + webFetchProviders),
+                        buildWebFetchProviderInfo()),
                 new ToolDescriptor("image_search", "Search the web for images.", "configured", "Web/检索", false),
                 
                 new ToolDescriptor("ls", "List files and directories in the workspace.", "configured", "文件读取", false),

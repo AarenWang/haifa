@@ -4,5 +4,5 @@ import reactor.core.publisher.Mono;
 
 public interface AgentModelClient {
 
-    Mono<String> generate(ModelPrompt prompt);
+    Mono<ModelResponse> generate(ModelPrompt prompt);
 }

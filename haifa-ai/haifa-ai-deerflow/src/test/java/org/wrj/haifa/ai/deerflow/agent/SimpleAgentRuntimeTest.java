@@ -12,6 +12,9 @@ import org.wrj.haifa.ai.deerflow.middleware.DynamicContextMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.TokenBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.ToolErrorHandlingMiddleware;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
+import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentEventStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
@@ -76,7 +79,23 @@ class SimpleAgentRuntimeTest {
         properties.setSystemPrompt("test system");
         properties.setMaxIterations(4);
 
-        AgentModelClient modelClient = prompt -> Mono.just("model saw: " + prompt.userPrompt());
+        org.wrj.haifa.ai.deerflow.model.ModelToolCall tc1 = new org.wrj.haifa.ai.deerflow.model.ModelToolCall("tc-1", "list_workspace_files", "{}");
+        org.wrj.haifa.ai.deerflow.model.ModelToolCall tc2 = new org.wrj.haifa.ai.deerflow.model.ModelToolCall("tc-2", "read_workspace_file", "{\"path\":\"note.md\"}");
+
+        AgentModelClient modelClient = new AgentModelClient() {
+            private int callCount = 0;
+            @Override
+            public Mono<ModelResponse> generate(ModelPrompt prompt) {
+                callCount++;
+                if (callCount == 1) {
+                    return Mono.just(new ModelResponse("", List.of(tc1)));
+                } else if (callCount == 2) {
+                    return Mono.just(new ModelResponse("", List.of(tc2)));
+                } else {
+                    return Mono.just(new ModelResponse("<final_answer>I read note.md: hello deerflow</final_answer>"));
+                }
+            }
+        };
         ToolRegistry tools = new ToolRegistry(List.of(
                 new CurrentTimeTool(),
                 new ListWorkspaceFilesTool(),
@@ -150,7 +169,19 @@ class SimpleAgentRuntimeTest {
         properties.setWorkspaceRoot(".");
         properties.setSystemPrompt("test system");
 
-        AgentModelClient modelClient = prompt -> Mono.just(prompt.userPrompt());
+        org.wrj.haifa.ai.deerflow.model.ModelToolCall tc = new org.wrj.haifa.ai.deerflow.model.ModelToolCall("tc-expl", "explode", "{}");
+        AgentModelClient modelClient = new AgentModelClient() {
+            private int callCount = 0;
+            @Override
+            public Mono<ModelResponse> generate(ModelPrompt prompt) {
+                callCount++;
+                if (callCount == 1) {
+                    return Mono.just(new ModelResponse("", List.of(tc)));
+                } else {
+                    return Mono.just(new ModelResponse("<final_answer>handled gracefully</final_answer>"));
+                }
+            }
+        };
         ToolRegistry tools = new ToolRegistry(List.of(new ExplodingTool()));
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager, messageStore,
                 List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
@@ -184,7 +215,7 @@ class SimpleAgentRuntimeTest {
         properties.setSystemPrompt("test system");
         properties.setCharBudget(5);
 
-        AgentModelClient modelClient = prompt -> Mono.just("should not reach model");
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("should not reach model"));
         ToolRegistry tools = new ToolRegistry(List.of());
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager, messageStore,
                 List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),

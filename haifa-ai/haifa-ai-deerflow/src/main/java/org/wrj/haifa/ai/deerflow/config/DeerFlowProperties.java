@@ -107,6 +107,7 @@ public class DeerFlowProperties {
 
     public static class WebSearchToolConfig {
         private String provider = WebSearchProviderType.defaultType().id();
+        private String apiKey;
 
         public String getProvider() {
             return provider;
@@ -114,11 +115,20 @@ public class DeerFlowProperties {
 
         public void setProvider(String provider) {
             this.provider = provider;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
         }
     }
 
     public static class WebFetchToolConfig {
         private String provider = WebFetchProviderType.defaultType().id();
+        private String apiKey;
 
         public String getProvider() {
             return provider;
@@ -126,6 +136,14 @@ public class DeerFlowProperties {
 
         public void setProvider(String provider) {
             this.provider = provider;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
         }
     }
 

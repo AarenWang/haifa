@@ -17,11 +17,11 @@ public class ReadWorkspaceFileTool implements AgentTool {
     private static final Pattern READ_PATH = Pattern.compile("(?i)(?:read|open|查看|读取)\\s+([^\\s,;]+)");
 
     /**
-     * Pattern to extract JSON string values for keys like "filepath", "path", or "file".
+     * Pattern to extract JSON string values for keys like "filepath", "file_path", "path", or "file".
      * Matches: "filepath":"pom.xml" or "path": "src/main/resources/app.yml" etc.
      */
     private static final Pattern JSON_PATH_VALUE = Pattern.compile(
-            "\"(?:filepath|path|file)\"\\s*:\\s*\"([^\"]+)\"");
+            "\"(?:filepath|file_path|path|file)\"\\s*:\\s*\"([^\"]+)\"");
 
     @Override
     public String name() {

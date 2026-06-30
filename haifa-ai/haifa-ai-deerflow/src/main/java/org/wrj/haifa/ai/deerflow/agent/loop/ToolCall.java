@@ -31,6 +31,10 @@ public record ToolCall(
         return new ToolCall(null, toolName, arguments, Status.PENDING, Map.of());
     }
 
+    public static ToolCall of(String id, String toolName, String arguments) {
+        return new ToolCall(id, toolName, arguments, Status.PENDING, Map.of());
+    }
+
     public ToolCall withStatus(Status newStatus) {
         return new ToolCall(this.id, this.toolName, this.arguments, newStatus, this.metadata);
     }

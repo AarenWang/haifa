@@ -12,6 +12,8 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.persistence.entity.AgentLoopRunEntity;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
@@ -97,7 +99,11 @@ public class AgentLoop {
 
             StringBuilder toolDescriptions = new StringBuilder();
             for (AgentTool tool : toolRegistry.tools()) {
-                toolDescriptions.append("- ").append(tool.name()).append(": ").append(tool.description()).append("\n");
+                String toolName = tool.name();
+                if (toolPolicy != null && !toolPolicy.isToolAllowed(toolName, activeSkills, runConfig.mode())) {
+                    continue;
+                }
+                toolDescriptions.append("- ").append(toolName).append(": ").append(tool.description()).append("\n");
             }
 
             String fullSystemPrompt = systemPrompt + "\n\nAvailable tools:\n" + toolDescriptions
@@ -153,7 +159,7 @@ public class AgentLoop {
                         Map.of("step", step + 1, "maxSteps", config.maxSteps())));
 
                 ModelPrompt prompt = new ModelPrompt(fullSystemPrompt, userPrompt, runConfig.modelName());
-                String modelResponse;
+                ModelResponse modelResponse;
                 try {
                     modelResponse = modelClient.generate(prompt).block();
                 } catch (Exception ex) {
@@ -171,27 +177,27 @@ public class AgentLoop {
                 long modelDuration = System.currentTimeMillis() - modelStartTime;
 
                 if (modelResponse == null) {
-                    modelResponse = "";
+                    modelResponse = new ModelResponse("");
                 }
 
                 // Persist model step
                 if (modelStepStore != null) {
                     try {
-                        ModelStep modelStep = new ModelStep(step + 1, userPrompt, modelResponse, List.of(), modelStartTime, modelDuration);
+                        ModelStep modelStep = new ModelStep(step + 1, userPrompt, modelResponse.content(), List.of(), modelStartTime, modelDuration);
                         modelStepStore.save(modelStep, runConfig.runId(), runConfig.threadId());
                     } catch (Exception e) {
                         log.warn("Failed to persist model step: {}", e.getMessage());
                     }
                 }
 
-                history.add("Assistant: " + modelResponse);
+                history.add("Assistant: " + modelResponse.content());
                 events.add(event(seq, runConfig, AgentEventType.MODEL_DELTA,
-                        modelResponse,
+                        modelResponse.content(),
                         Map.of("step", step + 1, "modelDurationMs", modelDuration)));
 
                 // Check for final answer
-                if (toolCallParser.hasFinalAnswer(modelResponse)) {
-                    String finalAnswer = toolCallParser.extractFinalAnswer(modelResponse);
+                if (toolCallParser.hasFinalAnswer(modelResponse.content())) {
+                    String finalAnswer = toolCallParser.extractFinalAnswer(modelResponse.content());
                     stopReason = "FINAL_ANSWER";
                     events.add(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
                             finalAnswer,
@@ -209,19 +215,48 @@ public class AgentLoop {
                     break;
                 }
 
-                // Parse tool calls
-                List<ToolCallParser.ParsedToolCall> parsedCalls = toolCallParser.parse(modelResponse);
-                if (parsedCalls.isEmpty()) {
+                // Extract tool calls (prioritize structured tool calls, fallback to text tags)
+                List<ToolCall> loopToolCalls = new ArrayList<>();
+                if (modelResponse.toolCalls() != null && !modelResponse.toolCalls().isEmpty()) {
+                    for (ModelToolCall mtc : modelResponse.toolCalls()) {
+                        loopToolCalls.add(ToolCall.of(mtc.id(), mtc.name(), mtc.arguments()));
+                    }
+                } else if (modelResponse.content() != null && !modelResponse.content().isBlank()) {
+                    List<ToolCallParser.ParsedToolCall> parsed = toolCallParser.parse(modelResponse.content());
+                    for (ToolCallParser.ParsedToolCall ptc : parsed) {
+                        loopToolCalls.add(ToolCall.of(ptc.toolName(), ptc.arguments()));
+                    }
+                }
+
+                // Process invalid tool calls explicitly so they are not swallowed silently
+                if (modelResponse.invalidToolCalls() != null && !modelResponse.invalidToolCalls().isEmpty()) {
+                    for (String invalidCall : modelResponse.invalidToolCalls()) {
+                        String invalidCallId = java.util.UUID.randomUUID().toString();
+                        events.add(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
+                                "Invalid tool call: " + invalidCall,
+                                Map.of("toolCallId", invalidCallId, "error", "Invalid tool call format or arguments")));
+                        events.add(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                                "Error: Invalid tool call arguments",
+                                Map.of("toolCallId", invalidCallId, "status", "FAILED", "error", "Invalid tool call arguments")));
+                        history.add("Tool result (error): Invalid tool call arguments for " + invalidCall);
+                    }
+                }
+
+                if (loopToolCalls.isEmpty()) {
                     // No tool calls, no final answer — treat as completed
-                    stopReason = "NO_TOOL_CALLS";
+                    stopReason = runConfig.mode() == org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT ? "ASSISTANT_COMPLETED" : "NO_TOOL_CALLS";
+                    String completionMsg = runConfig.mode() == org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT 
+                        ? "Chat completed" 
+                        : "Research completed after " + (step + 1) + " steps (no tool calls)";
+
                     events.add(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
-                            modelResponse,
+                            modelResponse.content(),
                             Map.of("step", step + 1, "modelDurationMs", modelDuration, "stopReason", stopReason)));
                     events.add(event(seq, runConfig, AgentEventType.RESEARCH_STEP_COMPLETED,
-                            "Research completed after " + (step + 1) + " steps (no tool calls)",
+                            completionMsg,
                             Map.of("steps", step + 1, "totalToolCalls", totalToolCalls, "stopReason", stopReason)));
                     events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
-                            "Research run completed",
+                            "Run completed",
                             Map.of("stopReason", stopReason, "steps", step + 1, "totalToolCalls", totalToolCalls)));
                     if (agentLoopRunStore != null) {
                         agentLoopRunStore.markCompleted(runConfig.runId(), stopReason);
@@ -232,13 +267,12 @@ public class AgentLoop {
 
                 // Execute tool calls
                 List<ToolCallResult> stepToolResults = new ArrayList<>();
-                for (ToolCallParser.ParsedToolCall parsedCall : parsedCalls) {
+                for (ToolCall toolCall : loopToolCalls) {
                     totalToolCalls++;
                     if (totalToolCalls > config.maxToolCalls()) {
                         break;
                     }
 
-                    ToolCall toolCall = ToolCall.of(parsedCall.toolName(), parsedCall.arguments());
                     events.add(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
                             "Tool call requested: " + toolCall.toolName(),
                             Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(), "arguments", toolCall.arguments())));
@@ -252,22 +286,26 @@ public class AgentLoop {
                         }
                     }
 
+                    // Resolve normalized target tool name
+                    AgentTool targetTool = findTool(toolCall.toolName());
+                    String targetToolName = targetTool != null ? targetTool.name() : toolCall.toolName();
+
                     // Policy check
-                    if (toolPolicy != null && activeSkills != null && !toolPolicy.isToolAllowed(toolCall.toolName(), activeSkills)) {
+                    if (toolPolicy != null && activeSkills != null && !toolPolicy.isToolAllowed(targetToolName, activeSkills, runConfig.mode())) {
                         events.add(event(seq, runConfig, AgentEventType.TOOL_STARTED,
-                                "Policy denied " + toolCall.toolName(),
-                                Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(), "denied", true)));
+                                "Policy denied " + targetToolName,
+                                Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
                         events.add(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
                                 "Tool denied by policy",
-                                Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(), "denied", true)));
-                        history.add("Tool result (" + toolCall.toolName() + "): Tool denied by policy");
+                                Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
+                        history.add("Tool result (" + targetToolName + "): Tool denied by policy");
                         continue;
                     }
 
                     long toolStartTime = System.currentTimeMillis();
                     events.add(event(seq, runConfig, AgentEventType.TOOL_STARTED,
-                            "Executing " + toolCall.toolName(),
-                            Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName())));
+                            "Executing " + targetToolName,
+                            Map.of("toolCallId", toolCall.id(), "toolName", targetToolName)));
 
                     ToolCallResult toolResult = executeTool(toolCall, runConfig, uploadedFileIds);
                     long toolDuration = System.currentTimeMillis() - toolStartTime;
@@ -281,11 +319,16 @@ public class AgentLoop {
                         }
                     }
 
+                    String eventContent = toolResult.result() != null ? toolResult.result() : "";
+                    if (toolResult.status() == ToolCallResult.Status.FAILED && toolResult.error() != null) {
+                        eventContent = toolResult.error();
+                    }
+
                     events.add(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
-                            toolResult.result(),
+                            eventContent,
                             Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(),
                                     "status", toolResult.status().name(), "durationMs", toolDuration,
-                                    "error", toolResult.error())));
+                                    "error", toolResult.error() != null ? toolResult.error() : "")));
 
                     history.add("Tool result (" + toolCall.toolName() + "): " + toolResult.result());
                     stepToolResults.add(toolResult);
@@ -348,15 +391,20 @@ public class AgentLoop {
     }
 
     private AgentTool findTool(String toolName) {
+        if (toolName == null) {
+            return null;
+        }
+        String normalizedQuery = toolName.toLowerCase().replace("_", "").replace("-", "").trim();
         for (AgentTool tool : toolRegistry.tools()) {
-            if (tool.name().equals(toolName)) {
+            String normalizedToolName = tool.name().toLowerCase().replace("_", "").replace("-", "").trim();
+            if (normalizedToolName.equals(normalizedQuery)) {
                 return tool;
             }
         }
-        if ("mock_search".equals(toolName)) {
+        if ("mock_search".equals(toolName) || "mocksearch".equals(normalizedQuery)) {
             return findTool("web_search");
         }
-        if ("mock_fetch".equals(toolName)) {
+        if ("mock_fetch".equals(toolName) || "mockfetch".equals(normalizedQuery)) {
             return findTool("web_fetch");
         }
         return null;

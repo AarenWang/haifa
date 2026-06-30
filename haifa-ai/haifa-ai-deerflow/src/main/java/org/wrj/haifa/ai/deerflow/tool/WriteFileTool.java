@@ -51,7 +51,16 @@ public class WriteFileTool implements AgentTool {
                 // Natural language fallback
                 return ToolResult.of(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
             }
-            String requestedPath = node.has("path") ? node.get("path").asText() : null;
+            String requestedPath = null;
+            if (node.has("path")) {
+                requestedPath = node.get("path").asText();
+            } else if (node.has("filepath")) {
+                requestedPath = node.get("filepath").asText();
+            } else if (node.has("file_path")) {
+                requestedPath = node.get("file_path").asText();
+            } else if (node.has("file")) {
+                requestedPath = node.get("file").asText();
+            }
             String content = node.has("content") ? node.get("content").asText() : "";
             if (requestedPath == null || requestedPath.isBlank()) {
                 return ToolResult.of(name(), "Error: path is required");

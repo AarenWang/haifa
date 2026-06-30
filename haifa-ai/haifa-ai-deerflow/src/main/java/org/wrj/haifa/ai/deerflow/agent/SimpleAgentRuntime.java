@@ -127,11 +127,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Run started", Map.of("uploadedFileCount", uploadedFileCount, "mode", "chat")));
 
             List<Skill> activeSkills = resolveActiveSkills(request);
-            List<ToolResult> toolResults = executePlannedTools(request, config, seq, prefixEvents, activeSkills);
-            for (ToolResult toolResult : toolResults) {
-                this.messageStore.add(threadId, run.runId(), MessageRole.TOOL, toolResult.content(),
-                        Map.of("tool", toolResult.toolName()));
-            }
+            List<ToolResult> toolResults = List.of();
 
             AgentRuntimeContext runtimeContext = AgentRuntimeContext.of(config, request, toolResults, this.properties, activeSkills);
             Mono<ModelPrompt> promptMono = new MiddlewareChain(this.middlewares).next(runtimeContext);
@@ -148,31 +144,76 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     log.info("Run completed with budget limit. runId={}, totalDurationMs={}, toolCount={}", run.runId(), totalDuration, toolResults.size());
                     return Flux.fromIterable(List.of(
                             event(seq, config, AgentEventType.MODEL_COMPLETED,
-                                    "Budget exceeded: request + observations too large.",
-                                    Map.of("budgetExceeded", true, "toolCount", toolResults.size())),
+                                     "Budget exceeded: request + observations too large.",
+                                     Map.of("budgetExceeded", true, "toolCount", toolResults.size())),
                             event(seq, config, AgentEventType.RUN_COMPLETED, "Run completed with budget limit",
-                                    Map.of("status", "BUDGET_LIMITED", "totalDurationMs", totalDuration))
+                                     Map.of("status", "BUDGET_LIMITED", "totalDurationMs", totalDuration))
                     ));
                 }
-                return Flux.concat(
-                        Flux.just(event(seq, config, AgentEventType.MODEL_STARTED, "Calling Spring AI model adapter",
-                                Map.of("model", nullToEmpty(modelName)))),
-                        this.modelClient.generate(prompt)
-                                .flatMapMany(answer -> {
-                                    this.runManager.markCompleted(run.runId());
-                                    this.threadManager.touch(threadId);
-                                    this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, answer,
-                                            Map.of("toolCount", toolResults.size()));
-                                    long modelDuration = System.currentTimeMillis() - modelStartTime;
+
+                org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig loopConfig = new org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig(
+                        config.maxIterations(),
+                        15, // max tool calls in chat mode
+                        this.properties.getResearchTimeout(),
+                        ResearchOptions.defaults());
+
+                Flux<AgentEvent> loopEvents = this.agentLoop.run(
+                        loopConfig,
+                        config,
+                        prompt.systemPrompt(),
+                        prompt.userPrompt(),
+                        seq,
+                        this.toolPolicyService,
+                        activeSkills,
+                        request.uploadedFileIds()
+                );
+
+                final java.util.concurrent.atomic.AtomicReference<String> lastEventType = new java.util.concurrent.atomic.AtomicReference<>();
+                final java.util.concurrent.atomic.AtomicReference<String> lastContent = new java.util.concurrent.atomic.AtomicReference<>("");
+                final java.util.concurrent.atomic.AtomicReference<Map<String, Object>> lastMetadata = new java.util.concurrent.atomic.AtomicReference<>(Map.of());
+
+                return loopEvents
+                                .doOnNext(evt -> {
+                                    lastEventType.set(evt.type().name());
+                                    if (evt.type() == AgentEventType.MODEL_COMPLETED || evt.type() == AgentEventType.MODEL_DELTA) {
+                                        if (evt.content() != null) {
+                                            lastContent.set(evt.content());
+                                        }
+                                    }
+                                    if (evt.metadata() != null) {
+                                        lastMetadata.set(evt.metadata());
+                                    }
+                                     if (evt.type() == AgentEventType.RUN_FAILED) {
+                                         this.runManager.markFailed(run.runId(), evt.content());
+                                         this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, evt.content(),
+                                                 Map.of("status", "FAILED", "errorType", "ModelException"));
+                                     }
+                                     if (evt.type() == AgentEventType.TOOL_COMPLETED) {
+                                         String toolName = (String) evt.metadata().get("toolName");
+                                         this.messageStore.add(threadId, run.runId(), MessageRole.TOOL, evt.content(),
+                                                 Map.of("tool", toolName != null ? toolName : "unknown",
+                                                        "tool_call_id", evt.metadata().getOrDefault("toolCallId", "")));
+                                     }
+                                 })
+                                .doOnComplete(() -> {
+                                    String lastType = lastEventType.get();
                                     long totalDuration = System.currentTimeMillis() - runStartTime;
-                                    log.info("Run completed. runId={}, modelDurationMs={}, totalDurationMs={}, toolCount={}, answerLength={}",
-                                            run.runId(), modelDuration, totalDuration, toolResults.size(), answer.length());
-                                    return Flux.fromIterable(List.of(
-                                            event(seq, config, AgentEventType.MODEL_COMPLETED, answer,
-                                                    Map.of("toolCount", toolResults.size(), "modelDurationMs", modelDuration)),
-                                            event(seq, config, AgentEventType.RUN_COMPLETED, "Run completed",
-                                                    Map.of("status", "COMPLETED", "totalDurationMs", totalDuration))
-                                    ));
+                                    if ("RUN_FAILED".equals(lastType)) {
+                                        this.runManager.markFailed(run.runId(), lastContent.get());
+                                        this.threadManager.touch(threadId);
+                                    } else if ("RUN_CANCELLED".equals(lastType)) {
+                                        this.threadManager.touch(threadId);
+                                    } else {
+                                        this.runManager.markCompleted(run.runId());
+                                        this.threadManager.touch(threadId);
+                                        String assistantAnswer = lastContent.get();
+                                        org.wrj.haifa.ai.deerflow.agent.loop.ToolCallParser parser = new org.wrj.haifa.ai.deerflow.agent.loop.ToolCallParser();
+                                        assistantAnswer = parser.cleanResponseText(assistantAnswer);
+                                        int toolCount = toolResults.size() + (int) lastMetadata.get().getOrDefault("totalToolCalls", 0);
+                                        this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, assistantAnswer,
+                                                Map.of("toolCount", toolCount));
+                                    }
+                                    log.info("Chat run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
                                 })
                                 .onErrorResume(ex -> {
                                     String errorMessage = describeException(ex);
@@ -187,8 +228,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                             event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
                                                     Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))
                                     ));
-                                })
-                );
+                                });
             });
 
             return Flux.concat(Flux.fromIterable(prefixEvents), modelAndTerminalEvents)
@@ -414,8 +454,33 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private void saveEvent(AgentEvent event) {
         try {
             this.agentEventStore.save(event);
+            if (event.type() == AgentEventType.TOOL_STARTED) {
+                String toolName = (String) event.metadata().get("toolName");
+                if (toolName == null) toolName = (String) event.metadata().get("tool");
+                String desc = (String) event.metadata().getOrDefault("description", "");
+                Boolean denied = (Boolean) event.metadata().getOrDefault("denied", false);
+                if (Boolean.TRUE.equals(denied)) {
+                    this.toolExecutionStore.saveDenied(event.runId(), event.threadId(), toolName, "Policy denied", event.metadata());
+                } else {
+                    String reqStr = (String) event.metadata().getOrDefault("arguments", "");
+                    this.toolExecutionStore.saveStarted(event.runId(), event.threadId(), toolName, desc, reqStr, event.metadata());
+                }
+            } else if (event.type() == AgentEventType.TOOL_COMPLETED) {
+                String toolName = (String) event.metadata().get("toolName");
+                if (toolName == null) toolName = (String) event.metadata().get("tool");
+                Boolean denied = (Boolean) event.metadata().getOrDefault("denied", false);
+                if (!Boolean.TRUE.equals(denied)) {
+                    long duration = ((Number) event.metadata().getOrDefault("durationMs", 0L)).longValue();
+                    String status = (String) event.metadata().getOrDefault("status", "COMPLETED");
+                    if ("FAILED".equals(status) || (event.content() != null && event.content().startsWith("Tool failed:"))) {
+                        this.toolExecutionStore.saveFailed(event.runId(), event.threadId(), toolName, event.content(), duration, event.metadata());
+                    } else {
+                        this.toolExecutionStore.saveCompleted(event.runId(), event.threadId(), toolName, event.content(), duration, event.metadata());
+                    }
+                }
+            }
         } catch (Exception e) {
-            log.warn("Failed to persist event: {}", e.getMessage());
+            log.warn("Failed to persist event or execution: {}", e.getMessage());
         }
     }
 

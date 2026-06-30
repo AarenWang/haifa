@@ -10,6 +10,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.MockFetchTool;
 import org.wrj.haifa.ai.deerflow.tool.MockSearchTool;
@@ -63,7 +64,7 @@ class AgentLoopTest {
     void stepLimitPreventsInfiniteLoop() {
         // Mock model that always requests a tool call (never gives final answer)
         AgentModelClient infiniteModel = prompt -> Mono.just(
-                "<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>");
+                new ModelResponse("<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>"));
 
         List<AgentTool> tools = List.of(new MockSearchTool());
         ToolRegistry registry = new ToolRegistry(tools);
@@ -110,9 +111,9 @@ class AgentLoopTest {
 
         AgentModelClient model = prompt -> {
             if (prompt.userPrompt().contains("exploding_tool")) {
-                return Mono.just("<final_answer>Recovered from tool failure</final_answer>");
+                return Mono.just(new ModelResponse("<final_answer>Recovered from tool failure</final_answer>"));
             }
-            return Mono.just("<tool_call name=\"exploding_tool\">{}</tool_call>");
+            return Mono.just(new ModelResponse("<tool_call name=\"exploding_tool\">{}</tool_call>"));
         };
 
         ToolRegistry registry = new ToolRegistry(List.of(explodingTool));
@@ -141,7 +142,7 @@ class AgentLoopTest {
     @Test
     void maxToolCallsLimitIsEnforced() {
         AgentModelClient model = prompt -> Mono.just(
-                "<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>");
+                new ModelResponse("<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>"));
 
         List<AgentTool> tools = List.of(new MockSearchTool());
         ToolRegistry registry = new ToolRegistry(tools);
@@ -178,13 +179,13 @@ class AgentLoopTest {
         private int callCount = 0;
 
         @Override
-        public Mono<String> generate(ModelPrompt prompt) {
+        public Mono<ModelResponse> generate(ModelPrompt prompt) {
             callCount++;
             return switch (callCount) {
-                case 1 -> Mono.just("<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>");
-                case 2 -> Mono.just("<tool_call name=\"mock_fetch\">{\"url\":\"https://example.com/article-1\"}</tool_call>");
-                case 3 -> Mono.just("<final_answer>Based on the search and fetch results, here is the answer.</final_answer>");
-                default -> Mono.just("<final_answer>Default answer.</final_answer>");
+                case 1 -> Mono.just(new ModelResponse("<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>"));
+                case 2 -> Mono.just(new ModelResponse("<tool_call name=\"mock_fetch\">{\"url\":\"https://example.com/article-1\"}</tool_call>"));
+                case 3 -> Mono.just(new ModelResponse("<final_answer>Based on the search and fetch results, here is the answer.</final_answer>"));
+                default -> Mono.just(new ModelResponse("<final_answer>Default answer.</final_answer>"));
             };
         }
     }

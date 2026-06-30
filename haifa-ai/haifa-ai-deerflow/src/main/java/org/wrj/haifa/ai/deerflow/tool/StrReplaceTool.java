@@ -50,7 +50,16 @@ public class StrReplaceTool implements AgentTool {
             } catch (Exception jsonEx) {
                 return ToolResult.of(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
             }
-            String requestedPath = node.has("path") ? node.get("path").asText() : null;
+            String requestedPath = null;
+            if (node.has("path")) {
+                requestedPath = node.get("path").asText();
+            } else if (node.has("filepath")) {
+                requestedPath = node.get("filepath").asText();
+            } else if (node.has("file_path")) {
+                requestedPath = node.get("file_path").asText();
+            } else if (node.has("file")) {
+                requestedPath = node.get("file").asText();
+            }
             String oldStr = node.has("old_str") ? node.get("old_str").asText() : null;
             String newStr = node.has("new_str") ? node.get("new_str").asText() : null;
 
