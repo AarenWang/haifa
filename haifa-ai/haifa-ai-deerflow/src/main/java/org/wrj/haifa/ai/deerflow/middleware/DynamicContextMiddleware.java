@@ -15,7 +15,7 @@ public class DynamicContextMiddleware implements AgentMiddleware {
         return next.next(context)
                 .map(prompt -> {
                     String dynamicContext = buildDynamicContext(context);
-                    String baseSystem = context.properties().getSystemPrompt();
+                    String baseSystem = prompt.systemPrompt();
                     String updatedSystem = (baseSystem == null || baseSystem.isBlank())
                             ? dynamicContext
                             : baseSystem + "\n\n" + dynamicContext;

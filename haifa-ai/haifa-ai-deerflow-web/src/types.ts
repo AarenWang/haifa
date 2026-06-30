@@ -173,4 +173,5 @@ export type AppAction =
   | { type: 'ADD_UPLOAD'; payload: UploadRecord }
   | { type: 'REMOVE_UPLOAD'; payload: string }
   | { type: 'TOGGLE_UPLOAD_SELECTION'; payload: string }
-  | { type: 'ADD_RUN_HISTORY'; payload: RunHistoryEntry };
+  | { type: 'ADD_RUN_HISTORY'; payload: RunHistoryEntry }
+  | { type: 'SET_EVENTS'; payload: DeerFlowEvent[] };

@@ -145,6 +145,14 @@ export async function fetchRunStatus(runId: string): Promise<unknown> {
   return res.json();
 }
 
+export async function fetchRunEvents(runId: string): Promise<DeerFlowEvent[]> {
+  const res = await fetch(`/api/deerflow/runs/${encodeURIComponent(runId)}/events`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function createThread(payload: {
   threadId?: string;
   title?: string;

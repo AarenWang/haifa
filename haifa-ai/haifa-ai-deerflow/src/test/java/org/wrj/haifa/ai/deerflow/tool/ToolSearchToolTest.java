@@ -22,6 +22,7 @@ class ToolSearchToolTest {
         assertThat(searchTool.supports("find tool something")).isTrue();
         assertThat(searchTool.supports("list tools")).isTrue();
         assertThat(searchTool.supports("what tools can I use")).isTrue();
+        assertThat(searchTool.supports("请告诉我目前的智能体有多少工具可以使用")).isTrue();
         assertThat(searchTool.supports("hello world")).isFalse();
     }
 
@@ -37,9 +38,19 @@ class ToolSearchToolTest {
     void returnsAllToolsForEmptyKeyword() {
         ToolRequest request = new ToolRequest("list tools", java.nio.file.Path.of("."));
         ToolResult result = searchTool.execute(request);
+        assertThat(result.content()).contains("Available tools (2 total):");
         assertThat(result.content()).contains("read_file");
         assertThat(result.content()).contains("web_search");
         assertThat(result.content()).contains("[requires skill]");
+    }
+
+    @Test
+    void returnsAllToolsForChineseInventoryQuestion() {
+        ToolRequest request = new ToolRequest("请告诉我目前的智能体有多少工具可以使用", java.nio.file.Path.of("."));
+        ToolResult result = searchTool.execute(request);
+        assertThat(result.content()).contains("Available tools (2 total):");
+        assertThat(result.content()).contains("read_file");
+        assertThat(result.content()).contains("web_search");
     }
 
     @Test

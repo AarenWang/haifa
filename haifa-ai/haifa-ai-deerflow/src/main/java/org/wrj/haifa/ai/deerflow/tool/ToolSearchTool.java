@@ -36,7 +36,8 @@ public class ToolSearchTool implements AgentTool {
                 || text.contains("find tool")
                 || text.contains("list tools")
                 || text.contains("what tools")
-                || text.contains("available tools");
+                || text.contains("available tools")
+                || isChineseToolInventoryQuery(userMessage);
     }
 
     @Override
@@ -49,7 +50,7 @@ public class ToolSearchTool implements AgentTool {
         String content = results.stream()
                 .map(t -> "- " + t.name() + " (source: " + t.source() + ")" + (t.requiresSkillActivation() ? " [requires skill]" : "")
                         + "\n  " + t.description())
-                .collect(Collectors.joining("\n\n", "Available tools:\n\n", ""));
+                .collect(Collectors.joining("\n\n", "Available tools (" + results.size() + " total):\n\n", ""));
         return ToolResult.of(name(), content);
     }
 
@@ -67,6 +68,23 @@ public class ToolSearchTool implements AgentTool {
                 return after;
             }
         }
+        if (isChineseToolInventoryQuery(userMessage)) {
+            return "";
+        }
         return userMessage;
+    }
+
+    private static boolean isChineseToolInventoryQuery(String userMessage) {
+        String text = userMessage == null ? "" : userMessage;
+        boolean mentionsTools = text.contains("工具") || text.toLowerCase().contains("tool");
+        boolean asksInventory = text.contains("多少")
+                || text.contains("几个")
+                || text.contains("数量")
+                || text.contains("哪些")
+                || text.contains("有哪些")
+                || text.contains("可用")
+                || text.contains("列表")
+                || text.contains("清单");
+        return mentionsTools && asksInventory;
     }
 }

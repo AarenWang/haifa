@@ -8,6 +8,8 @@ import {
   deleteUpload,
   listThreads,
   listThreadMessages,
+  listThreadRuns,
+  fetchRunEvents,
 } from './api/deerflowClient';
 import Header from './components/Header';
 import TaskComposer from './components/TaskComposer';
@@ -53,6 +55,30 @@ function App() {
     }
   }, []);
 
+  const refreshEvents = useCallback(async (threadId?: string) => {
+    if (!threadId) {
+      dispatch({ type: 'SET_EVENTS', payload: [] });
+      return;
+    }
+    try {
+      const data = await listThreadRuns(threadId);
+      if (data.runs && data.runs.length > 0) {
+        // Sort runs by createdAt desc to get the latest run
+        const sorted = [...data.runs].sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        const latestRun = sorted[0];
+        const events = await fetchRunEvents(latestRun.runId);
+        dispatch({ type: 'SET_EVENTS', payload: events });
+      } else {
+        dispatch({ type: 'SET_EVENTS', payload: [] });
+      }
+    } catch (err) {
+      console.error('Failed to load historical events', err);
+      dispatch({ type: 'SET_EVENTS', payload: [] });
+    }
+  }, []);
+
   // Poll backend health
   useEffect(() => {
     let mounted = true;
@@ -77,6 +103,10 @@ function App() {
   useEffect(() => {
     refreshMessages(state.threadId);
   }, [refreshMessages, state.threadId]);
+
+  useEffect(() => {
+    refreshEvents(state.threadId);
+  }, [refreshEvents, state.threadId]);
 
   // Load uploads on mount
   useEffect(() => {

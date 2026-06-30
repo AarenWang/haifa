@@ -157,6 +157,11 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         ...state,
         messages: action.payload,
       };
+    case 'SET_EVENTS':
+      return {
+        ...state,
+        events: action.payload,
+      };
     case 'STOP_RUN':
       return {
         ...state,

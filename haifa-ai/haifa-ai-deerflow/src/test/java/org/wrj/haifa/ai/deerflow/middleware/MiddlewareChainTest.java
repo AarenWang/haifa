@@ -73,6 +73,34 @@ class MiddlewareChainTest {
     }
 
     @Test
+    void dynamicContextMiddlewarePreservesExistingSystemPromptAugmentations() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setSystemPrompt("Base system");
+        properties.setWorkspaceRoot(".");
+
+        AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
+        AgentRequest request = new AgentRequest("t", "hi", null);
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, List.of(), properties);
+
+        AgentMiddleware prependSection = (ctx, next) -> next.next(ctx)
+                .map(prompt -> new ModelPrompt(prompt.systemPrompt() + "\n\n[Active skills]\n- research",
+                        prompt.userPrompt(), prompt.modelName()));
+
+        MiddlewareChain chain = new MiddlewareChain(List.of(
+                prependSection,
+                new DynamicContextMiddleware()
+        ));
+
+        StepVerifier.create(chain.next(context))
+                .assertNext(prompt -> {
+                    assertThat(prompt.systemPrompt()).contains("Base system");
+                    assertThat(prompt.systemPrompt()).contains("[Active skills]");
+                    assertThat(prompt.systemPrompt()).contains("[Dynamic context]");
+                })
+                .verifyComplete();
+    }
+
+    @Test
     void tokenBudgetMiddlewareReturnsBudgetExceededWhenOverLimit() {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setSystemPrompt("sys");
