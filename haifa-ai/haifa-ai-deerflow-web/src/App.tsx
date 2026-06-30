@@ -11,6 +11,9 @@ import {
   listThreadRuns,
   fetchRunEvidence,
   fetchRunEvents,
+  fetchRunPlan,
+  fetchRunProgress,
+  fetchRunQualityGate,
   fetchRunSources,
 } from './api/deerflowClient';
 import Header from './components/Header';
@@ -18,6 +21,7 @@ import TaskComposer from './components/TaskComposer';
 import AnswerWorkspace from './components/AnswerWorkspace';
 import ActivityTrace from './components/ActivityTrace';
 import ResearchInspector from './components/ResearchInspector';
+import ResearchPlanView from './components/ResearchPlanView';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
 
 function App() {
@@ -62,15 +66,44 @@ function App() {
     if (!runId) {
       dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
       dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
+      dispatch({ type: 'SET_RESEARCH_PLAN' });
+      dispatch({ type: 'SET_RESEARCH_PROGRESS' });
+      dispatch({ type: 'SET_QUALITY_GATE' });
       return;
     }
     try {
-      const [sources, evidenceItems] = await Promise.all([
+      const [sources, evidenceItems, planResult, progressResult, qualityResult] = await Promise.allSettled([
         fetchRunSources(runId),
         fetchRunEvidence(runId),
+        fetchRunPlan(runId),
+        fetchRunProgress(runId),
+        fetchRunQualityGate(runId),
       ]);
-      dispatch({ type: 'SET_RESEARCH_SOURCES', payload: sources });
-      dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: evidenceItems });
+      if (sources.status === 'fulfilled') {
+        dispatch({ type: 'SET_RESEARCH_SOURCES', payload: sources.value });
+      } else {
+        dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
+      }
+      if (evidenceItems.status === 'fulfilled') {
+        dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: evidenceItems.value });
+      } else {
+        dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
+      }
+      if (planResult.status === 'fulfilled') {
+        dispatch({ type: 'SET_RESEARCH_PLAN', payload: planResult.value });
+      } else {
+        dispatch({ type: 'SET_RESEARCH_PLAN' });
+      }
+      if (progressResult.status === 'fulfilled') {
+        dispatch({ type: 'SET_RESEARCH_PROGRESS', payload: progressResult.value });
+      } else {
+        dispatch({ type: 'SET_RESEARCH_PROGRESS' });
+      }
+      if (qualityResult.status === 'fulfilled') {
+        dispatch({ type: 'SET_QUALITY_GATE', payload: qualityResult.value });
+      } else {
+        dispatch({ type: 'SET_QUALITY_GATE' });
+      }
     } catch (err) {
       console.error('Failed to load research artifacts', err);
       dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
@@ -197,9 +230,15 @@ function App() {
               refreshMessages(evt.threadId);
             }
             if (
+              evt.type === 'RESEARCH_PLAN_CREATED' ||
+              evt.type === 'RESEARCH_DIMENSION_STARTED' ||
+              evt.type === 'RESEARCH_DIMENSION_COMPLETED' ||
               evt.type === 'SOURCE_FOUND' ||
               evt.type === 'SOURCE_FETCHED' ||
               evt.type === 'EVIDENCE_EXTRACTED' ||
+              evt.type === 'QUALITY_GATE_STARTED' ||
+              evt.type === 'QUALITY_GATE_PASSED' ||
+              evt.type === 'QUALITY_GATE_FAILED' ||
               evt.type === 'MODEL_COMPLETED' ||
               evt.type === 'RUN_COMPLETED'
             ) {
@@ -343,6 +382,11 @@ function App() {
             error={state.error}
             onReRun={state.status === 'failed' ? handleReRun : undefined}
             onRefreshMessage={handleRefreshMessage}
+          />
+          <ResearchPlanView
+            plan={state.researchPlan}
+            progress={state.researchProgress}
+            qualityGate={state.qualityGate}
           />
           <ResearchInspector
             sources={state.researchSources}

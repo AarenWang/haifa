@@ -20,6 +20,11 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
+import org.wrj.haifa.ai.deerflow.research.plan.ClarificationGate;
+import org.wrj.haifa.ai.deerflow.research.plan.InMemoryResearchPlanStore;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchClarificationStore;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanner;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunStatus;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
@@ -237,6 +242,72 @@ class SimpleAgentRuntimeTest {
                             assertThat(run.status()).isEqualTo(RunStatus.COMPLETED));
                 })
                 .verifyComplete();
+    }
+
+    @Test
+    void resumesResearchOnSameThreadAfterClarification() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("research system");
+        properties.setMaxIterations(2);
+        properties.setMaxResearchSteps(2);
+
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>stub</final_answer>"));
+        ToolRegistry tools = new ToolRegistry(List.of());
+        InMemoryResearchPlanStore planStore = new InMemoryResearchPlanStore();
+        ResearchClarificationStore clarificationStore = new ResearchClarificationStore();
+        ResearchProgressTracker progressTracker = new ResearchProgressTracker(planStore);
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(
+                properties,
+                tools,
+                modelClient,
+                runManager,
+                threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore,
+                toolExecutionStore,
+                modelStepStore,
+                toolCallStore,
+                agentLoopRunStore,
+                skillStorage,
+                null,
+                new ResearchPlanner(null, null, null),
+                planStore,
+                new ClarificationGate(),
+                clarificationStore,
+                progressTracker,
+                null
+        );
+
+        List<AgentEvent> clarificationEvents = runtime.stream(new AgentRequest(
+                        "thread-clarify",
+                        "Compare the best stocks",
+                        null,
+                        List.of(),
+                        RunMode.RESEARCH,
+                        ResearchOptions.defaults()))
+                .collectList()
+                .block();
+
+        assertThat(clarificationEvents).extracting(AgentEvent::type).contains(AgentEventType.TOOL_CALL_REQUESTED);
+        assertThat(clarificationStore.find("thread-clarify")).isPresent();
+
+        List<AgentEvent> resumedEvents = runtime.stream(new AgentRequest(
+                        "thread-clarify",
+                        "Focus on US AI infrastructure companies in 2025 and answer as a report.",
+                        null,
+                        List.of(),
+                        RunMode.RESEARCH,
+                        ResearchOptions.standard()))
+                .collectList()
+                .block();
+
+        assertThat(resumedEvents).extracting(AgentEvent::type).contains(AgentEventType.RESEARCH_PLAN_CREATED);
+        assertThat(clarificationStore.find("thread-clarify")).isEmpty();
+        assertThat(planStore.findByThreadId("thread-clarify")).isNotEmpty();
+        assertThat(messageStore.listByThread("thread-clarify")).anySatisfy(message ->
+                assertThat(message.content()).contains("Clarification needed"));
     }
 
     private static final class ExplodingTool implements AgentTool {

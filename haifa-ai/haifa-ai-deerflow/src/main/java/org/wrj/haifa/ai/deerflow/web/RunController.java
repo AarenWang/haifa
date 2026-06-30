@@ -16,6 +16,12 @@ import org.springframework.http.HttpStatus;
 import org.wrj.haifa.ai.deerflow.research.EvidenceItem;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
 import org.wrj.haifa.ai.deerflow.research.ResearchSource;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanStore;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchQualityGate;
+import org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchDimension;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
 import org.wrj.haifa.ai.deerflow.agent.AgentRuntime;
@@ -31,6 +37,7 @@ import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import java.time.format.DateTimeFormatter;
 
 @RestController
 @RequestMapping("/api/deerflow/runs")
@@ -43,11 +50,18 @@ public class RunController {
     private final ToolCallStore toolCallStore;
     private final ModelStepStore modelStepStore;
     private final ResearchRuntimeSupport researchRuntimeSupport;
+    private final ResearchPlanStore researchPlanStore;
+    private final ResearchProgressTracker researchProgressTracker;
+    private final ResearchQualityGate researchQualityGate;
+    private static final java.time.format.DateTimeFormatter ISO = java.time.format.DateTimeFormatter.ISO_INSTANT;
 
     public RunController(AgentRuntime agentRuntime, RunManager runManager,
             AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
             ToolCallStore toolCallStore, ModelStepStore modelStepStore,
-            ResearchRuntimeSupport researchRuntimeSupport) {
+            ResearchRuntimeSupport researchRuntimeSupport,
+            ResearchPlanStore researchPlanStore,
+            ResearchProgressTracker researchProgressTracker,
+            ResearchQualityGate researchQualityGate) {
         this.agentRuntime = agentRuntime;
         this.runManager = runManager;
         this.agentEventStore = agentEventStore;
@@ -55,6 +69,9 @@ public class RunController {
         this.toolCallStore = toolCallStore;
         this.modelStepStore = modelStepStore;
         this.researchRuntimeSupport = researchRuntimeSupport;
+        this.researchPlanStore = researchPlanStore;
+        this.researchProgressTracker = researchProgressTracker;
+        this.researchQualityGate = researchQualityGate;
     }
 
     @PostMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -146,6 +163,88 @@ public class RunController {
                 evidenceItem.dimension(),
                 evidenceItem.confidence(),
                 evidenceItem.extractedAt()
+        );
+    }
+
+    @GetMapping("/{runId}/plan")
+    public Mono<ResearchPlanResponse> plan(@PathVariable String runId) {
+        return Mono.justOrEmpty(this.researchPlanStore.findByRunId(runId))
+                .map(this::toPlanResponse)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Plan not found")));
+    }
+
+    @GetMapping("/{runId}/progress")
+    public Mono<ResearchProgressResponse> progress(@PathVariable String runId) {
+        ResearchProgressTracker.ResearchProgress progress = this.researchProgressTracker.getProgress(runId);
+        return Mono.just(new ResearchProgressResponse(
+                progress.totalDimensions(),
+                progress.completedDimensions(),
+                progress.inProgressDimensions(),
+                progress.totalSources(),
+                progress.totalEvidence(),
+                progress.planStatus(),
+                progress.completionPercentage(),
+                List.of()
+        ));
+    }
+
+    @GetMapping("/{runId}/quality-gate")
+    public Mono<QualityGateResponse> qualityGate(@PathVariable String runId) {
+        ResearchPlan plan = this.researchPlanStore.findByRunId(runId).orElse(null);
+        List<ResearchSource> sources = this.researchRuntimeSupport.listSourcesByRun(runId);
+        List<EvidenceItem> evidenceItems = this.researchRuntimeSupport.listEvidenceByRun(runId);
+        boolean requireCitations = this.runManager.find(runId)
+                .map(RunRecord::metadata)
+                .map(metadata -> metadata.get("requireCitations"))
+                .filter(Boolean.class::isInstance)
+                .map(Boolean.class::cast)
+                .orElse(plan != null);
+        QualityGateResult result = this.researchQualityGate.evaluate(plan, sources, evidenceItems, requireCitations);
+        return Mono.just(new QualityGateResponse(
+                result.passed(),
+                result.score(),
+                result.gaps(),
+                result.recommendation(),
+                result.dimensionCount(),
+                result.fetchedSourceCount(),
+                result.hasFacts(),
+                result.hasData(),
+                result.hasCases(),
+                result.hasOpinions(),
+                result.hasLimitations(),
+                result.hasCounterView(),
+                result.citationComplete()
+        ));
+    }
+
+    private ResearchPlanResponse toPlanResponse(ResearchPlan plan) {
+        return new ResearchPlanResponse(
+                plan.planId(),
+                plan.threadId(),
+                plan.runId(),
+                plan.topic(),
+                plan.researchQuestions(),
+                plan.dimensions().stream().map(this::toDimensionResponse).toList(),
+                plan.searchQueries(),
+                plan.sourceCriteria(),
+                plan.expectedDeliverable(),
+                plan.status(),
+                plan.createdAt() == null ? null : ISO.format(plan.createdAt()),
+                plan.updatedAt() == null ? null : ISO.format(plan.updatedAt())
+        );
+    }
+
+    private ResearchDimensionResponse toDimensionResponse(ResearchDimension dim) {
+        return new ResearchDimensionResponse(
+                dim.id(),
+                dim.title(),
+                dim.description(),
+                dim.status().name(),
+                dim.searchQueries(),
+                dim.expectedSourceCount(),
+                dim.actualSourceCount(),
+                dim.actualEvidenceCount(),
+                dim.evidenceIds()
         );
     }
 }

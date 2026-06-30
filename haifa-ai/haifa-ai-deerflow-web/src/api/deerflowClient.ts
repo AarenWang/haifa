@@ -2,6 +2,9 @@ import type {
   DeerFlowEvent,
   EvidenceItem,
   MessageListResponse,
+  QualityGateResult,
+  ResearchPlan,
+  ResearchProgress,
   ResearchSource,
   RunRequest,
   RunResponse,
@@ -170,6 +173,31 @@ export async function fetchRunEvidence(runId: string): Promise<EvidenceItem[]> {
   }
   return res.json();
 }
+
+export async function fetchRunPlan(runId: string): Promise<ResearchPlan> {
+  const res = await fetch(`/api/deerflow/runs/${encodeURIComponent(runId)}/plan`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunProgress(runId: string): Promise<ResearchProgress> {
+  const res = await fetch(`/api/deerflow/runs/${encodeURIComponent(runId)}/progress`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunQualityGate(runId: string): Promise<QualityGateResult> {
+  const res = await fetch(`/api/deerflow/runs/${encodeURIComponent(runId)}/quality-gate`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 
 export async function createThread(payload: {
   threadId?: string;

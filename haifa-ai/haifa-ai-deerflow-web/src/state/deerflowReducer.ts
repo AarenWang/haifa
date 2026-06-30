@@ -156,6 +156,21 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         ...state,
         evidenceItems: action.payload,
       };
+    case 'SET_RESEARCH_PLAN':
+      return {
+        ...state,
+        researchPlan: action.payload,
+      };
+    case 'SET_RESEARCH_PROGRESS':
+      return {
+        ...state,
+        researchProgress: action.payload,
+      };
+    case 'SET_QUALITY_GATE':
+      return {
+        ...state,
+        qualityGate: action.payload,
+      };
     case 'SET_THREAD_ID':
       return {
         ...state,

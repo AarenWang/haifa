@@ -19,10 +19,20 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.research.CitationProcessingResult;
+import org.wrj.haifa.ai.deerflow.research.EvidenceItem;
 import org.wrj.haifa.ai.deerflow.research.FetchProcessingResult;
 import org.wrj.haifa.ai.deerflow.research.RegisteredSourceContent;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
+import org.wrj.haifa.ai.deerflow.research.ResearchSource;
 import org.wrj.haifa.ai.deerflow.research.SearchIngestionResult;
+import org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanStore;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanner;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchQualityGate;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchTaskStatus;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchDimension;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
@@ -55,19 +65,32 @@ public class AgentLoop {
     private final ToolCallStore toolCallStore;
     private final AgentLoopRunStore agentLoopRunStore;
     private final ResearchRuntimeSupport researchRuntimeSupport;
+    private final ResearchPlanner researchPlanner;
+    private final ResearchPlanStore researchPlanStore;
+    private final ResearchProgressTracker researchProgressTracker;
+    private final ResearchQualityGate researchQualityGate;
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry) {
-        this(modelClient, toolRegistry, null, null, null, null);
+        this(modelClient, toolRegistry, null, null, null, null, null, null, null, null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore) {
-        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, null);
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, null, null, null, null, null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             ResearchRuntimeSupport researchRuntimeSupport) {
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, researchRuntimeSupport,
+                null, null, null, null);
+    }
+
+    public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            ResearchRuntimeSupport researchRuntimeSupport,
+            ResearchPlanner researchPlanner, ResearchPlanStore researchPlanStore,
+            ResearchProgressTracker researchProgressTracker, ResearchQualityGate researchQualityGate) {
         this.modelClient = modelClient;
         this.toolRegistry = toolRegistry;
         this.toolCallParser = new ToolCallParser();
@@ -75,6 +98,10 @@ public class AgentLoop {
         this.toolCallStore = toolCallStore;
         this.agentLoopRunStore = agentLoopRunStore;
         this.researchRuntimeSupport = researchRuntimeSupport;
+        this.researchPlanner = researchPlanner;
+        this.researchPlanStore = researchPlanStore;
+        this.researchProgressTracker = researchProgressTracker;
+        this.researchQualityGate = researchQualityGate;
     }
 
     /**
@@ -209,6 +236,15 @@ public class AgentLoop {
 
                 // Check for final answer
                 if (toolCallParser.hasFinalAnswer(modelResponse.content())) {
+                    QualityGateResult readiness = evaluateResearchReadiness(runConfig);
+                    if (shouldContinueResearch(runConfig, readiness)) {
+                        history.add("System: " + buildContinuationInstruction(runConfig, readiness));
+                        events.add(event(seq, runConfig, AgentEventType.RESEARCH_STEP_COMPLETED,
+                                "Research requires more coverage before a final answer can be accepted",
+                                Map.of("step", step + 1, "totalToolCalls", totalToolCalls,
+                                        "qualityGaps", readiness == null ? List.of("missing_plan") : readiness.gaps())));
+                        continue;
+                    }
                     CitationProcessingResult citationProcessingResult = finalizeResearchAnswer(
                             runConfig, toolCallParser.extractFinalAnswer(modelResponse.content()));
                     stopReason = "FINAL_ANSWER";
@@ -260,6 +296,15 @@ public class AgentLoop {
                 }
 
                 if (loopToolCalls.isEmpty()) {
+                    QualityGateResult readiness = evaluateResearchReadiness(runConfig);
+                    if (shouldContinueResearch(runConfig, readiness)) {
+                        history.add("System: " + buildContinuationInstruction(runConfig, readiness));
+                        events.add(event(seq, runConfig, AgentEventType.RESEARCH_STEP_COMPLETED,
+                                "Model attempted to stop early; continuing research",
+                                Map.of("step", step + 1, "totalToolCalls", totalToolCalls,
+                                        "qualityGaps", readiness == null ? List.of("missing_plan") : readiness.gaps())));
+                        continue;
+                    }
                     // No tool calls, no final answer — treat as completed
                     stopReason = runConfig.mode() == RunMode.CHAT ? "ASSISTANT_COMPLETED" : "NO_TOOL_CALLS";
                     String completionMsg = runConfig.mode() == RunMode.CHAT
@@ -368,11 +413,25 @@ public class AgentLoop {
                 events.add(event(seq, runConfig, AgentEventType.RESEARCH_STEP_COMPLETED,
                         "Step " + (step + 1) + " completed",
                         Map.of("step", step + 1, "totalToolCalls", totalToolCalls)));
+
+                // Advance dimension if in research mode and we have a plan
+                if (isResearchMode(runConfig) && researchPlanStore != null && researchProgressTracker != null) {
+                    advanceDimensionIfNeeded(runConfig, events, seq, step + 1);
+                }
             }
 
             // If loop exhausted max steps without final answer
             if (!stopped) {
                 stopReason = "MAX_STEPS_REACHED";
+                if (isResearchMode(runConfig)) {
+                    QualityGateResult readiness = evaluateResearchReadiness(runConfig);
+                    if (readiness != null && !readiness.passed()) {
+                        events.add(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
+                                "Research completed with explicit limitations. " + buildLimitationsSummary(readiness),
+                                Map.of("stopReason", stopReason, "qualityGaps", readiness.gaps(),
+                                        "recommendation", readiness.recommendation())));
+                    }
+                }
                 events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                         "Max steps reached without final answer",
                         Map.of("stopReason", stopReason, "maxSteps", config.maxSteps(), "totalToolCalls", totalToolCalls)));
@@ -488,6 +547,12 @@ public class AgentLoop {
                             "cached", fetchProcessingResult.registration().cached(),
                             "deduplicatedByUrl", fetchProcessingResult.registration().deduplicatedByUrl(),
                             "deduplicatedByContentHash", fetchProcessingResult.registration().deduplicatedByContentHash())));
+            if (this.researchProgressTracker != null && !fetchProcessingResult.registration().cached()) {
+                this.researchProgressTracker.recordFetchedSource(
+                        runConfig.runId(),
+                        fetchProcessingResult.registration().stored().source().sourceId()
+                );
+            }
             for (var evidenceItem : fetchProcessingResult.evidenceItems()) {
                 events.add(event(seq, runConfig, AgentEventType.EVIDENCE_EXTRACTED,
                         evidenceItem.claim(),
@@ -495,6 +560,9 @@ public class AgentLoop {
                                 "sourceId", evidenceItem.sourceId(),
                                 "dimension", evidenceItem.dimension(),
                                 "confidence", evidenceItem.confidence())));
+                if (this.researchProgressTracker != null) {
+                    this.researchProgressTracker.recordEvidence(runConfig.runId(), evidenceItem);
+                }
             }
             if (!fetchProcessingResult.observation().isBlank()) {
                 history.add(fetchProcessingResult.observation());
@@ -507,6 +575,106 @@ public class AgentLoop {
             return new CitationProcessingResult(answer, List.of(), List.of());
         }
         return this.researchRuntimeSupport.finalizeAnswer(runConfig.threadId(), runConfig.runId(), answer);
+    }
+
+    private void advanceDimensionIfNeeded(AgentRunConfig runConfig, List<AgentEvent> events, AtomicInteger seq, int step) {
+        ResearchPlan plan = researchPlanStore.findByRunId(runConfig.runId()).orElse(null);
+        if (plan == null) return;
+
+        // Find current IN_PROGRESS dimension and mark it COMPLETED if it has enough sources
+        ResearchDimension currentDim = null;
+        for (ResearchDimension dim : plan.dimensions()) {
+            if (dim.status() == ResearchTaskStatus.IN_PROGRESS) {
+                currentDim = dim;
+                break;
+            }
+        }
+
+        if (currentDim != null && currentDim.actualSourceCount() >= currentDim.expectedSourceCount()) {
+            researchProgressTracker.markDimensionCompleted(runConfig.runId(), currentDim.id());
+            events.add(event(seq, runConfig, AgentEventType.RESEARCH_DIMENSION_COMPLETED,
+                    "Dimension completed: " + currentDim.title(),
+                    Map.of("dimensionId", currentDim.id(), "dimensionTitle", currentDim.title(),
+                            "sourceCount", currentDim.actualSourceCount(), "evidenceCount", currentDim.actualEvidenceCount(),
+                            "step", step)));
+
+            // Find next PENDING dimension and mark it IN_PROGRESS
+            for (ResearchDimension dim : plan.dimensions()) {
+                if (dim.status() == ResearchTaskStatus.PENDING) {
+                    researchProgressTracker.markDimensionStarted(runConfig.runId(), dim.id());
+                    events.add(event(seq, runConfig, AgentEventType.RESEARCH_DIMENSION_STARTED,
+                            "Dimension started: " + dim.title(),
+                            Map.of("dimensionId", dim.id(), "dimensionTitle", dim.title(),
+                                    "expectedSourceCount", dim.expectedSourceCount(), "step", step)));
+                    break;
+                }
+            }
+        } else if (currentDim == null) {
+            // No dimension in progress, find first PENDING
+            for (ResearchDimension dim : plan.dimensions()) {
+                if (dim.status() == ResearchTaskStatus.PENDING) {
+                    researchProgressTracker.markDimensionStarted(runConfig.runId(), dim.id());
+                    events.add(event(seq, runConfig, AgentEventType.RESEARCH_DIMENSION_STARTED,
+                            "Dimension started: " + dim.title(),
+                            Map.of("dimensionId", dim.id(), "dimensionTitle", dim.title(),
+                                    "expectedSourceCount", dim.expectedSourceCount(), "step", step)));
+                    break;
+                }
+            }
+        }
+    }
+
+    private QualityGateResult evaluateResearchReadiness(AgentRunConfig runConfig) {
+        if (!isResearchMode(runConfig) || this.researchRuntimeSupport == null || this.researchQualityGate == null) {
+            return null;
+        }
+        ResearchPlan plan = this.researchPlanStore == null ? null : this.researchPlanStore.findByRunId(runConfig.runId()).orElse(null);
+        List<ResearchSource> sources = this.researchRuntimeSupport.listSourcesByRun(runConfig.runId());
+        List<EvidenceItem> evidenceItems = this.researchRuntimeSupport.listEvidenceByRun(runConfig.runId());
+        boolean requireCitations = runConfig.researchOptions() == null || Boolean.TRUE.equals(runConfig.researchOptions().requireCitations());
+        return this.researchQualityGate.evaluate(plan, sources, evidenceItems, requireCitations);
+    }
+
+    private boolean shouldContinueResearch(AgentRunConfig runConfig, QualityGateResult readiness) {
+        if (!isResearchMode(runConfig)) {
+            return false;
+        }
+        if (this.researchPlanStore == null || this.researchQualityGate == null || this.researchRuntimeSupport == null) {
+            return true;
+        }
+        return readiness == null || !readiness.passed();
+    }
+
+    private String buildContinuationInstruction(AgentRunConfig runConfig, QualityGateResult readiness) {
+        ResearchPlan plan = this.researchPlanStore == null ? null : this.researchPlanStore.findByRunId(runConfig.runId()).orElse(null);
+        if (plan == null) {
+            return "A structured research plan is still missing. Search from multiple angles and gather full-source evidence before finishing.";
+        }
+        ResearchDimension currentDimension = plan.dimensions().stream()
+                .filter(dimension -> dimension.status() == ResearchTaskStatus.IN_PROGRESS || dimension.status() == ResearchTaskStatus.PENDING)
+                .findFirst()
+                .orElse(null);
+        StringBuilder builder = new StringBuilder("Do not finish yet. Continue the research workflow.");
+        if (currentDimension != null) {
+            builder.append(" Focus on dimension \"").append(currentDimension.title()).append("\".");
+            if (!currentDimension.searchQueries().isEmpty()) {
+                builder.append(" Suggested queries: ")
+                        .append(String.join(" | ", currentDimension.searchQueries().stream().limit(3).toList()))
+                        .append(".");
+            }
+        }
+        if (readiness != null && !readiness.gaps().isEmpty()) {
+            builder.append(" Remaining gaps: ").append(String.join("; ", readiness.gaps())).append(".");
+        }
+        return builder.toString();
+    }
+
+    private String buildLimitationsSummary(QualityGateResult readiness) {
+        if (readiness == null) {
+            return "No structured quality assessment was available.";
+        }
+        String gaps = readiness.gaps().isEmpty() ? "No specific gaps were captured." : String.join("; ", readiness.gaps());
+        return "Limitations: " + gaps + ". Recommendation: " + readiness.recommendation();
     }
 
     private static boolean isResearchMode(AgentRunConfig runConfig) {

@@ -25,6 +25,60 @@ export type DeerFlowEventType =
   | 'TOOL_CALL_REQUESTED'
   | 'RESEARCH_STEP_COMPLETED';
 
+export interface ResearchPlan {
+  planId: string;
+  threadId: string;
+  runId: string;
+  topic: string;
+  researchQuestions: string[];
+  dimensions: ResearchDimension[];
+  searchQueries: string[];
+  sourceCriteria: string;
+  expectedDeliverable: string;
+  status: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface ResearchDimension {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  searchQueries: string[];
+  expectedSourceCount: number;
+  actualSourceCount: number;
+  actualEvidenceCount: number;
+  evidenceIds: string[];
+}
+
+export interface ResearchProgress {
+  totalDimensions: number;
+  completedDimensions: number;
+  inProgressDimensions: number;
+  totalSources: number;
+  totalEvidence: number;
+  planStatus: string;
+  completionPercentage: number;
+  gaps: string[];
+}
+
+export interface QualityGateResult {
+  passed: boolean;
+  score: number;
+  gaps: string[];
+  recommendation: string;
+  dimensionCount: number;
+  fetchedSourceCount: number;
+  hasFacts: boolean;
+  hasData: boolean;
+  hasCases: boolean;
+  hasOpinions: boolean;
+  hasLimitations: boolean;
+  hasCounterView: boolean;
+  citationComplete: boolean;
+}
+
 export interface DeerFlowEvent {
   eventId: string;
   runId: string;
@@ -182,6 +236,9 @@ export interface AppState {
   lastRequest?: RunRequest;
   researchSources: ResearchSource[];
   evidenceItems: EvidenceItem[];
+  researchPlan?: ResearchPlan;
+  researchProgress?: ResearchProgress;
+  qualityGate?: QualityGateResult;
   uploads: UploadRecord[];
   selectedUploadIds: string[];
   runHistory: RunHistoryEntry[];
@@ -194,6 +251,9 @@ export type AppAction =
   | { type: 'SET_ERROR'; payload: string }
   | { type: 'SET_RESEARCH_SOURCES'; payload: ResearchSource[] }
   | { type: 'SET_EVIDENCE_ITEMS'; payload: EvidenceItem[] }
+  | { type: 'SET_RESEARCH_PLAN'; payload?: ResearchPlan }
+  | { type: 'SET_RESEARCH_PROGRESS'; payload?: ResearchProgress }
+  | { type: 'SET_QUALITY_GATE'; payload?: QualityGateResult }
   | { type: 'SET_THREAD_ID'; payload?: string }
   | { type: 'SET_THREADS'; payload: ThreadRecord[] }
   | { type: 'SET_MESSAGES'; payload: MessageRecord[] }

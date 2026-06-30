@@ -36,7 +36,9 @@ export default function AnswerWorkspace({
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
 
   const visibleMessages = messages.filter((message) =>
-    message.role === 'USER' || message.role === 'ASSISTANT'
+    message.role === 'USER'
+    || message.role === 'ASSISTANT'
+    || (message.role === 'SYSTEM' && Boolean(message.metadata?.clarificationPending))
   );
   const hasAssistantContent = visibleMessages.some((message) => message.role === 'ASSISTANT');
 
@@ -118,7 +120,11 @@ export default function AnswerWorkspace({
                   className={`conversation-message ${message.role.toLowerCase()}`}
                 >
                   <div className="conversation-message-role">
-                    {message.role === 'USER' ? 'You' : 'DeerFlow'}
+                    {message.role === 'USER'
+                      ? 'You'
+                      : message.role === 'SYSTEM'
+                        ? 'Clarification'
+                        : 'DeerFlow'}
                   </div>
                   <div
                     className="conversation-message-content"

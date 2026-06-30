@@ -26,6 +26,15 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
+import org.wrj.haifa.ai.deerflow.research.plan.ClarificationGate;
+import org.wrj.haifa.ai.deerflow.research.plan.PlanGenerationResult;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchClarificationStore;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanStore;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanner;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchQualityGate;
+import org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
@@ -64,6 +73,12 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final AgentLoopRunStore agentLoopRunStore;
     private final org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage;
     private final ResearchRuntimeSupport researchRuntimeSupport;
+    private final ResearchPlanner researchPlanner;
+    private final ResearchPlanStore researchPlanStore;
+    private final ClarificationGate clarificationGate;
+    private final ResearchClarificationStore researchClarificationStore;
+    private final ResearchProgressTracker researchProgressTracker;
+    private final ResearchQualityGate researchQualityGate;
 
     @Autowired(required = false)
     private ToolPolicyService toolPolicyService;
@@ -77,7 +92,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage) {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
-                agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage, null);
+                agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
+                null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -86,7 +102,13 @@ public class SimpleAgentRuntime implements AgentRuntime {
             AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage,
-            @Autowired(required = false) ResearchRuntimeSupport researchRuntimeSupport) {
+            @Autowired(required = false) ResearchRuntimeSupport researchRuntimeSupport,
+            @Autowired(required = false) ResearchPlanner researchPlanner,
+            @Autowired(required = false) ResearchPlanStore researchPlanStore,
+            @Autowired(required = false) ClarificationGate clarificationGate,
+            @Autowired(required = false) ResearchClarificationStore researchClarificationStore,
+            @Autowired(required = false) ResearchProgressTracker researchProgressTracker,
+            @Autowired(required = false) ResearchQualityGate researchQualityGate) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
@@ -100,7 +122,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 }))
                 .toList();
         this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
-                researchRuntimeSupport);
+                researchRuntimeSupport, researchPlanner, researchPlanStore, researchProgressTracker, researchQualityGate);
         this.agentEventStore = agentEventStore;
         this.toolExecutionStore = toolExecutionStore;
         this.modelStepStore = modelStepStore;
@@ -108,6 +130,12 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this.agentLoopRunStore = agentLoopRunStore;
         this.skillStorage = skillStorage;
         this.researchRuntimeSupport = researchRuntimeSupport;
+        this.researchPlanner = researchPlanner;
+        this.researchPlanStore = researchPlanStore;
+        this.clarificationGate = clarificationGate;
+        this.researchClarificationStore = researchClarificationStore;
+        this.researchProgressTracker = researchProgressTracker;
+        this.researchQualityGate = researchQualityGate;
     }
 
     @Override
@@ -263,26 +291,42 @@ public class SimpleAgentRuntime implements AgentRuntime {
         return Flux.defer(() -> {
             long runStartTime = System.currentTimeMillis();
             String requestedThreadId = StringUtils.hasText(request.threadId()) ? request.threadId() : UUID.randomUUID().toString();
+            ResearchClarificationStore.PendingClarification pendingClarification = this.researchClarificationStore == null
+                    ? null
+                    : this.researchClarificationStore.find(requestedThreadId).orElse(null);
             ThreadRecord thread = this.threadManager.upsert(requestedThreadId,
                     ThreadManager.titleFromMessage(request.message()), Map.of("source", "run"));
             String threadId = thread.threadId();
             String modelName = StringUtils.hasText(request.model()) ? request.model() : this.properties.getModel();
             int uploadedFileCount = request.uploadedFileIds() == null ? 0 : request.uploadedFileIds().size();
-            ResearchOptions researchOptions = request.researchOptions() == null ? ResearchOptions.defaults() : request.researchOptions();
-            Map<String, Object> runMetadata = Map.of(
-                    "source", "sse",
-                    "uploadedFiles", uploadedFileCount,
-                    "mode", "research",
-                    "depth", researchOptions.depth().name(),
-                    "timeWindow", researchOptions.timeWindow().name(),
-                    "maxSources", researchOptions.maxSources(),
-                    "requireCitations", researchOptions.requireCitations(),
-                    "outputFormat", researchOptions.outputFormat().name()
-            );
+            ResearchOptions researchOptions = request.researchOptions() == null
+                    ? (pendingClarification == null ? ResearchOptions.defaults() : pendingClarification.researchOptions())
+                    : request.researchOptions();
+            String effectiveResearchMessage = pendingClarification == null
+                    ? request.message()
+                    : pendingClarification.originalMessage() + System.lineSeparator()
+                            + "Clarification from user: " + request.message();
+            java.util.Map<String, Object> runMetadataMap = new java.util.LinkedHashMap<>();
+            runMetadataMap.put("source", "sse");
+            runMetadataMap.put("uploadedFiles", uploadedFileCount);
+            runMetadataMap.put("mode", "research");
+            runMetadataMap.put("depth", researchOptions.depth().name());
+            runMetadataMap.put("timeWindow", researchOptions.timeWindow().name());
+            runMetadataMap.put("maxSources", researchOptions.maxSources());
+            runMetadataMap.put("requireCitations", researchOptions.requireCitations());
+            runMetadataMap.put("outputFormat", researchOptions.outputFormat().name());
+            if (pendingClarification != null) {
+                runMetadataMap.put("continuationOfRunId", pendingClarification.runId());
+                runMetadataMap.put("clarificationType", pendingClarification.clarificationType());
+            }
+            Map<String, Object> runMetadata = Map.copyOf(runMetadataMap);
             RunRecord run = this.runManager.create(threadId, modelName, runMetadata);
             this.runManager.markRunning(run.runId());
             this.messageStore.add(threadId, run.runId(), MessageRole.USER, request.message(),
                     Map.of("uploadedFileCount", uploadedFileCount, "mode", "research"));
+            if (pendingClarification != null && this.researchClarificationStore != null) {
+                this.researchClarificationStore.clear(threadId);
+            }
             log.info("Research run started. runId={}, threadId={}, model={}, depth={}, timeWindow={}, maxSources={}, outputFormat={}",
                     run.runId(), threadId, nullToEmpty(modelName), researchOptions.depth(), researchOptions.timeWindow(),
                     researchOptions.maxSources(), researchOptions.outputFormat());
@@ -294,10 +338,111 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
             List<AgentEvent> prefixEvents = new ArrayList<>();
             prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Research run started", runMetadata));
-            prefixEvents.add(event(seq, config, AgentEventType.RESEARCH_PLAN_CREATED,
-                    "Research plan created for: " + request.message(),
-                    Map.of("depth", researchOptions.depth().name(), "timeWindow", researchOptions.timeWindow().name(),
-                            "maxSources", researchOptions.maxSources(), "outputFormat", researchOptions.outputFormat().name())));
+
+            // --- Clarification Gate ---
+            if (this.clarificationGate != null && pendingClarification == null) {
+                var clarificationResult = this.clarificationGate.check(effectiveResearchMessage, researchOptions);
+                if (clarificationResult.needsClarification()) {
+                    if (this.researchClarificationStore != null) {
+                        this.researchClarificationStore.save(
+                                threadId,
+                                run.runId(),
+                                effectiveResearchMessage,
+                                researchOptions,
+                                clarificationResult.clarificationQuestion(),
+                                clarificationResult.clarificationType()
+                        );
+                    }
+                    prefixEvents.add(event(seq, config, AgentEventType.TOOL_CALL_REQUESTED,
+                            "Clarification needed: " + clarificationResult.clarificationQuestion(),
+                            Map.of("clarificationType", clarificationResult.clarificationType(),
+                                    "question", clarificationResult.clarificationQuestion(),
+                                    "resumeThreadId", threadId,
+                                    "resumeRunId", run.runId())));
+                    this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM,
+                            "Clarification needed: " + clarificationResult.clarificationQuestion(),
+                            Map.of("clarificationType", clarificationResult.clarificationType(),
+                                    "question", clarificationResult.clarificationQuestion(),
+                                    "clarificationPending", true,
+                                    "resumeThreadId", threadId,
+                                    "resumeRunId", run.runId()));
+                    return Flux.fromIterable(prefixEvents)
+                            .doOnNext(this::saveEvent)
+                            .doOnComplete(() -> {
+                                this.runManager.markCompleted(run.runId());
+                                this.threadManager.touch(threadId);
+                            });
+                }
+            }
+
+            // --- Research Plan Generation ---
+            ResearchPlan plan = null;
+            if (this.researchPlanner != null) {
+                PlanGenerationResult planResult = this.researchPlanner.generatePlan(threadId, run.runId(), effectiveResearchMessage, researchOptions);
+                if (planResult.success() && planResult.plan() != null) {
+                    plan = planResult.plan();
+                    if (this.researchPlanStore != null) {
+                        this.researchPlanStore.save(plan);
+                    }
+                    if (this.researchProgressTracker != null && !plan.dimensions().isEmpty()) {
+                        this.researchProgressTracker.markDimensionStarted(run.runId(), plan.dimensions().get(0).id());
+                        plan = this.researchPlanStore == null ? plan : this.researchPlanStore.findByRunId(run.runId()).orElse(plan);
+                    }
+                    prefixEvents.add(event(seq, config, AgentEventType.RESEARCH_PLAN_CREATED,
+                            "Research plan created with " + plan.dimensionCount() + " dimensions",
+                            Map.of("planId", plan.planId(), "dimensionCount", plan.dimensionCount(),
+                                    "topic", plan.topic(), "depth", researchOptions.depth().name(),
+                                    "timeWindow", researchOptions.timeWindow().name(),
+                                    "maxSources", researchOptions.maxSources(),
+                                    "outputFormat", researchOptions.outputFormat().name())));
+                    // Emit dimension started events for the active dimension
+                    for (org.wrj.haifa.ai.deerflow.research.plan.ResearchDimension dim : plan.dimensions()) {
+                        if (dim.status() == org.wrj.haifa.ai.deerflow.research.plan.ResearchTaskStatus.IN_PROGRESS) {
+                            prefixEvents.add(event(seq, config, AgentEventType.RESEARCH_DIMENSION_STARTED,
+                                    "Dimension started: " + dim.title(),
+                                    Map.of("dimensionId", dim.id(), "dimensionTitle", dim.title(),
+                                            "expectedSourceCount", dim.expectedSourceCount())));
+                            break;
+                        }
+                    }
+                } else if (planResult.needsClarification()) {
+                    if (this.researchClarificationStore != null) {
+                        this.researchClarificationStore.save(
+                                threadId,
+                                run.runId(),
+                                effectiveResearchMessage,
+                                researchOptions,
+                                planResult.clarificationQuestion(),
+                                planResult.clarificationType()
+                        );
+                    }
+                    prefixEvents.add(event(seq, config, AgentEventType.TOOL_CALL_REQUESTED,
+                            "Plan generation needs clarification: " + planResult.clarificationQuestion(),
+                            Map.of("clarificationType", planResult.clarificationType(),
+                                    "question", planResult.clarificationQuestion(),
+                                    "resumeThreadId", threadId,
+                                    "resumeRunId", run.runId())));
+                    this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM,
+                            "Plan generation needs clarification: " + planResult.clarificationQuestion(),
+                            Map.of("clarificationType", planResult.clarificationType(),
+                                    "question", planResult.clarificationQuestion(),
+                                    "clarificationPending", true,
+                                    "resumeThreadId", threadId,
+                                    "resumeRunId", run.runId()));
+                    return Flux.fromIterable(prefixEvents)
+                            .doOnNext(this::saveEvent)
+                            .doOnComplete(() -> {
+                                this.runManager.markCompleted(run.runId());
+                                this.threadManager.touch(threadId);
+                            });
+                }
+            }
+            if (plan == null) {
+                prefixEvents.add(event(seq, config, AgentEventType.RESEARCH_PLAN_CREATED,
+                        "Research plan created for: " + effectiveResearchMessage,
+                        Map.of("depth", researchOptions.depth().name(), "timeWindow", researchOptions.timeWindow().name(),
+                                "maxSources", researchOptions.maxSources(), "outputFormat", researchOptions.outputFormat().name())));
+            }
 
             List<Skill> activeSkills = new java.util.ArrayList<>(resolveActiveSkills(request));
             boolean hasDeepResearch = activeSkills.stream().anyMatch(s -> "deep-research".equals(s.name()));
@@ -337,14 +482,18 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     researchOptions);
 
             // Run the agent loop with full context (policy, skills, uploads)
-            Flux<AgentEvent> loopEvents = this.agentLoop.run(loopConfig, config, researchSystemPrompt, request.message(), seq,
+            Flux<AgentEvent> loopEvents = this.agentLoop.run(loopConfig, config, researchSystemPrompt, effectiveResearchMessage, seq,
                     this.toolPolicyService, activeSkills, request.uploadedFileIds());
 
             // After loop completes, mark run status based on last event type
             final java.util.concurrent.atomic.AtomicReference<String> lastEventType = new java.util.concurrent.atomic.AtomicReference<>();
+            final java.util.concurrent.atomic.AtomicReference<org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan> finalPlan = new java.util.concurrent.atomic.AtomicReference<>(plan);
             Flux<AgentEvent> wrappedLoopEvents = loopEvents
                     .doOnNext(evt -> {
                         lastEventType.set(evt.type().name());
+                        if (this.researchPlanStore != null) {
+                            this.researchPlanStore.findByRunId(run.runId()).ifPresent(finalPlan::set);
+                        }
                         if (evt.type() == AgentEventType.MODEL_COMPLETED) {
                             this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, evt.content(),
                                     Map.of("mode", "research", "toolCount", evt.metadata().getOrDefault("totalToolCalls", 0)));
@@ -354,13 +503,39 @@ public class SimpleAgentRuntime implements AgentRuntime {
                         String lastType = lastEventType.get();
                         long totalDuration = System.currentTimeMillis() - runStartTime;
                         if ("RUN_FAILED".equals(lastType)) {
-                            // Already marked as failed by AgentLoop — do not override
                             this.threadManager.touch(threadId);
                             log.info("Research run failed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
                         } else if ("RUN_CANCELLED".equals(lastType)) {
                             this.threadManager.touch(threadId);
                             log.info("Research run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
                         } else {
+                            // --- Quality Gate Check ---
+                            List<AgentEvent> qualityEvents = new ArrayList<>();
+                            if (this.researchQualityGate != null && this.researchRuntimeSupport != null) {
+                                List<org.wrj.haifa.ai.deerflow.research.ResearchSource> sources = this.researchRuntimeSupport.listSourcesByRun(run.runId());
+                                List<org.wrj.haifa.ai.deerflow.research.EvidenceItem> evidenceItems = this.researchRuntimeSupport.listEvidenceByRun(run.runId());
+                                org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult qgResult = this.researchQualityGate.evaluate(finalPlan.get(), sources, evidenceItems,
+                                        researchOptions.requireCitations());
+                                qualityEvents.add(event(seq, config, AgentEventType.QUALITY_GATE_STARTED,
+                                        "Quality gate evaluation started", Map.of()));
+                                if (qgResult.passed()) {
+                                    qualityEvents.add(event(seq, config, AgentEventType.QUALITY_GATE_PASSED,
+                                            "Quality gate passed. Score: " + String.format("%.1f", qgResult.score()),
+                                            Map.of("score", qgResult.score(), "dimensionCount", qgResult.dimensionCount(),
+                                                    "fetchedSourceCount", qgResult.fetchedSourceCount())));
+                                } else {
+                                    qualityEvents.add(event(seq, config, AgentEventType.QUALITY_GATE_FAILED,
+                                            "Quality gate failed. Score: " + String.format("%.1f", qgResult.score()) + 
+                                                    ". Gaps: " + String.join("; ", qgResult.gaps()),
+                                            Map.of("score", qgResult.score(), "gaps", qgResult.gaps(),
+                                                    "recommendation", qgResult.recommendation(),
+                                                    "dimensionCount", qgResult.dimensionCount(),
+                                                    "fetchedSourceCount", qgResult.fetchedSourceCount())));
+                                }
+                                for (AgentEvent qe : qualityEvents) {
+                                    try { this.saveEvent(qe); } catch (Exception ignored) {}
+                                }
+                            }
                             this.runManager.markCompleted(run.runId());
                             this.threadManager.touch(threadId);
                             log.info("Research run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
