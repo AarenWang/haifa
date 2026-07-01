@@ -11,6 +11,7 @@ import org.wrj.haifa.ai.deerflow.todo.TodoStore;
 
 /**
  * Default implementation of AgentLoopObserver with todo checklist verification.
+ * Tool output compression is handled centrally by {@link AgentLoop}.
  */
 public class DefaultAgentLoopObserver implements AgentLoopObserver {
 
@@ -23,6 +24,8 @@ public class DefaultAgentLoopObserver implements AgentLoopObserver {
     @Override
     public String onToolCompleted(AgentRunConfig runConfig, ToolCall toolCall, ToolCallResult toolResult,
             List<AgentEvent> events, AtomicInteger seq, List<String> history) {
+        // Tool output compression is now handled by AgentLoop before event emission.
+        // Observers only handle source/evidence processing and observations.
         return null;
     }
 

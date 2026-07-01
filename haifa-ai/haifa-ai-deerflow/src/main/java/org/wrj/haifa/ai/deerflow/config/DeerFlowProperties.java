@@ -343,6 +343,85 @@ public class DeerFlowProperties {
         this.researchEnabled = researchEnabled;
     }
 
+    // Tool output budget configuration (inspired by Python deer-flow ToolOutputConfig)
+    private ToolOutputBudget toolOutputBudget = new ToolOutputBudget();
+
+    // Summarization configuration (inspired by Python deer-flow SummarizationConfig)
+    private Summarization summarization = new Summarization();
+
+    public static class ToolOutputBudget {
+        private boolean enabled = true;
+        private boolean externalizeEnabled = true;
+        private int externalizeMinChars = 10_000;
+        private int fallbackMaxChars = 8_000;
+        private int fallbackHeadChars = 1_500;
+        private int fallbackTailChars = 1_500;
+        private int previewHeadChars = 1_500;
+        private int previewTailChars = 1_500;
+        private String storageSubdir = "tool-outputs";
+        private String exemptTools = "present_files,view_image";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public boolean isExternalizeEnabled() { return externalizeEnabled; }
+        public void setExternalizeEnabled(boolean externalizeEnabled) { this.externalizeEnabled = externalizeEnabled; }
+        public int getExternalizeMinChars() { return externalizeMinChars; }
+        public void setExternalizeMinChars(int externalizeMinChars) { this.externalizeMinChars = externalizeMinChars; }
+        public int getFallbackMaxChars() { return fallbackMaxChars; }
+        public void setFallbackMaxChars(int fallbackMaxChars) { this.fallbackMaxChars = fallbackMaxChars; }
+        public int getFallbackHeadChars() { return fallbackHeadChars; }
+        public void setFallbackHeadChars(int fallbackHeadChars) { this.fallbackHeadChars = fallbackHeadChars; }
+        public int getFallbackTailChars() { return fallbackTailChars; }
+        public void setFallbackTailChars(int fallbackTailChars) { this.fallbackTailChars = fallbackTailChars; }
+        public int getPreviewHeadChars() { return previewHeadChars; }
+        public void setPreviewHeadChars(int previewHeadChars) { this.previewHeadChars = previewHeadChars; }
+        public int getPreviewTailChars() { return previewTailChars; }
+        public void setPreviewTailChars(int previewTailChars) { this.previewTailChars = previewTailChars; }
+        public String getStorageSubdir() { return storageSubdir; }
+        public void setStorageSubdir(String storageSubdir) { this.storageSubdir = storageSubdir; }
+        public String getExemptTools() { return exemptTools; }
+        public void setExemptTools(String exemptTools) { this.exemptTools = exemptTools; }
+    }
+
+    public static class Summarization {
+        private boolean enabled = false;
+        private String summaryModelName; // lightweight model for summarization (e.g. gpt-4o-mini)
+        private int triggerMessages = 10;
+        private int triggerChars = 8_000;
+        private int keepMessages = 4;
+        private int trimTokensToSummarize = 4_000;
+        private int preserveRecentSkillCount = 5;
+        private int preserveRecentSkillTokens = 25_000;
+        private int preserveRecentSkillTokensPerSkill = 5_000;
+        private String skillFileReadToolNames = "read_file,read,view,cat";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getSummaryModelName() { return summaryModelName; }
+        public void setSummaryModelName(String summaryModelName) { this.summaryModelName = summaryModelName; }
+        public int getTriggerMessages() { return triggerMessages; }
+        public void setTriggerMessages(int triggerMessages) { this.triggerMessages = triggerMessages; }
+        public int getTriggerChars() { return triggerChars; }
+        public void setTriggerChars(int triggerChars) { this.triggerChars = triggerChars; }
+        public int getKeepMessages() { return keepMessages; }
+        public void setKeepMessages(int keepMessages) { this.keepMessages = keepMessages; }
+        public int getTrimTokensToSummarize() { return trimTokensToSummarize; }
+        public void setTrimTokensToSummarize(int trimTokensToSummarize) { this.trimTokensToSummarize = trimTokensToSummarize; }
+        public int getPreserveRecentSkillCount() { return preserveRecentSkillCount; }
+        public void setPreserveRecentSkillCount(int preserveRecentSkillCount) { this.preserveRecentSkillCount = preserveRecentSkillCount; }
+        public int getPreserveRecentSkillTokens() { return preserveRecentSkillTokens; }
+        public void setPreserveRecentSkillTokens(int preserveRecentSkillTokens) { this.preserveRecentSkillTokens = preserveRecentSkillTokens; }
+        public int getPreserveRecentSkillTokensPerSkill() { return preserveRecentSkillTokensPerSkill; }
+        public void setPreserveRecentSkillTokensPerSkill(int preserveRecentSkillTokensPerSkill) { this.preserveRecentSkillTokensPerSkill = preserveRecentSkillTokensPerSkill; }
+        public String getSkillFileReadToolNames() { return skillFileReadToolNames; }
+        public void setSkillFileReadToolNames(String skillFileReadToolNames) { this.skillFileReadToolNames = skillFileReadToolNames; }
+    }
+
+    public ToolOutputBudget getToolOutputBudget() { return toolOutputBudget; }
+    public void setToolOutputBudget(ToolOutputBudget toolOutputBudget) { this.toolOutputBudget = toolOutputBudget; }
+    public Summarization getSummarization() { return summarization; }
+    public void setSummarization(Summarization summarization) { this.summarization = summarization; }
+
     public String getOutputsRoot() {
         return outputsRoot;
     }

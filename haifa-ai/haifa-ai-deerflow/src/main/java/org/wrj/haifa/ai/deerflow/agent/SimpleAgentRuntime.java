@@ -21,6 +21,7 @@ import org.wrj.haifa.ai.deerflow.middleware.AgentMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.AgentRuntimeContext;
 import org.wrj.haifa.ai.deerflow.middleware.MiddlewareChain;
 import org.wrj.haifa.ai.deerflow.middleware.MiddlewareOrder;
+import org.wrj.haifa.ai.deerflow.middleware.ToolOutputBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentEventStore;
@@ -99,7 +100,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage) {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
                 agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
@@ -114,7 +115,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             ReportWriterService reportWriterService) {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
                 agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
-                null, researchRuntimeSupport, researchPlanner, researchPlanStore, clarificationGate,
+                null, null, researchRuntimeSupport, researchPlanner, researchPlanStore, clarificationGate,
                 researchClarificationStore, researchProgressTracker, researchQualityGate, reportWriterService);
     }
 
@@ -125,6 +126,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage,
             @Autowired(required = false) org.wrj.haifa.ai.deerflow.todo.TodoStore todoStore,
+            @Autowired(required = false) ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
             @Autowired(required = false) ResearchRuntimeSupport researchRuntimeSupport,
             @Autowired(required = false) ResearchPlanner researchPlanner,
             @Autowired(required = false) ResearchPlanStore researchPlanStore,
@@ -146,7 +148,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 }))
                 .toList();
         this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
-                new ResearchLoopObserver(todoStore, researchRuntimeSupport, researchPlanner, researchPlanStore, researchProgressTracker, researchQualityGate));
+                new ResearchLoopObserver(todoStore, researchRuntimeSupport, researchPlanner, researchPlanStore, researchProgressTracker, researchQualityGate),
+                toolOutputBudgetMiddleware);
         this.agentEventStore = agentEventStore;
         this.toolExecutionStore = toolExecutionStore;
         this.modelStepStore = modelStepStore;
@@ -569,6 +572,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private List<AgentEvent> finishResearchDelivery(String lastType, RunRecord run, String threadId,
             AgentRunConfig config, AtomicInteger seq, long runStartTime, ResearchPlan plan,
             ResearchOptions researchOptions, String synthesisResult, Map<String, Object> modelMetadata) {
+        if (plan != null && StringUtils.hasText(plan.topic())) {
+            this.threadManager.update(threadId, plan.topic(), null, null);
+        }
         long totalDuration = System.currentTimeMillis() - runStartTime;
         if ("RUN_FAILED".equals(lastType)) {
             this.runManager.markFailed(run.runId(), "Research run failed");
@@ -632,7 +638,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                             "previewUrl", "/api/deerflow/artifacts/" + result.artifact().artifactId(),
                             "downloadUrl", "/api/deerflow/artifacts/" + result.artifact().artifactId() + "/download")));
             this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
-                    buildArtifactSummary(result),
+                    buildArtifactSummary(result, qgResult),
                     Map.of("mode", "research", "artifactId", result.artifact().artifactId(),
                             "filename", result.artifact().filename(),
                             "toolCount", modelMetadata == null ? 0 : modelMetadata.getOrDefault("totalToolCalls", 0)));
@@ -648,11 +654,20 @@ public class SimpleAgentRuntime implements AgentRuntime {
         return events;
     }
 
-    private static String buildArtifactSummary(ReportWriteResult result) {
-        return "Summary\n\n" + result.summary()
-                + "\n\nLimitations\n\n" + result.limitations()
-                + "\n\nArtifact\n\n- [" + result.artifact().filename() + "](/api/deerflow/artifacts/"
-                + result.artifact().artifactId() + "/download)";
+    private static String buildArtifactSummary(ReportWriteResult result, QualityGateResult qgResult) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Summary\n\n").append(result.summary())
+          .append("\n\nLimitations\n\n").append(result.limitations());
+
+        List<String> suggestions = generateSuggestions(qgResult);
+        sb.append("\n\nFollow-up Suggestions\n\n");
+        for (String sug : suggestions) {
+            sb.append("- ").append(sug).append("\n");
+        }
+
+        sb.append("\n\nArtifact\n\n- [").append(result.artifact().filename())
+          .append("](/api/deerflow/artifacts/").append(result.artifact().artifactId()).append("/download)");
+        return sb.toString();
     }
 
     private static String compactResearchAnswer(String synthesisResult, QualityGateResult qualityGateResult) {
@@ -666,8 +681,48 @@ public class SimpleAgentRuntime implements AgentRuntime {
         String limitations = qualityGateResult == null || qualityGateResult.passed()
                 ? "No blocking quality gate gaps were recorded."
                 : String.join("; ", qualityGateResult.gaps());
-        return "Summary\n\n" + (answer.isBlank() ? "Research completed." : answer)
-                + "\n\nLimitations\n\n" + limitations;
+        StringBuilder sb = new StringBuilder();
+        sb.append("Summary\n\n").append(answer.isBlank() ? "Research completed." : answer)
+          .append("\n\nLimitations\n\n").append(limitations);
+
+        List<String> suggestions = generateSuggestions(qualityGateResult);
+        sb.append("\n\nFollow-up Suggestions\n\n");
+        for (String sug : suggestions) {
+            sb.append("- ").append(sug).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private static List<String> generateSuggestions(QualityGateResult qgResult) {
+        List<String> suggestions = new ArrayList<>();
+        if (qgResult == null || qgResult.passed()) {
+            suggestions.add("Expand the research to other related technologies or industries.");
+            suggestions.add("Compare these findings with a historical or geographical case study.");
+            return suggestions;
+        }
+        for (String gap : qgResult.gaps()) {
+            String lower = gap.toLowerCase();
+            if (lower.contains("source") || lower.contains("read")) {
+                suggestions.add("Fetch and read more authoritative articles on the topic.");
+            } else if (lower.contains("data") || lower.contains("fact") || lower.contains("number")) {
+                suggestions.add("Search specifically for quantitative data, statistics, and industry reports.");
+            } else if (lower.contains("case") || lower.contains("example")) {
+                suggestions.add("Search for real-world case studies or implementation examples.");
+            } else if (lower.contains("opinion") || lower.contains("view")) {
+                suggestions.add("Seek out expert analyses, interviews, or professional commentaries.");
+            } else if (lower.contains("limitation") || lower.contains("gap")) {
+                suggestions.add("Investigate the challenges, failures, and limitations of this area.");
+            } else if (lower.contains("counter") || lower.contains("oppose") || lower.contains("bias")) {
+                suggestions.add("Look into alternative perspectives, critiques, or counterarguments.");
+            } else if (lower.contains("citation") || lower.contains("cite")) {
+                suggestions.add("Validate the sources and check if all claims have proper inline citations.");
+            }
+        }
+        if (suggestions.isEmpty()) {
+            suggestions.add("Expand the research to other related technologies or industries.");
+            suggestions.add("Compare these findings with a historical or geographical case study.");
+        }
+        return suggestions;
     }
 
     private List<Skill> resolveActiveSkills(AgentRequest request) {

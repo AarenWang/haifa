@@ -26,6 +26,7 @@ import org.wrj.haifa.ai.deerflow.todo.TodoStore;
 
 /**
  * AgentLoopObserver implementation for research-specific logic.
+ * Tool output compression is handled centrally by {@link org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop}.
  */
 public class ResearchLoopObserver extends DefaultAgentLoopObserver {
 
@@ -139,6 +140,12 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
                     this.researchProgressTracker.recordEvidence(runConfig.runId(), evidenceItem);
                 }
             }
+
+            String sourceId = fetchProcessingResult.registration().stored().source().sourceId();
+            String title = fetchProcessingResult.registration().stored().source().title();
+
+            // Tool output compression is now handled centrally by AgentLoop before event emission.
+            // This observer only handles source/evidence processing and returns observation.
             return fetchProcessingResult.observation();
         }
 

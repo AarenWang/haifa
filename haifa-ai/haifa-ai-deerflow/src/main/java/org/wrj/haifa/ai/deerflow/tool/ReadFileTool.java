@@ -63,8 +63,17 @@ public class ReadFileTool implements AgentTool {
                 return ToolResult.of(name(), "Error: path is required");
             }
 
+            Path resolved;
             Path workspacePath = request.workspaceRoot().toAbsolutePath().normalize();
-            Path resolved = workspacePath.resolve(requestedPath).normalize();
+            final String VIRTUAL_OUTPUTS_BASE = "/mnt/user-data/outputs";
+            if (requestedPath.startsWith(VIRTUAL_OUTPUTS_BASE + "/")) {
+                // Virtual path from ToolOutputBudgetMiddleware externalization
+                String relativePath = requestedPath.substring(VIRTUAL_OUTPUTS_BASE.length() + 1);
+                resolved = Path.of(properties.getOutputsRoot()).resolve(relativePath).normalize();
+            } else {
+                resolved = workspacePath.resolve(requestedPath).normalize();
+            }
+
             Path uploadsPath = Path.of(properties.getUploadsRoot()).toAbsolutePath().normalize();
             Path outputsPath = Path.of(properties.getOutputsRoot()).toAbsolutePath().normalize();
             Path skillsPath = Path.of(properties.getSkillsRoot()).toAbsolutePath().normalize();

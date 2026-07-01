@@ -18,6 +18,7 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
+import org.wrj.haifa.ai.deerflow.middleware.ToolOutputBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
@@ -40,21 +41,26 @@ public class AgentLoop {
     private final ToolCallStore toolCallStore;
     private final AgentLoopRunStore agentLoopRunStore;
     private final AgentLoopObserver observer;
+    private final ToolOutputBudgetMiddleware toolOutputBudgetMiddleware;
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry) {
-        this(modelClient, toolRegistry, null, null, null, new NoopAgentLoopObserver());
+        this(modelClient, toolRegistry, null, null, null, new NoopAgentLoopObserver(), null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore) {
-        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, new NoopAgentLoopObserver());
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, new NoopAgentLoopObserver(), null);
     }
-
-
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             AgentLoopObserver observer) {
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer, null);
+    }
+
+    public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            AgentLoopObserver observer, ToolOutputBudgetMiddleware toolOutputBudgetMiddleware) {
         this.modelClient = modelClient;
         this.toolRegistry = toolRegistry;
         this.toolCallParser = new ToolCallParser();
@@ -62,6 +68,7 @@ public class AgentLoop {
         this.toolCallStore = toolCallStore;
         this.agentLoopRunStore = agentLoopRunStore;
         this.observer = observer != null ? observer : new NoopAgentLoopObserver();
+        this.toolOutputBudgetMiddleware = toolOutputBudgetMiddleware;
     }
 
     public Flux<AgentEvent> run(
@@ -311,35 +318,55 @@ public class AgentLoop {
                             "Executing " + targetToolName,
                             Map.of("toolCallId", toolCall.id(), "toolName", targetToolName)));
 
-                    ToolCallResult toolResult = executeTool(toolCall, runConfig, uploadedFileIds);
+                    ToolCallResult rawToolResult = executeTool(toolCall, runConfig, uploadedFileIds);
                     long toolDuration = System.currentTimeMillis() - toolStartTime;
 
-                    // Persist tool call result
+                    // Persist raw tool call result for audit/debug
                     if (toolCallStore != null) {
                         try {
-                            toolCallStore.saveResult(toolCall.id(), toolResult);
+                            toolCallStore.saveResult(toolCall.id(), rawToolResult);
                         } catch (Exception e) {
                             log.warn("Failed to persist tool call result: {}", e.getMessage());
                         }
                     }
 
-                    String eventContent = toolResult.result() != null ? toolResult.result() : "";
-                    if (toolResult.status() == ToolCallResult.Status.FAILED && toolResult.error() != null) {
-                        eventContent = toolResult.error();
+                    // Add raw history entry for observer source/evidence processing
+                    history.add("Tool result (" + toolCall.toolName() + "): " + rawToolResult.result());
+
+                    // Observer processes source/evidence (uses raw toolResult, does NOT compress)
+                    String observation = observer.onToolCompleted(runConfig, toolCall, rawToolResult, events, seq, history);
+                    if (observation != null && !observation.isBlank()) {
+                        history.add(observation);
+                    }
+
+                    // Compress tool output BEFORE emitting TOOL_COMPLETED event and MessageStore persistence
+                    String compressedResult = rawToolResult.result();
+                    if (toolOutputBudgetMiddleware != null && rawToolResult.status() == ToolCallResult.Status.SUCCESS) {
+                        String processed = toolOutputBudgetMiddleware.processToolOutput(
+                                toolCall.toolName(), rawToolResult.result(), runConfig.threadId(), runConfig.runId(), null, null, null);
+                        if (processed != null && processed.length() < rawToolResult.result().length()) {
+                            compressedResult = processed;
+                            int lastIdx = history.size() - 1;
+                            if (lastIdx >= 0 && history.get(lastIdx).startsWith("Tool result (" + toolCall.toolName() + "): ")) {
+                                history.set(lastIdx, "Tool result (" + toolCall.toolName() + "): " + compressedResult);
+                            }
+                            events.add(event(seq, runConfig, AgentEventType.TOOL_OUTPUT_BUDGET_EXCEEDED,
+                                    "Tool output budget exceeded for: " + toolCall.toolName() + ". Compressed.",
+                                    Map.of("toolName", toolCall.toolName(), "compressed", true)));
+                        }
+                    }
+
+                    // Emit TOOL_COMPLETED event with compressed content (ensures MessageStore/toolExecutionStore also see compressed)
+                    String eventContent = compressedResult;
+                    if (rawToolResult.status() == ToolCallResult.Status.FAILED && rawToolResult.error() != null) {
+                        eventContent = rawToolResult.error();
                     }
 
                     events.add(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
                             eventContent,
                             Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(),
-                                    "status", toolResult.status().name(), "durationMs", toolDuration,
-                                    "error", toolResult.error() != null ? toolResult.error() : "")));
-
-                    history.add("Tool result (" + toolCall.toolName() + "): " + toolResult.result());
-
-                    String observation = observer.onToolCompleted(runConfig, toolCall, toolResult, events, seq, history);
-                    if (observation != null && !observation.isBlank()) {
-                        history.add(observation);
-                    }
+                                    "status", rawToolResult.status().name(), "durationMs", toolDuration,
+                                    "error", rawToolResult.error() != null ? rawToolResult.error() : "")));
                 }
 
                 if (totalToolCalls >= config.maxToolCalls()) {
