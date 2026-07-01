@@ -1,12 +1,13 @@
-import { Zap } from 'lucide-react';
+import { Zap, Brain } from 'lucide-react';
 import type { AppStatus } from '../types';
 
 interface HeaderProps {
   backendStatus: 'connected' | 'disconnected' | 'unknown';
   runStatus: AppStatus;
+  onOpenMemorySettings: () => void;
 }
 
-export default function Header({ backendStatus, runStatus }: HeaderProps) {
+export default function Header({ backendStatus, runStatus, onOpenMemorySettings }: HeaderProps) {
   const backendPill = (() => {
     if (backendStatus === 'connected') {
       return (
@@ -57,7 +58,28 @@ export default function Header({ backendStatus, runStatus }: HeaderProps) {
       <div className="header-meta">
         {backendPill}
         {runPill}
+        <button
+          type="button"
+          className="btn btn-ghost flex-row align-center gap-1"
+          onClick={onOpenMemorySettings}
+          title="Agent Persona & Memory"
+          style={{
+            padding: '4px 8px',
+            fontSize: '12px',
+            borderRadius: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            border: '1px solid var(--border)',
+            background: 'var(--bg-secondary)',
+            cursor: 'pointer'
+          }}
+        >
+          <Brain size={14} style={{ color: 'var(--accent-blue)' }} />
+          <span>Memory & Persona</span>
+        </button>
       </div>
     </header>
   );
 }
+

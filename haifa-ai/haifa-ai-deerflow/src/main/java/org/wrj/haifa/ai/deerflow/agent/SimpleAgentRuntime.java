@@ -95,6 +95,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
     @Autowired(required = false)
     private SlashSkillResolver slashSkillResolver;
 
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.memory.MemoryReflectionService memoryReflectionService;
+
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
             RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
             AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
@@ -193,15 +196,23 @@ public class SimpleAgentRuntime implements AgentRuntime {
             String threadId = thread.threadId();
             String modelName = StringUtils.hasText(request.model()) ? request.model() : this.properties.getModel();
             int uploadedFileCount = request.uploadedFileIds() == null ? 0 : request.uploadedFileIds().size();
-            RunRecord run = this.runManager.create(threadId, modelName, Map.of("source", "sse", "uploadedFiles", uploadedFileCount, "mode", "chat"));
+            java.util.Map<String, Object> runMetadata = new java.util.HashMap<>();
+            runMetadata.put("source", "sse");
+            runMetadata.put("uploadedFiles", uploadedFileCount);
+            runMetadata.put("mode", "chat");
+            runMetadata.put("userId", request.userId());
+            RunRecord run = this.runManager.create(threadId, modelName, runMetadata);
             this.runManager.markRunning(run.runId());
             this.messageStore.add(threadId, run.runId(), MessageRole.USER, request.message(),
                     Map.of("uploadedFileCount", uploadedFileCount));
             log.info("Run started. runId={}, threadId={}, model={}, uploadedFileCount={}, mode=chat", run.runId(), threadId, nullToEmpty(modelName), uploadedFileCount);
 
+            java.util.Map<String, Object> configMetadata = new java.util.HashMap<>();
+            configMetadata.put("runtime", "simple-agent-runtime");
+            configMetadata.put("userId", request.userId());
             AgentRunConfig config = new AgentRunConfig(threadId, run.runId(), modelName, true, false,
                     this.properties.getMaxIterations(), Path.of(this.properties.getWorkspaceRoot()), RunMode.CHAT,
-                    ResearchOptions.defaults(), Map.of("runtime", "simple-agent-runtime"));
+                    ResearchOptions.defaults(), configMetadata);
             AtomicInteger seq = new AtomicInteger();
 
             List<AgentEvent> prefixEvents = new ArrayList<>();
@@ -293,6 +304,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                         int toolCount = toolResults.size() + (int) lastMetadata.get().getOrDefault("totalToolCalls", 0);
                                         this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, assistantAnswer,
                                                 Map.of("toolCount", toolCount));
+                                        if (this.memoryReflectionService != null) {
+                                            this.memoryReflectionService.reflectAsync(threadId, run.runId());
+                                        }
                                     }
                                     log.info("Chat run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
                                 })
@@ -348,6 +362,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             runMetadataMap.put("source", "sse");
             runMetadataMap.put("uploadedFiles", uploadedFileCount);
             runMetadataMap.put("mode", "research");
+            runMetadataMap.put("userId", request.userId());
             runMetadataMap.put("depth", researchOptions.depth().name());
             runMetadataMap.put("timeWindow", researchOptions.timeWindow().name());
             runMetadataMap.put("maxSources", researchOptions.maxSources());
@@ -369,9 +384,12 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     run.runId(), threadId, nullToEmpty(modelName), researchOptions.depth(), researchOptions.timeWindow(),
                     researchOptions.maxSources(), researchOptions.outputFormat());
 
+            java.util.Map<String, Object> configMetadata = new java.util.HashMap<>();
+            configMetadata.put("runtime", "agent-loop");
+            configMetadata.put("userId", request.userId());
             AgentRunConfig config = new AgentRunConfig(threadId, run.runId(), modelName, true, false,
                     this.properties.getMaxIterations(), Path.of(this.properties.getWorkspaceRoot()), RunMode.RESEARCH,
-                    researchOptions, Map.of("runtime", "agent-loop"));
+                    researchOptions, configMetadata);
             AtomicInteger seq = new AtomicInteger();
 
             List<AgentEvent> prefixEvents = new ArrayList<>();
@@ -660,6 +678,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
         this.runManager.markCompleted(run.runId());
         this.threadManager.touch(threadId);
+        if (this.memoryReflectionService != null) {
+            this.memoryReflectionService.reflectAsync(threadId, run.runId());
+        }
         log.info("Research run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
         return events;
     }

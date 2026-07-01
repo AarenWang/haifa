@@ -8,26 +8,33 @@ public record AgentRequest(
         String model,
         List<String> uploadedFileIds,
         RunMode mode,
-        ResearchOptions researchOptions
+        ResearchOptions researchOptions,
+        String userId
 ) {
 
     public AgentRequest(String threadId, String message, String model) {
-        this(threadId, message, model, List.of(), RunMode.CHAT, ResearchOptions.defaults());
+        this(threadId, message, model, List.of(), RunMode.CHAT, ResearchOptions.defaults(), "default-user");
     }
 
     public AgentRequest(String threadId, String message, String model, List<String> uploadedFileIds) {
         this(threadId, message, model, uploadedFileIds == null ? List.of() : uploadedFileIds, RunMode.CHAT,
-                ResearchOptions.defaults());
+                ResearchOptions.defaults(), "default-user");
     }
 
     public AgentRequest(String threadId, String message, String model, List<String> uploadedFileIds,
             RunMode mode, ResearchOptions researchOptions) {
+        this(threadId, message, model, uploadedFileIds, mode, researchOptions, "default-user");
+    }
+
+    public AgentRequest(String threadId, String message, String model, List<String> uploadedFileIds,
+            RunMode mode, ResearchOptions researchOptions, String userId) {
         this.threadId = threadId;
         this.message = message;
         this.model = model;
         this.uploadedFileIds = uploadedFileIds == null ? List.of() : uploadedFileIds;
         this.mode = mode == null ? RunMode.CHAT : mode;
         this.researchOptions = researchOptions == null ? ResearchOptions.defaults() : researchOptions;
+        this.userId = userId == null ? "default-user" : userId;
     }
 
     public boolean isChatMode() {

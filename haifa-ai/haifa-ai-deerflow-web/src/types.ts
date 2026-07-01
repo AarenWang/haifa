@@ -282,4 +282,47 @@ export type AppAction =
   | { type: 'TOGGLE_UPLOAD_SELECTION'; payload: string }
   | { type: 'ADD_RUN_HISTORY'; payload: RunHistoryEntry }
   | { type: 'SET_EVENTS'; payload: DeerFlowEvent[] }
- | { type: 'SET_LAST_REQUEST'; payload?: RunRequest };
+  | { type: 'SET_LAST_REQUEST'; payload?: RunRequest };
+
+export interface AgentPersona {
+  id?: string;
+  userId?: string;
+  agentId?: string;
+  name: string;
+  description: string;
+  soul: string;
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface MemoryFact {
+  id?: string;
+  userId?: string;
+  agentId?: string;
+  category: string;
+  content: string;
+  source?: string;
+  sourceThreadId?: string;
+  sourceRunId?: string;
+  confidence?: number;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastUsedAt?: string;
+}
+
+export interface MemoryCandidate {
+  id?: string;
+  userId?: string;
+  agentId?: string;
+  category: string;
+  content: string;
+  source?: string;
+  sourceThreadId?: string;
+  sourceRunId?: string;
+  confidence?: number;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+}

@@ -75,14 +75,20 @@ public class RunController {
     }
 
     @PostMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<AgentEvent>> stream(@Valid @RequestBody RunCreateRequest request) {
-        return this.agentRuntime.stream(new AgentRequest(
+    public org.springframework.http.ResponseEntity<Flux<ServerSentEvent<AgentEvent>>> stream(
+            @Valid @RequestBody RunCreateRequest request,
+            org.springframework.web.server.ServerWebExchange exchange) {
+        String userId = UserIdResolver.resolve(exchange);
+        Flux<ServerSentEvent<AgentEvent>> body = this.agentRuntime.stream(new AgentRequest(
                 request.threadId(), request.message(), request.model(), request.uploadedFileIds(),
-                request.mode(), request.researchOptions()))
+                request.mode(), request.researchOptions(), userId))
                 .map(event -> ServerSentEvent.<AgentEvent>builder(event)
                         .id(event.runId() + ":" + event.eventId())
                         .event(event.type().name().toLowerCase())
                         .build());
+        return org.springframework.http.ResponseEntity.ok()
+                .header("X-Accel-Buffering", "no")
+                .body(body);
     }
 
     @GetMapping("/{runId}")

@@ -25,12 +25,14 @@ import ArtifactPanel from './components/ArtifactPanel';
 import ResearchInspector from './components/ResearchInspector';
 import ResearchPlanView from './components/ResearchPlanView';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
+import MemorySettingsModal from './components/MemorySettingsModal';
 
 function App() {
   const [state, dispatch] = useReducer(deerflowReducer, initialState);
   const abortRef = useRef<AbortController | null>(null);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'unknown'>('unknown');
   const [externalMessage, setExternalMessage] = useState<string | undefined>(undefined);
+  const [isMemoryOpen, setIsMemoryOpen] = useState<boolean>(false);
 
   useEffect(() => {
     const threadId = getThreadIdFromUrl();
@@ -394,7 +396,11 @@ function App() {
 
   return (
     <div className="app">
-      <Header backendStatus={backendStatus} runStatus={state.status} />
+      <Header
+        backendStatus={backendStatus}
+        runStatus={state.status}
+        onOpenMemorySettings={() => setIsMemoryOpen(true)}
+      />
       <div className="main">
         <WorkspaceSidebar
           backendStatus={backendStatus}
@@ -453,6 +459,7 @@ function App() {
         </div>
         <ActivityTrace events={state.events} />
       </div>
+      {isMemoryOpen && <MemorySettingsModal onClose={() => setIsMemoryOpen(false)} />}
     </div>
   );
 }

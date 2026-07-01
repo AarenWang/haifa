@@ -70,3 +70,5 @@ hs_err_pid*
 !pom.xml
 !**/pom.xml
 prompts/
+
+**/outputs/
