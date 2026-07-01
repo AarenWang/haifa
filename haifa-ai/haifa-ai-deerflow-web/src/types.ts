@@ -121,6 +121,7 @@ export interface RunResponse {
   modelName: string;
   status: string;
   error: string | null;
+  mode: 'chat' | 'research';
   createdAt: string;
   updatedAt: string;
 }

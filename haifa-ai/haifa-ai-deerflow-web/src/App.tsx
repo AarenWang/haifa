@@ -141,7 +141,11 @@ function App() {
         const latestRun = sorted[0];
         const events = await fetchRunEvents(latestRun.runId);
         dispatch({ type: 'SET_EVENTS', payload: events });
-        refreshResearchData(latestRun.runId);
+        if (latestRun.mode === 'research') {
+          refreshResearchData(latestRun.runId);
+        } else {
+          refreshResearchData();
+        }
         refreshArtifactData(threadId, latestRun.runId);
       } else {
         dispatch({ type: 'SET_EVENTS', payload: [] });
@@ -238,16 +242,8 @@ function App() {
         {
           onEvent: (evt) => {
             dispatch({ type: 'ADD_EVENT', payload: evt });
-            if (
-              evt.type === 'RUN_STARTED' ||
-              evt.type === 'MODEL_COMPLETED' ||
-              evt.type === 'RUN_COMPLETED' ||
-              evt.type === 'RUN_FAILED'
-            ) {
-              refreshThreads();
-              refreshMessages(evt.threadId);
-            }
-            if (
+            const isResearchRun = fullReq.mode === 'research';
+            const isResearchEvent =
               evt.type === 'RESEARCH_PLAN_CREATED' ||
               evt.type === 'RESEARCH_DIMENSION_STARTED' ||
               evt.type === 'RESEARCH_DIMENSION_COMPLETED' ||
@@ -261,8 +257,17 @@ function App() {
               evt.type === 'REPORT_COMPLETED' ||
               evt.type === 'ARTIFACT_CREATED' ||
               evt.type === 'MODEL_COMPLETED' ||
-              evt.type === 'RUN_COMPLETED'
+              evt.type === 'RUN_COMPLETED';
+            if (
+              evt.type === 'RUN_STARTED' ||
+              evt.type === 'MODEL_COMPLETED' ||
+              evt.type === 'RUN_COMPLETED' ||
+              evt.type === 'RUN_FAILED'
             ) {
+              refreshThreads();
+              refreshMessages(evt.threadId);
+            }
+            if (isResearchRun && isResearchEvent) {
               refreshResearchData(evt.runId);
             }
             if (

@@ -35,6 +35,9 @@ public class RunManager {
         entity.setModelName(modelName);
         entity.setStatus(RunStatus.PENDING);
         entity.setMetadataJson(metadataToJson(metadata));
+        if (metadata != null && metadata.get("mode") instanceof String mode) {
+            entity.setMode(mode);
+        }
         entity.setCreatedAt(now);
         entity.setUpdatedAt(now);
         runRepository.save(entity);

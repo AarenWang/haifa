@@ -175,6 +175,7 @@ public class RunController {
 
     @GetMapping("/{runId}/progress")
     public Mono<ResearchProgressResponse> progress(@PathVariable String runId) {
+        requireResearchPlan(runId);
         ResearchProgressTracker.ResearchProgress progress = this.researchProgressTracker.getProgress(runId);
         return Mono.just(new ResearchProgressResponse(
                 progress.totalDimensions(),
@@ -190,7 +191,7 @@ public class RunController {
 
     @GetMapping("/{runId}/quality-gate")
     public Mono<QualityGateResponse> qualityGate(@PathVariable String runId) {
-        ResearchPlan plan = this.researchPlanStore.findByRunId(runId).orElse(null);
+        ResearchPlan plan = requireResearchPlan(runId);
         List<ResearchSource> sources = this.researchRuntimeSupport.listSourcesByRun(runId);
         List<EvidenceItem> evidenceItems = this.researchRuntimeSupport.listEvidenceByRun(runId);
         boolean requireCitations = this.runManager.find(runId)
@@ -215,6 +216,16 @@ public class RunController {
                 result.hasCounterView(),
                 result.citationComplete()
         ));
+    }
+
+    private ResearchPlan requireResearchPlan(String runId) {
+        RunRecord run = this.runManager.find(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+        if (!"research".equalsIgnoreCase(run.mode())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Research artifacts not found");
+        }
+        return this.researchPlanStore.findByRunId(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Plan not found"));
     }
 
     private ResearchPlanResponse toPlanResponse(ResearchPlan plan) {
