@@ -26,7 +26,7 @@ import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchClarificationStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStore;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 import reactor.core.scheduler.Schedulers;
@@ -46,7 +46,7 @@ public class AgentLoop {
     private final AgentLoopRunStore agentLoopRunStore;
     private final AgentLoopObserver observer;
     private final ToolOutputBudgetMiddleware toolOutputBudgetMiddleware;
-    private final ResearchClarificationStore clarificationStore;
+    private final ClarificationStore clarificationStore;
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry) {
         this(modelClient, toolRegistry, null, null, null, new NoopAgentLoopObserver(), null, null);
@@ -72,7 +72,7 @@ public class AgentLoop {
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             AgentLoopObserver observer, ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
-            ResearchClarificationStore clarificationStore) {
+            ClarificationStore clarificationStore) {
         this.modelClient = modelClient;
         this.toolRegistry = toolRegistry;
         this.toolCallParser = new ToolCallParser();
@@ -409,30 +409,32 @@ public class AgentLoop {
                     long toolDuration = rawToolResult.durationMs();
 
                     // --- Intercept ask_clarification and suspend the run ---
-                    if ("ask_clarification".equals(pending.targetToolName()) && clarificationStore != null
-                            && rawToolResult.status() == ToolCallResult.Status.SUCCESS) {
-                        String resultText = rawToolResult.result();
-                        String question = extractQuestion(resultText);
-                        if (question != null && !question.isBlank()) {
-                            clarificationStore.save(
-                                    runConfig.threadId(), runConfig.runId(), userMessage,
-                                    runConfig.researchOptions(), question, "missing_info"
-                            );
-                            emitter.emit(event(seq, runConfig, AgentEventType.CLARIFICATION_REQUIRED,
-                                    "Clarification required: " + question,
-                                    Map.of("question", question, "clarificationType", "missing_info",
-                                            "resumeThreadId", runConfig.threadId(), "resumeRunId", runConfig.runId())));
-                            emitter.emit(event(seq, runConfig, AgentEventType.RUN_SUSPENDED,
-                                    "Run suspended waiting for user clarification.",
-                                    Map.of("question", question, "clarificationType", "missing_info",
-                                            "resumeThreadId", runConfig.threadId(), "resumeRunId", runConfig.runId())));
-                            if (agentLoopRunStore != null) {
-                                agentLoopRunStore.markSuspended(runConfig.runId(), "CLARIFICATION_REQUIRED");
-                            }
-                            stopped = true;
-                            break;
+                    if (rawToolResult.metadata() != null && Boolean.TRUE.equals(rawToolResult.metadata().get("clarificationRequired"))) {
+                        String question = (String) rawToolResult.metadata().get("question");
+                        String clarificationId = (String) rawToolResult.metadata().get("clarificationId");
+                        String type = (String) rawToolResult.metadata().getOrDefault("clarificationType", "missing_info");
+
+                        emitter.emit(event(seq, runConfig, AgentEventType.CLARIFICATION_REQUIRED,
+                                "Clarification required: " + question,
+                                Map.of("question", question,
+                                        "clarificationType", type,
+                                        "clarificationId", clarificationId,
+                                        "resumeThreadId", runConfig.threadId(),
+                                        "resumeRunId", runConfig.runId())));
+                        emitter.emit(event(seq, runConfig, AgentEventType.RUN_SUSPENDED,
+                                "Run suspended waiting for user clarification.",
+                                Map.of("question", question,
+                                        "clarificationType", type,
+                                        "clarificationId", clarificationId,
+                                        "resumeThreadId", runConfig.threadId(),
+                                        "resumeRunId", runConfig.runId())));
+                        if (agentLoopRunStore != null) {
+                            agentLoopRunStore.markSuspended(runConfig.runId(), "CLARIFICATION_REQUIRED");
                         }
+                        stopped = true;
+                        break;
                     }
+
 
                     // Persist raw tool call result for audit/debug
                     if (toolCallStore != null) {

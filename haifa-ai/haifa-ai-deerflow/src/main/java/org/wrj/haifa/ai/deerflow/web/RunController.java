@@ -33,6 +33,10 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentEventStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationRecord;
+import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStatus;
+import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
 import reactor.core.publisher.Flux;
@@ -53,6 +57,8 @@ public class RunController {
     private final ResearchPlanStore researchPlanStore;
     private final ResearchProgressTracker researchProgressTracker;
     private final ResearchQualityGate researchQualityGate;
+    private final ClarificationStore clarificationStore;
+    private final MessageStore messageStore;
     private static final java.time.format.DateTimeFormatter ISO = java.time.format.DateTimeFormatter.ISO_INSTANT;
 
     public RunController(AgentRuntime agentRuntime, RunManager runManager,
@@ -61,7 +67,9 @@ public class RunController {
             ResearchRuntimeSupport researchRuntimeSupport,
             ResearchPlanStore researchPlanStore,
             ResearchProgressTracker researchProgressTracker,
-            ResearchQualityGate researchQualityGate) {
+            ResearchQualityGate researchQualityGate,
+            ClarificationStore clarificationStore,
+            MessageStore messageStore) {
         this.agentRuntime = agentRuntime;
         this.runManager = runManager;
         this.agentEventStore = agentEventStore;
@@ -72,6 +80,8 @@ public class RunController {
         this.researchPlanStore = researchPlanStore;
         this.researchProgressTracker = researchProgressTracker;
         this.researchQualityGate = researchQualityGate;
+        this.clarificationStore = clarificationStore;
+        this.messageStore = messageStore;
     }
 
     @PostMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -90,6 +100,85 @@ public class RunController {
                 .header("X-Accel-Buffering", "no")
                 .body(body);
     }
+
+    @PostMapping(path = "/{runId}/resume", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public org.springframework.http.ResponseEntity<Flux<ServerSentEvent<AgentEvent>>> resume(
+            @PathVariable String runId,
+            org.springframework.web.server.ServerWebExchange exchange) {
+        String userId = UserIdResolver.resolve(exchange);
+
+        org.wrj.haifa.ai.deerflow.run.RunRecord originalRun = this.runManager.find(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+
+        ClarificationRecord clarification = this.clarificationStore.findByRunId(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No clarification record found for this run"));
+
+        if (clarification.status() != ClarificationStatus.ANSWERED) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Clarification has not been answered yet");
+        }
+
+        List<org.wrj.haifa.ai.deerflow.thread.MessageRecord> runMessages = this.messageStore.listByRun(runId);
+        String originalMessage = runMessages.stream()
+                .filter(m -> m.role() == org.wrj.haifa.ai.deerflow.thread.MessageRole.USER)
+                .map(org.wrj.haifa.ai.deerflow.thread.MessageRecord::content)
+                .findFirst()
+                .orElse("");
+
+        java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+        metadata.put("resumedFromRunId", runId);
+        metadata.put("clarificationId", clarification.clarificationId());
+
+        org.wrj.haifa.ai.deerflow.agent.ResearchOptions options = originalRun.metadata() != null ?
+                reconstructResearchOptions(originalRun.metadata()) :
+                org.wrj.haifa.ai.deerflow.agent.ResearchOptions.defaults();
+
+        org.wrj.haifa.ai.deerflow.agent.RunMode runMode = "research".equalsIgnoreCase(originalRun.mode()) ?
+                org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH : org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT;
+
+        AgentRequest resumeRequest = new AgentRequest(
+                originalRun.threadId(),
+                originalMessage,
+                originalRun.modelName(),
+                List.of(),
+                runMode,
+                options,
+                userId,
+                metadata
+        );
+
+        Flux<ServerSentEvent<AgentEvent>> body = this.agentRuntime.stream(resumeRequest)
+                .map(event -> ServerSentEvent.<AgentEvent>builder(event)
+                        .id(event.runId() + ":" + event.eventId())
+                        .event(event.type().name().toLowerCase())
+                        .build());
+
+        return org.springframework.http.ResponseEntity.ok()
+                .header("X-Accel-Buffering", "no")
+                .body(body);
+    }
+
+    private org.wrj.haifa.ai.deerflow.agent.ResearchOptions reconstructResearchOptions(java.util.Map<String, Object> metadata) {
+        if (metadata == null) {
+            return org.wrj.haifa.ai.deerflow.agent.ResearchOptions.defaults();
+        }
+        try {
+            org.wrj.haifa.ai.deerflow.agent.ResearchDepth depth = org.wrj.haifa.ai.deerflow.agent.ResearchDepth.valueOf(
+                    String.valueOf(metadata.getOrDefault("depth", "STANDARD"))
+            );
+            org.wrj.haifa.ai.deerflow.agent.ResearchTimeWindow timeWindow = org.wrj.haifa.ai.deerflow.agent.ResearchTimeWindow.valueOf(
+                    String.valueOf(metadata.getOrDefault("timeWindow", "LATEST"))
+            );
+            int maxSources = Integer.parseInt(String.valueOf(metadata.getOrDefault("maxSources", "10")));
+            boolean requireCitations = Boolean.parseBoolean(String.valueOf(metadata.getOrDefault("requireCitations", "true")));
+            org.wrj.haifa.ai.deerflow.agent.ResearchOutputFormat outputFormat = org.wrj.haifa.ai.deerflow.agent.ResearchOutputFormat.valueOf(
+                    String.valueOf(metadata.getOrDefault("outputFormat", "ANSWER"))
+            );
+            return new org.wrj.haifa.ai.deerflow.agent.ResearchOptions(depth, timeWindow, maxSources, requireCitations, outputFormat);
+        } catch (Exception e) {
+            return org.wrj.haifa.ai.deerflow.agent.ResearchOptions.defaults();
+        }
+    }
+
 
     @GetMapping("/{runId}")
     public Mono<RunResponse> get(@PathVariable String runId) {

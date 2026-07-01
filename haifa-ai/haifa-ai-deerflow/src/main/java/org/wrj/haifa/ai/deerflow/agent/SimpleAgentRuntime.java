@@ -36,7 +36,7 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchClarificationStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStore;
 import org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchDimension;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan;
@@ -83,7 +83,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final AgentLoopRunStore agentLoopRunStore;
     private final org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage;
     private final ResearchRuntimeSupport researchRuntimeSupport;
-    private final ResearchClarificationStore researchClarificationStore;
+    private final ClarificationStore clarificationStore;
     private final ReportWriterService reportWriterService;
     private final TodoStore todoStore;
 
@@ -115,7 +115,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             @Autowired(required = false) TodoStore todoStore,
             @Autowired(required = false) ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
             @Autowired(required = false) ResearchRuntimeSupport researchRuntimeSupport,
-            @Autowired(required = false) ResearchClarificationStore researchClarificationStore,
+            @Autowired(required = false) ClarificationStore clarificationStore,
             @Autowired(required = false) ReportWriterService reportWriterService,
             @Autowired(required = false) SubagentLimitMiddleware subagentLimitMiddleware) {
         this.properties = properties;
@@ -140,7 +140,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
                 new CompositeAgentLoopObserver(observers),
                 toolOutputBudgetMiddleware,
-                researchClarificationStore);
+                clarificationStore);
         this.agentEventStore = agentEventStore;
         this.toolExecutionStore = toolExecutionStore;
         this.modelStepStore = modelStepStore;
@@ -148,7 +148,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this.agentLoopRunStore = agentLoopRunStore;
         this.skillStorage = skillStorage;
         this.researchRuntimeSupport = researchRuntimeSupport;
-        this.researchClarificationStore = researchClarificationStore;
+        this.clarificationStore = clarificationStore;
         this.reportWriterService = reportWriterService;
         this.todoStore = todoStore;
     }
@@ -165,13 +165,16 @@ public class SimpleAgentRuntime implements AgentRuntime {
             int uploadedFileCount = request.uploadedFileIds() == null ? 0 : request.uploadedFileIds().size();
             ResearchOptions researchOptions = request.researchOptions() == null
                     ? ResearchOptions.defaults() : request.researchOptions();
-            AgentRequest effectiveRequest = consumePendingClarificationIfPresent(request, threadId);
+            AgentRequest effectiveRequest = request;
 
             Map<String, Object> runMetadata = new HashMap<>();
             runMetadata.put("source", "sse");
             runMetadata.put("uploadedFiles", uploadedFileCount);
             runMetadata.put("mode", request.isResearchMode() ? "research" : "chat");
             runMetadata.put("userId", request.userId());
+            if (request.metadata() != null) {
+                runMetadata.putAll(request.metadata());
+            }
             if (request.isResearchMode()) {
                 runMetadata.put("depth", researchOptions.depth().name());
                 runMetadata.put("timeWindow", researchOptions.timeWindow().name());
@@ -180,10 +183,17 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 runMetadata.put("outputFormat", researchOptions.outputFormat().name());
             }
             Map<String, Object> runMetadataCopy = Map.copyOf(runMetadata);
-
             RunRecord run = this.runManager.create(threadId, modelName, runMetadataCopy);
             this.runManager.markRunning(run.runId());
-            this.messageStore.add(threadId, run.runId(), MessageRole.USER, request.message(),
+
+            String logMessage = request.message();
+            if (request.metadata() != null && request.metadata().containsKey("clarificationId") && this.clarificationStore != null) {
+                String clarId = (String) request.metadata().get("clarificationId");
+                logMessage = this.clarificationStore.find(clarId)
+                        .map(org.wrj.haifa.ai.deerflow.persistence.store.ClarificationRecord::answer)
+                        .orElse(request.message());
+            }
+            this.messageStore.add(threadId, run.runId(), MessageRole.USER, logMessage,
                     Map.of("uploadedFileCount", uploadedFileCount, "mode", request.isResearchMode() ? "research" : "chat"));
             log.info("Run started. runId={}, threadId={}, model={}, uploadedFileCount={}, mode={}",
                     run.runId(), threadId, nullToEmpty(modelName), uploadedFileCount, runMetadata.get("mode"));
@@ -191,6 +201,10 @@ public class SimpleAgentRuntime implements AgentRuntime {
             Map<String, Object> configMetadata = new HashMap<>();
             configMetadata.put("runtime", "simple-agent-runtime");
             configMetadata.put("userId", request.userId());
+            if (request.metadata() != null) {
+                configMetadata.putAll(request.metadata());
+            }
+
 
             RunMode runMode = request.mode();
             AgentRunConfig config = new AgentRunConfig(
@@ -512,37 +526,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
         return ResearchTaskStatus.PENDING;
     }
 
-    private AgentRequest consumePendingClarificationIfPresent(AgentRequest request, String threadId) {
-        if (this.researchClarificationStore == null) {
-            return request;
-        }
-        return this.researchClarificationStore.consume(threadId)
-                .map(clarification -> {
-                    String effectiveMessage = """
-                            %s
 
-                            <clarification_answer>
-                            澄清问题：%s
-                            用户回答：%s
-                            请基于该回答继续完成原始任务。
-                            </clarification_answer>
-                            """.formatted(
-                            clarification.originalMessage(),
-                            clarification.question(),
-                            request.message()
-                    ).trim();
-                    return new AgentRequest(
-                            request.threadId(),
-                            effectiveMessage,
-                            request.model(),
-                            request.uploadedFileIds(),
-                            request.mode(),
-                            request.researchOptions(),
-                            request.userId()
-                    );
-                })
-                .orElse(request);
-    }
 
     private static String buildArtifactSummary(ReportWriteResult result, QualityGateResult qgResult) {
         StringBuilder sb = new StringBuilder();

@@ -11,6 +11,8 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.middleware.DynamicContextMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.TokenBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.ToolErrorHandlingMiddleware;
+import org.wrj.haifa.ai.deerflow.middleware.ClarificationMiddleware;
+import java.util.Map;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
@@ -20,7 +22,7 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchClarificationStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentClarificationStore;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunStatus;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
@@ -251,7 +253,7 @@ class SimpleAgentRuntimeTest {
 
         AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>stub</final_answer>"));
         ToolRegistry tools = new ToolRegistry(List.of());
-        ResearchClarificationStore clarificationStore = new ResearchClarificationStore();
+        AgentClarificationStore clarificationStore = new AgentClarificationStore();
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(
                 properties,
                 tools,
@@ -259,7 +261,7 @@ class SimpleAgentRuntimeTest {
                 runManager,
                 threadManager,
                 messageStore,
-                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                List.of(new DynamicContextMiddleware(), new ClarificationMiddleware(clarificationStore), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
                 agentEventStore,
                 toolExecutionStore,
                 modelStepStore,
@@ -275,20 +277,22 @@ class SimpleAgentRuntimeTest {
         );
 
         // Simulate a previous run that saved a pending clarification
-        clarificationStore.save("thread-clarify", "run-prev", "Original research request",
-                ResearchOptions.defaults(), "What time period?", "missing_info");
+        var record = clarificationStore.create("thread-clarify", "run-prev", "What time period?", "missing_info", "");
+        clarificationStore.answer(record.clarificationId(), "Focus on 2025");
 
         List<AgentEvent> resumedEvents = runtime.stream(new AgentRequest(
                         "thread-clarify",
-                        "Focus on 2025",
+                        "Original research request",
                         null,
                         List.of(),
                         RunMode.RESEARCH,
-                        ResearchOptions.standard()))
+                        ResearchOptions.standard(),
+                        "default-user",
+                        Map.of("clarificationId", record.clarificationId())))
                 .collectList()
                 .block();
 
-        assertThat(clarificationStore.find("thread-clarify")).isEmpty();
+        assertThat(clarificationStore.findPending("thread-clarify")).isEmpty();
         assertThat(resumedEvents).extracting(AgentEvent::type).contains(AgentEventType.RUN_STARTED);
     }
 
@@ -302,10 +306,10 @@ class SimpleAgentRuntimeTest {
 
         org.wrj.haifa.ai.deerflow.model.ModelToolCall tc = new org.wrj.haifa.ai.deerflow.model.ModelToolCall("tc-clarify", "ask_clarification", "{\"question\":\"What time period?\"}");
         AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("", List.of(tc)));
-        ResearchClarificationStore clarificationStore = new ResearchClarificationStore();
+        AgentClarificationStore clarificationStore = new AgentClarificationStore();
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(
                 properties,
-                new ToolRegistry(List.of(new AskClarificationTool())),
+                new ToolRegistry(List.of(new AskClarificationTool(clarificationStore))),
                 modelClient,
                 runManager,
                 threadManager,
@@ -337,7 +341,7 @@ class SimpleAgentRuntimeTest {
 
         assertThat(events).extracting(AgentEvent::type)
                 .contains(AgentEventType.CLARIFICATION_REQUIRED);
-        assertThat(clarificationStore.find("thread-ask-clarify")).isPresent();
+        assertThat(clarificationStore.findPending("thread-ask-clarify")).isPresent();
     }
 
     private static final class ExplodingTool implements AgentTool {

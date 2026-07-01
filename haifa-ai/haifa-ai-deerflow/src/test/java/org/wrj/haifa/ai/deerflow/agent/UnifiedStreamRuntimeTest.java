@@ -227,13 +227,13 @@ class UnifiedStreamRuntimeTest {
         properties.setMaxIterations(2);
         properties.setMaxResearchSteps(2);
 
-        org.wrj.haifa.ai.deerflow.research.plan.ResearchClarificationStore clarificationStore =
-                new org.wrj.haifa.ai.deerflow.research.plan.ResearchClarificationStore();
+        org.wrj.haifa.ai.deerflow.persistence.store.AgentClarificationStore clarificationStore =
+                new org.wrj.haifa.ai.deerflow.persistence.store.AgentClarificationStore();
 
         ModelToolCall tc = new ModelToolCall("tc-clarify", "ask_clarification",
                 "{\"question\":\"Which region?\"}");
         AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("", List.of(tc)));
-        org.wrj.haifa.ai.deerflow.tool.AskClarificationTool askTool = new org.wrj.haifa.ai.deerflow.tool.AskClarificationTool();
+        org.wrj.haifa.ai.deerflow.tool.AskClarificationTool askTool = new org.wrj.haifa.ai.deerflow.tool.AskClarificationTool(clarificationStore);
 
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(
                 properties,
@@ -242,7 +242,7 @@ class UnifiedStreamRuntimeTest {
                 runManager,
                 threadManager,
                 messageStore,
-                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                List.of(new DynamicContextMiddleware(), new org.wrj.haifa.ai.deerflow.middleware.ClarificationMiddleware(clarificationStore), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
                 agentEventStore,
                 toolExecutionStore,
                 modelStepStore,
@@ -269,7 +269,11 @@ class UnifiedStreamRuntimeTest {
 
         assertThat(events).extracting(AgentEvent::type)
                 .contains(AgentEventType.CLARIFICATION_REQUIRED);
-        assertThat(clarificationStore.find("thread-clarify-resume")).isPresent();
+        var pendingRecord = clarificationStore.findPending("thread-clarify-resume");
+        assertThat(pendingRecord).isPresent();
+
+        // Answer clarification
+        clarificationStore.answer(pendingRecord.get().clarificationId(), "Asia region");
 
         // Resume with user clarification
         AgentModelClient resumedClient = prompt -> Mono.just(
@@ -281,7 +285,7 @@ class UnifiedStreamRuntimeTest {
                 runManager,
                 threadManager,
                 messageStore,
-                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                List.of(new DynamicContextMiddleware(), new org.wrj.haifa.ai.deerflow.middleware.ClarificationMiddleware(clarificationStore), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
                 agentEventStore,
                 toolExecutionStore,
                 modelStepStore,
@@ -298,15 +302,17 @@ class UnifiedStreamRuntimeTest {
 
         List<AgentEvent> resumedEvents = resumedRuntime.stream(new AgentRequest(
                         "thread-clarify-resume",
-                        "Asia region",
+                        "Analyze market trends",
                         null,
                         List.of(),
                         RunMode.RESEARCH,
-                        ResearchOptions.defaults()))
+                        ResearchOptions.defaults(),
+                        "default-user",
+                        java.util.Map.of("clarificationId", pendingRecord.get().clarificationId())))
                 .collectList()
                 .block();
 
-        assertThat(clarificationStore.find("thread-clarify-resume")).isEmpty();
+        assertThat(clarificationStore.findPending("thread-clarify-resume")).isEmpty();
         assertThat(resumedEvents).extracting(AgentEvent::type)
                 .contains(AgentEventType.RUN_COMPLETED);
     }

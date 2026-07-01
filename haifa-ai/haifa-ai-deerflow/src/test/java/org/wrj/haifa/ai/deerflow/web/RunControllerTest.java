@@ -57,7 +57,9 @@ class RunControllerTest {
                 mock(ResearchRuntimeSupport.class),
                 mock(ResearchPlanStore.class),
                 mock(ResearchProgressTracker.class),
-                mock(ResearchQualityGate.class)
+                mock(ResearchQualityGate.class),
+                mock(org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStore.class),
+                mock(org.wrj.haifa.ai.deerflow.thread.MessageStore.class)
         );
     }
 
