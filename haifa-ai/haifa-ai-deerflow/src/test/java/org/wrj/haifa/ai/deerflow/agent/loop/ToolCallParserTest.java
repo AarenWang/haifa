@@ -56,6 +56,24 @@ class ToolCallParserTest {
     }
 
     @Test
+    void parsesNaturalLanguageToolCallFormat() {
+        String response = """
+                Tool call: web_search({"query": "丽水市 基本概况", "max_results": 5})
+
+                Tool call: web_search({"query": "Lishui city Zhejiang overview", "max_results": 5})
+                """;
+
+        List<ToolCallParser.ParsedToolCall> calls = parser.parse(response);
+
+        assertThat(calls).hasSize(2);
+        assertThat(calls.get(0).toolName()).isEqualTo("web_search");
+        assertThat(calls.get(0).arguments()).contains("丽水市 基本概况");
+        assertThat(calls.get(1).toolName()).isEqualTo("web_search");
+        assertThat(calls.get(1).arguments()).contains("Lishui city Zhejiang overview");
+        assertThat(parser.hasToolCall(response)).isTrue();
+    }
+
+    @Test
     void parsesDsmlFormat() {
         String response = """
             < | | DSML | | toolcalls>
@@ -76,12 +94,22 @@ class ToolCallParserTest {
         String standard = "Use <tool_call name=\"foo\">{}</tool_call>";
         String nested = "Use <tool_call><tool_name>foo</tool_name><json>{}</json></tool_call>";
         String invoke = "Use <invoke name=\"bar\"></invoke>";
+        String natural = "Tool call: web_search({\"query\":\"x\"})";
         String plain = "No tool call here";
 
         assertThat(parser.hasToolCall(standard)).isTrue();
         assertThat(parser.hasToolCall(nested)).isTrue();
         assertThat(parser.hasToolCall(invoke)).isTrue();
+        assertThat(parser.hasToolCall(natural)).isTrue();
         assertThat(parser.hasToolCall(plain)).isFalse();
+    }
+
+    @Test
+    void detectsLikelyToolCallIntentEvenWhenMalformed() {
+        String malformed = "Tool call - web_search({\"query\":\"x\"})";
+
+        assertThat(parser.parse(malformed)).isEmpty();
+        assertThat(parser.hasToolCallIntent(malformed)).isTrue();
     }
 
     @Test

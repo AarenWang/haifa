@@ -33,6 +33,13 @@ public class ToolCallParser {
     private static final Pattern PARAMETER_TAG = Pattern.compile(
             "<[^>]*?parameter\\s+name=\"([^\"]+)\"[^>]*>([^<]*)</[^>]*?parameter\\s*>");
 
+    private static final Pattern NATURAL_TOOL_CALL_PATTERN = Pattern.compile(
+            "^\\s*Tool\\s+call\\s*:\\s*([A-Za-z][\\w.-]*)\\s*\\((\\{.*})\\)\\s*$",
+            Pattern.MULTILINE);
+
+    private static final Pattern TOOL_CALL_INTENT_PATTERN = Pattern.compile(
+            "(?is)(<\\s*tool_call\\b|<[^>]*?invoke\\s+name=|\\bTool\\s+call\\s*:|\\bTool\\s+call\\s*[-=])");
+
     public List<ParsedToolCall> parse(String modelResponse) {
         List<ParsedToolCall> calls = new ArrayList<>();
         if (modelResponse == null || modelResponse.isBlank()) {
@@ -110,6 +117,17 @@ public class ToolCallParser {
             }
         }
 
+        // 4. Parse natural-language tool call format that some models emit despite
+        // prompt instructions: Tool call: web_search({"query":"..."})
+        Matcher naturalMatcher = NATURAL_TOOL_CALL_PATTERN.matcher(modelResponse);
+        while (naturalMatcher.find()) {
+            String toolName = naturalMatcher.group(1).trim();
+            String argsJson = naturalMatcher.group(2).trim();
+            if (!toolName.isBlank()) {
+                calls.add(new ParsedToolCall(toolName, argsJson, naturalMatcher.start(), naturalMatcher.end()));
+            }
+        }
+
         return calls;
     }
 
@@ -119,7 +137,15 @@ public class ToolCallParser {
         }
         return TOOL_CALL_PATTERN.matcher(modelResponse).find()
                 || TOOL_CALL_BLOCK_PATTERN.matcher(modelResponse).find()
-                || INVOKE_START.matcher(modelResponse).find();
+                || INVOKE_START.matcher(modelResponse).find()
+                || NATURAL_TOOL_CALL_PATTERN.matcher(modelResponse).find();
+    }
+
+    public boolean hasToolCallIntent(String modelResponse) {
+        if (modelResponse == null || modelResponse.isBlank()) {
+            return false;
+        }
+        return hasToolCall(modelResponse) || TOOL_CALL_INTENT_PATTERN.matcher(modelResponse).find();
     }
 
     public boolean hasFinalAnswer(String modelResponse) {
@@ -161,6 +187,7 @@ public class ToolCallParser {
         cleaned = Pattern.compile("</function_calls>").matcher(cleaned).replaceAll("");
         cleaned = Pattern.compile("<\\s*\\|\\s*\\|\\s*DSML\\s*\\|\\s*\\|\\s*toolcalls\\s*>").matcher(cleaned).replaceAll("");
         cleaned = Pattern.compile("</\\s*\\|\\s*/\\s*DSML\\s*\\|\\s*/\\s*\\|\\s*toolcalls\\s*>").matcher(cleaned).replaceAll("");
+        cleaned = NATURAL_TOOL_CALL_PATTERN.matcher(cleaned).replaceAll("");
         // Remove thinking tags if present
         cleaned = Pattern.compile("<thinking>[^<]*</thinking>").matcher(cleaned).replaceAll("");
         cleaned = Pattern.compile("<thinking>[^<]*$").matcher(cleaned).replaceAll("");

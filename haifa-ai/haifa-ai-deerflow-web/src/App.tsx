@@ -30,6 +30,7 @@ function App() {
   const [state, dispatch] = useReducer(deerflowReducer, initialState);
   const abortRef = useRef<AbortController | null>(null);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'unknown'>('unknown');
+  const [externalMessage, setExternalMessage] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const threadId = getThreadIdFromUrl();
@@ -418,22 +419,36 @@ function App() {
             onReRun={state.status === 'failed' ? handleReRun : undefined}
             onRefreshMessage={handleRefreshMessage}
           />
-          <ResearchPlanView
-            plan={state.researchPlan}
-            progress={state.researchProgress}
-            qualityGate={state.qualityGate}
+          {state.lastRequest?.mode === 'research' && (
+            <ResearchPlanView
+              plan={state.researchPlan}
+              progress={state.researchProgress}
+              qualityGate={state.qualityGate}
+            />
+          )}
+          <ArtifactPanel
+            artifacts={state.artifacts}
+            onFollowUp={(filename) => {
+              setExternalMessage(`Please refine/expand the report ${filename} to...`);
+            }}
           />
-          <ArtifactPanel artifacts={state.artifacts} />
-          <ResearchInspector
-            sources={state.researchSources}
-            evidenceItems={state.evidenceItems}
-          />
+          {state.lastRequest?.mode === 'research' && (
+            <ResearchInspector
+              sources={state.researchSources}
+              evidenceItems={state.evidenceItems}
+              onFollowUp={(sourceTitle) => {
+                setExternalMessage(`Please look deeper into the source "${sourceTitle}" to investigate...`);
+              }}
+            />
+          )}
           <TaskComposer
             onRun={handleRun}
             onStop={handleStop}
             isRunning={state.status === 'running'}
             lastRequest={state.lastRequest}
             selectedUploadCount={state.selectedUploadIds.length}
+            externalMessage={externalMessage}
+            onClearExternalMessage={() => setExternalMessage(undefined)}
           />
         </div>
         <ActivityTrace events={state.events} />

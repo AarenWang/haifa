@@ -23,7 +23,9 @@ export type DeerFlowEventType =
   | 'SUBAGENT_COMPLETED'
   | 'MODEL_DELTA'
   | 'TOOL_CALL_REQUESTED'
-  | 'RESEARCH_STEP_COMPLETED';
+  | 'RESEARCH_STEP_COMPLETED'
+  | 'CONTEXT_COMPRESSED'
+  | 'TOOL_OUTPUT_BUDGET_EXCEEDED';
 
 export interface ResearchPlan {
   planId: string;

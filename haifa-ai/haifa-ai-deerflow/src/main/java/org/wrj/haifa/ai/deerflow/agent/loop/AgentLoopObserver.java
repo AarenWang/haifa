@@ -52,7 +52,20 @@ public interface AgentLoopObserver {
     }
 
     /**
-     * Response wrapper for finalized answer and extra metadata.
+     * Invoked after tool calls are parsed from a model response but before any are executed.
+     * Allows observers to filter, reject, or modify the tool call list.
+     * Each returned entry contains the (possibly modified) tool call and a flag indicating
+     * whether it should be executed. Rejected tool calls are automatically emitted as
+     * TOOL_COMPLETED events with the provided reason.
+     *
+     * @return list of filtered tool call entries
      */
-    record FinalAnswerResult(String finalAnswer, Map<String, Object> extraMetadata) {}
+    default List<FilteredToolCall> afterToolCallsParsed(AgentRunConfig runConfig, List<ToolCall> toolCalls) {
+        return toolCalls.stream().map(tc -> new FilteredToolCall(tc, true, null)).toList();
+    }
+
+    /**
+     * Record representing a tool call after filtering.
+     */
+    record FilteredToolCall(ToolCall toolCall, boolean allowed, String reason) {}
 }

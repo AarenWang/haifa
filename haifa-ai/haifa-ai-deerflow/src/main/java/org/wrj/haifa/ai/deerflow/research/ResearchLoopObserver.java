@@ -12,6 +12,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver;
 import org.wrj.haifa.ai.deerflow.agent.loop.DefaultAgentLoopObserver;
+import org.wrj.haifa.ai.deerflow.agent.loop.FinalAnswerResult;
 import org.wrj.haifa.ai.deerflow.agent.loop.ToolCall;
 import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallResult;
 import org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult;

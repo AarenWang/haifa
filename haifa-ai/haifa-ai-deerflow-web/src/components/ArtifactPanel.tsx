@@ -6,6 +6,7 @@ import { renderMarkdown } from '../utils/markdownRenderer';
 
 interface ArtifactPanelProps {
   artifacts: ArtifactRecord[];
+  onFollowUp?: (filename: string) => void;
 }
 
 function formatBytes(size: number) {
@@ -21,7 +22,7 @@ function formatTime(value: string) {
   return date.toLocaleString();
 }
 
-export default function ArtifactPanel({ artifacts }: ArtifactPanelProps) {
+export default function ArtifactPanel({ artifacts, onFollowUp }: ArtifactPanelProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [previewById, setPreviewById] = useState<Record<string, string>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -114,8 +115,18 @@ export default function ArtifactPanel({ artifacts }: ArtifactPanelProps) {
 
         <div className="artifact-preview">
           {selected && (
-            <div className="artifact-preview-toolbar">
-              <div className="artifact-preview-title">{selected.filename}</div>
+            <div className="artifact-preview-toolbar" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="artifact-preview-title" style={{ flexGrow: 1 }}>{selected.filename}</div>
+              {onFollowUp && (
+                <button
+                  type="button"
+                  className="artifact-follow-up btn btn-ghost"
+                  onClick={() => onFollowUp(selected.filename)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                >
+                  Follow-up
+                </button>
+              )}
               <a className="artifact-download" href={artifactDownloadUrl(selected.artifactId)}>
                 <Download size={14} />
                 Download

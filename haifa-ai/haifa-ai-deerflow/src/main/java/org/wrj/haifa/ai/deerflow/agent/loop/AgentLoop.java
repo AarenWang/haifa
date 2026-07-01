@@ -1,8 +1,10 @@
 package org.wrj.haifa.ai.deerflow.agent.loop;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +27,7 @@ import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -80,7 +83,8 @@ public class AgentLoop {
             ToolPolicyService toolPolicy,
             List<Skill> activeSkills,
             List<String> uploadedFileIds) {
-        return Flux.defer(() -> {
+        return Flux.<AgentEvent>create(sink -> {
+            try {
             long loopStartTime = System.currentTimeMillis();
             List<String> history = new ArrayList<>();
             history.add("User: " + userMessage);
@@ -100,9 +104,11 @@ public class AgentLoop {
 
             String fullSystemPrompt = systemPrompt + "\n\nAvailable tools:\n" + toolDescriptions
                     + "\nWhen you need to use a tool, emit: <tool_call name=\"tool_name\">{\"arg\":\"value\"}</tool_call>\n"
+                    + "Do not write tool calls as prose such as `Tool call: name({...})`; use only the XML tag format above.\n"
                     + "When you have enough information, provide your final answer starting with <final_answer>.";
 
             List<AgentEvent> events = new ArrayList<>();
+            EventEmitter emitter = new EventEmitter(events, sink);
             int totalToolCalls = 0;
             boolean stopped = false;
             String stopReason = null;
@@ -116,7 +122,7 @@ public class AgentLoop {
                 // Check timeout
                 if (System.currentTimeMillis() - loopStartTime > config.timeoutMs()) {
                     stopReason = "TIMEOUT";
-                    events.add(event(seq, runConfig, AgentEventType.RUN_FAILED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.RUN_FAILED,
                             "Loop timeout exceeded after " + config.timeoutMs() + "ms",
                             Map.of("stopReason", stopReason, "steps", step)));
                     if (agentLoopRunStore != null) {
@@ -129,7 +135,7 @@ public class AgentLoop {
                 // Check max tool calls
                 if (totalToolCalls >= config.maxToolCalls()) {
                     stopReason = "MAX_TOOL_CALLS_REACHED";
-                    events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                             "Max tool calls reached",
                             Map.of("stopReason", stopReason, "steps", step, "totalToolCalls", totalToolCalls)));
                     if (agentLoopRunStore != null) {
@@ -147,7 +153,7 @@ public class AgentLoop {
                 String userPrompt = userPromptBuilder.toString().trim();
 
                 long modelStartTime = System.currentTimeMillis();
-                events.add(event(seq, runConfig, AgentEventType.MODEL_STARTED,
+                emitter.emit(event(seq, runConfig, AgentEventType.MODEL_STARTED,
                         "Model step " + (step + 1) + "/" + config.maxSteps(),
                         Map.of("step", step + 1, "maxSteps", config.maxSteps())));
 
@@ -158,7 +164,7 @@ public class AgentLoop {
                 } catch (Exception ex) {
                     log.error("Model call failed at step {}. runId={}", step, runConfig.runId(), ex);
                     stopReason = "ERROR";
-                    events.add(event(seq, runConfig, AgentEventType.RUN_FAILED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.RUN_FAILED,
                             "Model call failed: " + ex.getMessage(),
                             Map.of("stopReason", stopReason, "step", step, "errorType", ex.getClass().getName())));
                     if (agentLoopRunStore != null) {
@@ -186,18 +192,22 @@ public class AgentLoop {
                 }
 
                 history.add("Assistant: " + modelResponse.content());
-                events.add(event(seq, runConfig, AgentEventType.MODEL_DELTA,
+                emitter.emit(event(seq, runConfig, AgentEventType.MODEL_DELTA,
                         modelResponse.content(),
                         Map.of("step", step + 1, "modelDurationMs", modelDuration)));
 
                 // Check for final answer
                 if (toolCallParser.hasFinalAnswer(modelResponse.content())) {
-                    if (observer.shouldContinue(runConfig, modelResponse.content(), events, seq, step + 1, totalToolCalls, history)) {
+                    boolean continueAfterFinalAnswer = observer.shouldContinue(
+                            runConfig, modelResponse.content(), events, seq, step + 1, totalToolCalls, history);
+                    emitter.flush();
+                    if (continueAfterFinalAnswer) {
                         continue;
                     }
                     String rawAnswer = toolCallParser.extractFinalAnswer(modelResponse.content());
-                    AgentLoopObserver.FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
+                    FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
                             runConfig, rawAnswer, events, seq, step + 1, totalToolCalls);
+                    emitter.flush();
                     stopReason = "FINAL_ANSWER";
 
                     java.util.Map<String, Object> metadata = new java.util.HashMap<>();
@@ -208,10 +218,10 @@ public class AgentLoop {
                         metadata.putAll(finalResult.extraMetadata());
                     }
 
-                    events.add(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
                             finalResult.finalAnswer(),
                             metadata));
-                    events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                             "Run completed",
                             Map.of("stopReason", stopReason, "steps", step + 1, "totalToolCalls", totalToolCalls)));
                     if (agentLoopRunStore != null) {
@@ -234,14 +244,36 @@ public class AgentLoop {
                     }
                 }
 
+                // --- Apply observer tool-call filtering (e.g. SubagentLimitMiddleware) ---
+                List<AgentLoopObserver.FilteredToolCall> filteredToolCalls = observer.afterToolCallsParsed(runConfig, loopToolCalls);
+                // Emit events for rejected tool calls
+                for (AgentLoopObserver.FilteredToolCall ftc : filteredToolCalls) {
+                    if (!ftc.allowed()) {
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
+                                "Tool call rejected by policy: " + ftc.toolCall().toolName(),
+                                Map.of("toolCallId", ftc.toolCall().id(), "toolName", ftc.toolCall().toolName(),
+                                        "denied", true, "reason", ftc.reason() != null ? ftc.reason() : "rejected by middleware")));
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                                ftc.reason() != null ? ftc.reason() : "Tool call rejected by middleware",
+                                Map.of("toolCallId", ftc.toolCall().id(), "toolName", ftc.toolCall().toolName(),
+                                        "status", "REJECTED", "denied", true)));
+                        history.add("Tool result (" + ftc.toolCall().toolName() + "): " + (ftc.reason() != null ? ftc.reason() : "Rejected by middleware"));
+                    }
+                }
+                // Keep only allowed calls for execution
+                loopToolCalls = filteredToolCalls.stream()
+                        .filter(AgentLoopObserver.FilteredToolCall::allowed)
+                        .map(AgentLoopObserver.FilteredToolCall::toolCall)
+                        .toList();
+
                 // Process invalid tool calls
                 if (modelResponse.invalidToolCalls() != null && !modelResponse.invalidToolCalls().isEmpty()) {
                     for (String invalidCall : modelResponse.invalidToolCalls()) {
                         String invalidCallId = java.util.UUID.randomUUID().toString();
-                        events.add(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
                                 "Invalid tool call: " + invalidCall,
                                 Map.of("toolCallId", invalidCallId, "error", "Invalid tool call format or arguments")));
-                        events.add(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
                                 "Error: Invalid tool call arguments",
                                 Map.of("toolCallId", invalidCallId, "status", "FAILED", "error", "Invalid tool call arguments")));
                         history.add("Tool result (error): Invalid tool call arguments for " + invalidCall);
@@ -249,12 +281,26 @@ public class AgentLoop {
                 }
 
                 if (loopToolCalls.isEmpty()) {
-                    if (observer.shouldContinue(runConfig, modelResponse.content(), events, seq, step + 1, totalToolCalls, history)) {
+                    if (toolCallParser.hasToolCallIntent(modelResponse.content())) {
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
+                                "Unparsed tool call format detected. Asking model to re-emit tool calls.",
+                                Map.of("step", step + 1, "unparsedToolCall", true)));
+                        history.add("System: Your previous response looked like a tool call but could not be parsed. "
+                                + "Re-emit each tool call exactly as "
+                                + "<tool_call name=\"tool_name\">{\"arg\":\"value\"}</tool_call>. "
+                                + "Do not describe the tool call in prose and do not answer yet.");
+                        continue;
+                    }
+                    boolean continueAfterNoTools = observer.shouldContinue(
+                            runConfig, modelResponse.content(), events, seq, step + 1, totalToolCalls, history);
+                    emitter.flush();
+                    if (continueAfterNoTools) {
                         continue;
                     }
                     stopReason = runConfig.mode() == RunMode.CHAT ? "ASSISTANT_COMPLETED" : "NO_TOOL_CALLS";
-                    AgentLoopObserver.FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
+                    FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
                             runConfig, modelResponse.content(), events, seq, step + 1, totalToolCalls);
+                    emitter.flush();
 
                     java.util.Map<String, Object> metadata = new java.util.HashMap<>();
                     metadata.put("step", step + 1);
@@ -264,10 +310,10 @@ public class AgentLoop {
                         metadata.putAll(finalResult.extraMetadata());
                     }
 
-                    events.add(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
                             finalResult.finalAnswer(),
                             metadata));
-                    events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                             "Run completed",
                             Map.of("stopReason", stopReason, "steps", step + 1, "totalToolCalls", totalToolCalls)));
                     if (agentLoopRunStore != null) {
@@ -277,14 +323,16 @@ public class AgentLoop {
                     break;
                 }
 
-                // Execute tool calls
+                // Execute tool calls. Calls from the same model response are independent, so
+                // launch them together and merge observations back in the original order.
+                List<PendingToolExecution> pendingExecutions = new ArrayList<>();
                 for (ToolCall toolCall : loopToolCalls) {
                     totalToolCalls++;
                     if (totalToolCalls > config.maxToolCalls()) {
                         break;
                     }
 
-                    events.add(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
                             "Tool call requested: " + toolCall.toolName(),
                             Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(), "arguments", toolCall.arguments())));
 
@@ -303,10 +351,10 @@ public class AgentLoop {
 
                     // Policy check
                     if (toolPolicy != null && activeSkills != null && !toolPolicy.isToolAllowed(targetToolName, activeSkills, runConfig.mode())) {
-                        events.add(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
                                 "Policy denied " + targetToolName,
                                 Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
-                        events.add(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
                                 "Tool denied by policy",
                                 Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
                         history.add("Tool result (" + targetToolName + "): Tool denied by policy");
@@ -314,12 +362,33 @@ public class AgentLoop {
                     }
 
                     long toolStartTime = System.currentTimeMillis();
-                    events.add(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
                             "Executing " + targetToolName,
                             Map.of("toolCallId", toolCall.id(), "toolName", targetToolName)));
 
-                    ToolCallResult rawToolResult = executeTool(toolCall, runConfig, uploadedFileIds);
-                    long toolDuration = System.currentTimeMillis() - toolStartTime;
+                    if ("task".equals(targetToolName)) {
+                        emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_STARTED,
+                                "Subagent task started",
+                                Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
+                                        "arguments", toolCall.arguments())));
+                    }
+
+                    CompletableFuture<ToolCallResult> future = CompletableFuture.supplyAsync(
+                            () -> executeTool(toolCall, runConfig, uploadedFileIds, activeSkills));
+                    pendingExecutions.add(new PendingToolExecution(toolCall, targetToolName, toolStartTime, future));
+                }
+
+                for (PendingToolExecution pending : pendingExecutions) {
+                    ToolCall toolCall = pending.toolCall();
+                    ToolCallResult rawToolResult;
+                    try {
+                        rawToolResult = pending.resultFuture().join();
+                    } catch (RuntimeException ex) {
+                        long duration = System.currentTimeMillis() - pending.startedAtMs();
+                        rawToolResult = ToolCallResult.fromError(toolCall,
+                                "Tool failed: " + ex.getMessage(), duration);
+                    }
+                    long toolDuration = rawToolResult.durationMs();
 
                     // Persist raw tool call result for audit/debug
                     if (toolCallStore != null) {
@@ -335,6 +404,7 @@ public class AgentLoop {
 
                     // Observer processes source/evidence (uses raw toolResult, does NOT compress)
                     String observation = observer.onToolCompleted(runConfig, toolCall, rawToolResult, events, seq, history);
+                    emitter.flush();
                     if (observation != null && !observation.isBlank()) {
                         history.add(observation);
                     }
@@ -350,7 +420,7 @@ public class AgentLoop {
                             if (lastIdx >= 0 && history.get(lastIdx).startsWith("Tool result (" + toolCall.toolName() + "): ")) {
                                 history.set(lastIdx, "Tool result (" + toolCall.toolName() + "): " + compressedResult);
                             }
-                            events.add(event(seq, runConfig, AgentEventType.TOOL_OUTPUT_BUDGET_EXCEEDED,
+                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_OUTPUT_BUDGET_EXCEEDED,
                                     "Tool output budget exceeded for: " + toolCall.toolName() + ". Compressed.",
                                     Map.of("toolName", toolCall.toolName(), "compressed", true)));
                         }
@@ -362,16 +432,30 @@ public class AgentLoop {
                         eventContent = rawToolResult.error();
                     }
 
-                    events.add(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                    Map<String, Object> completionMetadata = new HashMap<>(rawToolResult.metadata());
+                    completionMetadata.put("toolCallId", toolCall.id());
+                    completionMetadata.put("toolName", toolCall.toolName());
+                    completionMetadata.put("status", rawToolResult.status().name());
+                    completionMetadata.put("durationMs", toolDuration);
+                    completionMetadata.put("error", rawToolResult.error() != null ? rawToolResult.error() : "");
+
+                    if ("task".equals(pending.targetToolName())) {
+                        Object subagentStatus = completionMetadata.getOrDefault("subagentStatus", rawToolResult.status().name());
+                        emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_COMPLETED,
+                                "COMPLETED".equals(subagentStatus) || "SUCCESS".equals(subagentStatus)
+                                        ? "Subagent task completed"
+                                        : "Subagent task failed",
+                                completionMetadata));
+                    }
+
+                    emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
                             eventContent,
-                            Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(),
-                                    "status", rawToolResult.status().name(), "durationMs", toolDuration,
-                                    "error", rawToolResult.error() != null ? rawToolResult.error() : "")));
+                            completionMetadata));
                 }
 
                 if (totalToolCalls >= config.maxToolCalls()) {
                     stopReason = "MAX_TOOL_CALLS_REACHED";
-                    events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                             "Max tool calls reached after " + totalToolCalls + " tool calls",
                             Map.of("stopReason", stopReason, "steps", step + 1, "totalToolCalls", totalToolCalls)));
                     if (agentLoopRunStore != null) {
@@ -382,19 +466,21 @@ public class AgentLoop {
                 }
 
                 if (runConfig.mode() == RunMode.RESEARCH) {
-                    events.add(event(seq, runConfig, AgentEventType.RESEARCH_STEP_COMPLETED,
+                    emitter.emit(event(seq, runConfig, AgentEventType.RESEARCH_STEP_COMPLETED,
                             "Step " + (step + 1) + " completed",
                             Map.of("step", step + 1, "totalToolCalls", totalToolCalls)));
                 }
 
                 observer.onStepCompleted(runConfig, events, seq, step + 1);
+                emitter.flush();
             }
 
             // If loop exhausted max steps without final answer
             if (!stopped) {
                 stopReason = "MAX_STEPS_REACHED";
                 observer.onMaxStepsReached(runConfig, lastModelContent, events, seq, config.maxSteps(), totalToolCalls);
-                events.add(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
+                emitter.flush();
+                emitter.emit(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                         "Max steps reached without final answer",
                         Map.of("stopReason", stopReason, "maxSteps", config.maxSteps(), "totalToolCalls", totalToolCalls)));
                 if (agentLoopRunStore != null) {
@@ -402,11 +488,15 @@ public class AgentLoop {
                 }
             }
 
-            return Flux.fromIterable(events);
+            sink.complete();
+            } catch (Exception ex) {
+                sink.error(ex);
+            }
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    private ToolCallResult executeTool(ToolCall toolCall, AgentRunConfig runConfig, List<String> uploadedFileIds) {
+    private ToolCallResult executeTool(ToolCall toolCall, AgentRunConfig runConfig, List<String> uploadedFileIds,
+            List<Skill> activeSkills) {
         ToolCallResult observerBypass = observer.beforeToolExecute(runConfig, toolCall);
         if (observerBypass != null) {
             return observerBypass;
@@ -420,7 +510,8 @@ public class AgentLoop {
         }
 
         ToolRequest request = new ToolRequest(toolCall.arguments(), runConfig.workspaceRoot(),
-                uploadedFileIds == null ? List.of() : uploadedFileIds, runConfig.threadId(), runConfig.runId());
+                uploadedFileIds == null ? List.of() : uploadedFileIds, runConfig.threadId(), runConfig.runId(),
+                runConfig.mode(), activeSkills);
         long startTime = System.currentTimeMillis();
         try {
             ToolResult result = tool.execute(request);
@@ -458,5 +549,36 @@ public class AgentLoop {
             Map<String, Object> metadata) {
         return AgentEvent.of(Integer.toString(seq.incrementAndGet()), config.runId(), config.threadId(), type, content,
                 metadata);
+    }
+
+    private record PendingToolExecution(
+            ToolCall toolCall,
+            String targetToolName,
+            long startedAtMs,
+            CompletableFuture<ToolCallResult> resultFuture
+    ) {}
+
+    private static class EventEmitter {
+        private final List<AgentEvent> events;
+        private final FluxSink<AgentEvent> sink;
+        private int emittedCount;
+
+        EventEmitter(List<AgentEvent> events, FluxSink<AgentEvent> sink) {
+            this.events = events;
+            this.sink = sink;
+        }
+
+        void emit(AgentEvent event) {
+            this.events.add(event);
+            this.sink.next(event);
+            this.emittedCount = this.events.size();
+        }
+
+        void flush() {
+            while (this.emittedCount < this.events.size()) {
+                this.sink.next(this.events.get(this.emittedCount));
+                this.emittedCount++;
+            }
+        }
     }
 }

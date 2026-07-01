@@ -53,6 +53,8 @@ const eventTitles: Record<string, string> = {
   MODEL_DELTA: 'Model delta',
   TOOL_CALL_REQUESTED: 'Tool call requested',
   RESEARCH_STEP_COMPLETED: 'Research step completed',
+  CONTEXT_COMPRESSED: 'Context compressed',
+  TOOL_OUTPUT_BUDGET_EXCEEDED: 'Tool output budget exceeded',
 };
 
 const eventIcons: Record<string, React.ReactNode> = {
@@ -82,6 +84,8 @@ const eventIcons: Record<string, React.ReactNode> = {
   MODEL_DELTA: <Brain size={16} />,
   TOOL_CALL_REQUESTED: <Wrench size={16} />,
   RESEARCH_STEP_COMPLETED: <CheckCircle2 size={16} />,
+  CONTEXT_COMPRESSED: <Layers size={16} />,
+  TOOL_OUTPUT_BUDGET_EXCEEDED: <AlertTriangle size={16} />,
 };
 
 const eventIconColors: Record<string, string> = {
@@ -111,6 +115,8 @@ const eventIconColors: Record<string, string> = {
   MODEL_DELTA: 'green',
   TOOL_CALL_REQUESTED: 'amber',
   RESEARCH_STEP_COMPLETED: 'blue',
+  CONTEXT_COMPRESSED: 'teal',
+  TOOL_OUTPUT_BUDGET_EXCEEDED: 'orange',
 };
 
 interface EventCardProps {

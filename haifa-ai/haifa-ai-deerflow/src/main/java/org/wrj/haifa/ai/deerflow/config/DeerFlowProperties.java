@@ -453,4 +453,24 @@ public class DeerFlowProperties {
     public void setBashEnabled(boolean bashEnabled) {
         this.bashEnabled = bashEnabled;
     }
+
+    // Subagent configuration
+    private int subagentMaxPerResponse = 3;
+    private int subagentMaxConcurrent = 3;
+
+    public int getSubagentMaxPerResponse() {
+        return subagentMaxPerResponse;
+    }
+
+    public void setSubagentMaxPerResponse(int subagentMaxPerResponse) {
+        this.subagentMaxPerResponse = Math.max(1, subagentMaxPerResponse);
+    }
+
+    public int getSubagentMaxConcurrent() {
+        return subagentMaxConcurrent;
+    }
+
+    public void setSubagentMaxConcurrent(int subagentMaxConcurrent) {
+        this.subagentMaxConcurrent = Math.max(1, subagentMaxConcurrent);
+    }
 }

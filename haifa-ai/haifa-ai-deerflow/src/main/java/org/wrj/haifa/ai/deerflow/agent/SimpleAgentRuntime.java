@@ -58,6 +58,8 @@ import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import org.wrj.haifa.ai.deerflow.agent.loop.CompositeAgentLoopObserver;
+import org.wrj.haifa.ai.deerflow.middleware.SubagentLimitMiddleware;
 
 @Component
 public class SimpleAgentRuntime implements AgentRuntime {
@@ -100,7 +102,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage) {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
                 agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
@@ -116,7 +118,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
                 agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
                 null, null, researchRuntimeSupport, researchPlanner, researchPlanStore, clarificationGate,
-                researchClarificationStore, researchProgressTracker, researchQualityGate, reportWriterService);
+                researchClarificationStore, researchProgressTracker, researchQualityGate, reportWriterService, null);
     }
 
     @Autowired
@@ -134,7 +136,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
             @Autowired(required = false) ResearchClarificationStore researchClarificationStore,
             @Autowired(required = false) ResearchProgressTracker researchProgressTracker,
             @Autowired(required = false) ResearchQualityGate researchQualityGate,
-            @Autowired(required = false) ReportWriterService reportWriterService) {
+            @Autowired(required = false) ReportWriterService reportWriterService,
+            @Autowired(required = false) SubagentLimitMiddleware subagentLimitMiddleware) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
@@ -147,8 +150,15 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     return order == null ? Integer.MAX_VALUE : order.value();
                 }))
                 .toList();
+
+        List<org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver> observers = new ArrayList<>();
+        observers.add(new ResearchLoopObserver(todoStore, researchRuntimeSupport, researchPlanner, researchPlanStore, researchProgressTracker, researchQualityGate));
+        if (subagentLimitMiddleware != null) {
+            observers.add(subagentLimitMiddleware);
+        }
+
         this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
-                new ResearchLoopObserver(todoStore, researchRuntimeSupport, researchPlanner, researchPlanStore, researchProgressTracker, researchQualityGate),
+                new CompositeAgentLoopObserver(observers),
                 toolOutputBudgetMiddleware);
         this.agentEventStore = agentEventStore;
         this.toolExecutionStore = toolExecutionStore;

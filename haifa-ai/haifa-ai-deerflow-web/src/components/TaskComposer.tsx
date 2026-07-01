@@ -8,6 +8,8 @@ interface TaskComposerProps {
   isRunning: boolean;
   lastRequest?: RunRequest;
   selectedUploadCount?: number;
+  externalMessage?: string;
+  onClearExternalMessage?: () => void;
 }
 
 export default function TaskComposer({
@@ -16,8 +18,19 @@ export default function TaskComposer({
   isRunning,
   lastRequest,
   selectedUploadCount = 0,
+  externalMessage,
+  onClearExternalMessage,
 }: TaskComposerProps) {
   const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (externalMessage) {
+      setMessage(externalMessage);
+      if (onClearExternalMessage) {
+        onClearExternalMessage();
+      }
+    }
+  }, [externalMessage, onClearExternalMessage]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [threadId, setThreadId] = useState('');
   const [model, setModel] = useState('');
