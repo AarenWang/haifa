@@ -26,6 +26,7 @@ import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchClarificationStore;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 import reactor.core.scheduler.Schedulers;
@@ -45,25 +46,33 @@ public class AgentLoop {
     private final AgentLoopRunStore agentLoopRunStore;
     private final AgentLoopObserver observer;
     private final ToolOutputBudgetMiddleware toolOutputBudgetMiddleware;
+    private final ResearchClarificationStore clarificationStore;
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry) {
-        this(modelClient, toolRegistry, null, null, null, new NoopAgentLoopObserver(), null);
+        this(modelClient, toolRegistry, null, null, null, new NoopAgentLoopObserver(), null, null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore) {
-        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, new NoopAgentLoopObserver(), null);
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, new NoopAgentLoopObserver(), null, null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             AgentLoopObserver observer) {
-        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer, null);
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer, null, null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             AgentLoopObserver observer, ToolOutputBudgetMiddleware toolOutputBudgetMiddleware) {
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer, toolOutputBudgetMiddleware, null);
+    }
+
+    public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            AgentLoopObserver observer, ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
+            ResearchClarificationStore clarificationStore) {
         this.modelClient = modelClient;
         this.toolRegistry = toolRegistry;
         this.toolCallParser = new ToolCallParser();
@@ -72,6 +81,7 @@ public class AgentLoop {
         this.agentLoopRunStore = agentLoopRunStore;
         this.observer = observer != null ? observer : new NoopAgentLoopObserver();
         this.toolOutputBudgetMiddleware = toolOutputBudgetMiddleware;
+        this.clarificationStore = clarificationStore;
     }
 
     public Flux<AgentEvent> run(
@@ -390,6 +400,32 @@ public class AgentLoop {
                     }
                     long toolDuration = rawToolResult.durationMs();
 
+                    // --- Intercept ask_clarification and suspend the run ---
+                    if ("ask_clarification".equals(pending.targetToolName()) && clarificationStore != null
+                            && rawToolResult.status() == ToolCallResult.Status.SUCCESS) {
+                        String resultText = rawToolResult.result();
+                        String question = extractQuestion(resultText);
+                        if (question != null && !question.isBlank()) {
+                            clarificationStore.save(
+                                    runConfig.threadId(), runConfig.runId(), userMessage,
+                                    runConfig.researchOptions(), question, "missing_info"
+                            );
+                            emitter.emit(event(seq, runConfig, AgentEventType.CLARIFICATION_REQUIRED,
+                                    "Clarification required: " + question,
+                                    Map.of("question", question, "clarificationType", "missing_info",
+                                            "resumeThreadId", runConfig.threadId(), "resumeRunId", runConfig.runId())));
+                            emitter.emit(event(seq, runConfig, AgentEventType.RUN_SUSPENDED,
+                                    "Run suspended waiting for user clarification.",
+                                    Map.of("question", question, "clarificationType", "missing_info",
+                                            "resumeThreadId", runConfig.threadId(), "resumeRunId", runConfig.runId())));
+                            if (agentLoopRunStore != null) {
+                                agentLoopRunStore.markSuspended(runConfig.runId(), "CLARIFICATION_REQUIRED");
+                            }
+                            stopped = true;
+                            break;
+                        }
+                    }
+
                     // Persist raw tool call result for audit/debug
                     if (toolCallStore != null) {
                         try {
@@ -451,6 +487,10 @@ public class AgentLoop {
                     emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
                             eventContent,
                             completionMetadata));
+                }
+
+                if (stopped) {
+                    break;
                 }
 
                 if (totalToolCalls >= config.maxToolCalls()) {
@@ -523,6 +563,23 @@ public class AgentLoop {
             log.warn("Tool {} failed: {}", toolName, ex.getMessage());
             return ToolCallResult.fromError(toolCall, "Tool failed: " + ex.getMessage(), duration);
         }
+    }
+
+    private static String extractQuestion(String resultText) {
+        if (resultText == null) {
+            return null;
+        }
+        int idx = resultText.indexOf("Question:");
+        if (idx >= 0) {
+            String question = resultText.substring(idx + "Question:".length()).trim();
+            // Stop at first newline if there are extra lines
+            int nl = question.indexOf('\n');
+            if (nl >= 0) {
+                question = question.substring(0, nl).trim();
+            }
+            return question;
+        }
+        return null;
     }
 
     private AgentTool findTool(String toolName) {

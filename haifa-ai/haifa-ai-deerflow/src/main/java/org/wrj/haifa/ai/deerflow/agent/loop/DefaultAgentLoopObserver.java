@@ -36,6 +36,23 @@ public class DefaultAgentLoopObserver implements AgentLoopObserver {
     @Override
     public boolean shouldContinue(AgentRunConfig runConfig, String responseContent, List<AgentEvent> events,
             AtomicInteger seq, int step, int totalToolCalls, List<String> history) {
+        if (todoStore == null) {
+            return false;
+        }
+        List<TodoItem> todos = todoStore.listTodos(runConfig.threadId(), runConfig.runId());
+        List<TodoItem> incomplete = todos.stream()
+                .filter(t -> !"completed".equalsIgnoreCase(t.getStatus()))
+                .toList();
+        if (!incomplete.isEmpty()) {
+            String instruction = "Do not finish yet. The following tasks are still incomplete: "
+                    + String.join("; ", incomplete.stream().map(TodoItem::getContent).toList())
+                    + ". Continue working through the todo list. Mark each task as completed immediately after finishing it.";
+            history.add("System: " + instruction);
+            events.add(AgentEvent.of(Integer.toString(seq.incrementAndGet()), runConfig.runId(), runConfig.threadId(),
+                    AgentEventType.TODO_INCOMPLETE, "Incomplete todos prevent final answer",
+                    Map.of("incompleteTodos", incomplete.stream().map(TodoItem::getId).toList())));
+            return true;
+        }
         return false;
     }
 

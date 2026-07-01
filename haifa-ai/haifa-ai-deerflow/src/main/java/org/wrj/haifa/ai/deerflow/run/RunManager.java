@@ -89,6 +89,11 @@ public class RunManager {
     }
 
     @Transactional
+    public RunRecord markSuspended(String runId) {
+        return updateStatus(runId, RunStatus.SUSPENDED);
+    }
+
+    @Transactional
     public RunRecord markCancelled(String runId) {
         return updateStatus(runId, RunStatus.CANCELLED);
     }

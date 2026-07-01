@@ -54,7 +54,7 @@ public class AgentLoopRunEntity {
     private Instant updatedAt;
 
     public enum Status {
-        PENDING, RUNNING, COMPLETED, FAILED, CANCELLED, TIMEOUT
+        PENDING, RUNNING, SUSPENDED, COMPLETED, FAILED, CANCELLED, TIMEOUT
     }
 
     public AgentLoopRunEntity() {

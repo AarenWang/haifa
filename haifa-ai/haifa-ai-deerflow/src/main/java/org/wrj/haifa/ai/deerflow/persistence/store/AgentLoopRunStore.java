@@ -48,6 +48,16 @@ public class AgentLoopRunStore {
     }
 
     @Transactional
+    public void markSuspended(String runId, String stopReason) {
+        agentLoopRunRepository.findByRunId(runId).ifPresent(entity -> {
+            entity.setStatus(AgentLoopRunEntity.Status.SUSPENDED);
+            entity.setStopReason(stopReason);
+            entity.setUpdatedAt(Instant.now());
+            agentLoopRunRepository.save(entity);
+        });
+    }
+
+    @Transactional
     public void markFailed(String runId, String stopReason) {
         agentLoopRunRepository.findByRunId(runId).ifPresent(entity -> {
             entity.setStatus(AgentLoopRunEntity.Status.FAILED);

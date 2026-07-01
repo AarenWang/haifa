@@ -36,4 +36,8 @@ public record AgentRuntimeContext(
     public AgentRuntimeContext withActiveSkills(List<Skill> activeSkills) {
         return new AgentRuntimeContext(config, request, toolResults, properties, activeSkills);
     }
+
+    public AgentRuntimeContext withRequest(AgentRequest request) {
+        return new AgentRuntimeContext(config, request, toolResults, properties, activeSkills);
+    }
 }
