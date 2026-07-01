@@ -9,14 +9,18 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 
 class ProviderConfigurationValidatorTest {
 
+    private final AliyunSearchProvider aliyunSearch = new AliyunSearchProvider();
+    private final AliyunFetchProvider aliyunFetch = new AliyunFetchProvider();
     private final DuckDuckGoSearchProvider duckDuckGo = new DuckDuckGoSearchProvider();
     private final JinaAiFetchProvider jina = new JinaAiFetchProvider();
 
     @Test
     void defaultConfigPassesValidation() {
         DeerFlowProperties properties = new DeerFlowProperties();
-        WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(List.of(duckDuckGo));
-        WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(List.of(jina));
+        properties.getTools().getWebSearch().setApiKey("dummy");
+        properties.getTools().getWebFetch().setApiKey("dummy");
+        WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(List.of(aliyunSearch));
+        WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(List.of(aliyunFetch));
 
         ProviderConfigurationValidator validator = new ProviderConfigurationValidator(
                 properties, searchRegistry, fetchRegistry);
@@ -28,6 +32,7 @@ class ProviderConfigurationValidatorTest {
     void unregisteredSearchProviderFailsAtStartup() {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.getTools().getWebSearch().setProvider("tavily"); // known enum but no bean
+        properties.getTools().getWebFetch().setProvider("jina"); // no key required
         WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(List.of(duckDuckGo));
         WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(List.of(jina));
 
@@ -45,6 +50,7 @@ class ProviderConfigurationValidatorTest {
     void unknownSearchProviderIdFailsAtStartup() {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.getTools().getWebSearch().setProvider("not-a-provider");
+        properties.getTools().getWebFetch().setProvider("jina"); // no key required
         WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(List.of(duckDuckGo));
         WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(List.of(jina));
 
@@ -59,6 +65,7 @@ class ProviderConfigurationValidatorTest {
     @Test
     void unregisteredFetchProviderFailsAtStartup() {
         DeerFlowProperties properties = new DeerFlowProperties();
+        properties.getTools().getWebSearch().setProvider("duckduckgo"); // no key required
         properties.getTools().getWebFetch().setProvider("exa"); // known enum but no bean
         WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(List.of(duckDuckGo));
         WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(List.of(jina));
@@ -84,6 +91,7 @@ class ProviderConfigurationValidatorTest {
             public String search(String query, int maxResults) { return "stub"; }
         };
         properties.getTools().getWebSearch().setProvider("tavily");
+        properties.getTools().getWebFetch().setProvider("jina"); // no key required
         WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(List.of(tavilyProvider));
         WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(List.of(jina));
 
@@ -106,6 +114,7 @@ class ProviderConfigurationValidatorTest {
             @Override
             public String fetch(String url) { return "stub"; }
         };
+        properties.getTools().getWebSearch().setProvider("duckduckgo"); // no key required
         properties.getTools().getWebFetch().setProvider("exa");
         WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(List.of(duckDuckGo));
         WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(List.of(exaProvider));
@@ -131,6 +140,7 @@ class ProviderConfigurationValidatorTest {
         };
         properties.getTools().getWebSearch().setProvider("tavily");
         properties.getTools().getWebSearch().setApiKey("sk-test123");
+        properties.getTools().getWebFetch().setProvider("jina"); // no key required
         WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(List.of(tavilyProvider));
         WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(List.of(jina));
 

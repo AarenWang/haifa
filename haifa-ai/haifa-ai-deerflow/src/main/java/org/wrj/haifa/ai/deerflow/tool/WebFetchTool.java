@@ -35,7 +35,7 @@ public class WebFetchTool implements AgentTool {
     public String description() {
         String providerId = properties.getWebFetchProvider();
         return "Fetch and read the full markdown content of a URL. "
-                + "Uses the configured fetch provider (default: Jina AI Reader). "
+                + "Uses the configured fetch provider (default: " + org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType.defaultType().displayName() + "). "
                 + "Current provider: " + providerId + ". "
                 + "Arguments: {\"url\": \"https://example.com\"}";
     }

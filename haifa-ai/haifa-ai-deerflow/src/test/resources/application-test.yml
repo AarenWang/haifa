@@ -37,3 +37,8 @@ haifa:
       default-research-depth: STANDARD
       research-enabled: true
       research-system-prompt: "test research prompt"
+      tools:
+        web-search:
+          api-key: "dummy-test-key"
+        web-fetch:
+          api-key: "dummy-test-key"

@@ -7,8 +7,8 @@ import java.util.List;
  */
 public enum WebFetchProviderType {
 
-    JINA("jina", "Jina AI Reader", false, true,
-            "Default fetch provider; anonymous usage supported (rate limits apply). Optional JINA_API_KEY."),
+    JINA("jina", "Jina AI Reader", false, false,
+            "Anonymous usage supported (rate limits apply). Optional JINA_API_KEY."),
     EXA("exa", "Exa", true, false,
             "Page content extraction via Exa. Requires EXA_API_KEY."),
     FIRECRAWL("firecrawl", "Firecrawl", true, false,
@@ -20,7 +20,9 @@ public enum WebFetchProviderType {
     BROWSERLESS("browserless", "Browserless", false, false,
             "Headless Chrome rendering for JS-heavy pages. Requires self-hosted or cloud Browserless."),
     FASTCRW("fastcrw", "fastCRW", false, false,
-            "Firecrawl-compatible scraper. May require CRW_API_KEY for cloud.");
+            "Firecrawl-compatible scraper. May require CRW_API_KEY for cloud."),
+    ALIYUN("aliyun", "Aliyun IQS Fetch", true, true,
+            "Aliyun ReadPageBasic (IQS) API. Requires ALIYUN_API_KEY or DASHSCOPE_API_KEY.");
 
     private final String id;
     private final String displayName;
@@ -64,7 +66,7 @@ public enum WebFetchProviderType {
      * Returns the default provider type.
      */
     public static WebFetchProviderType defaultType() {
-        return JINA;
+        return ALIYUN;
     }
 
     /**

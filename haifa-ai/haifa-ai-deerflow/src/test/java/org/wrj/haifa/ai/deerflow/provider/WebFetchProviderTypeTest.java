@@ -8,8 +8,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class WebFetchProviderTypeTest {
 
     @Test
-    void defaultTypeIsJina() {
-        assertThat(WebFetchProviderType.defaultType()).isEqualTo(WebFetchProviderType.JINA);
+    void defaultTypeIsAliyun() {
+        assertThat(WebFetchProviderType.defaultType()).isEqualTo(WebFetchProviderType.ALIYUN);
     }
 
     @Test
@@ -36,10 +36,10 @@ class WebFetchProviderTypeTest {
 
     @Test
     void metadataIsCorrect() {
-        ProviderMetadata meta = WebFetchProviderType.JINA.toMetadata();
-        assertThat(meta.id()).isEqualTo("jina");
-        assertThat(meta.displayName()).isEqualTo("Jina AI Reader");
-        assertThat(meta.requiresApiKey()).isFalse();
+        ProviderMetadata meta = WebFetchProviderType.ALIYUN.toMetadata();
+        assertThat(meta.id()).isEqualTo("aliyun");
+        assertThat(meta.displayName()).isEqualTo("Aliyun IQS Fetch");
+        assertThat(meta.requiresApiKey()).isTrue();
         assertThat(meta.defaultEnabled()).isTrue();
         assertThat(meta.supportsSearch()).isFalse();
         assertThat(meta.supportsFetch()).isTrue();

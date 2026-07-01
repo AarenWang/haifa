@@ -7,8 +7,8 @@ import java.util.List;
  */
 public enum WebSearchProviderType {
 
-    DUCKDUCKGO("duckduckgo", "DuckDuckGo", false, true,
-            "Default search provider; no API key required."),
+    DUCKDUCKGO("duckduckgo", "DuckDuckGo", false, false,
+            "No API key required. Scrapes DuckDuckGo's HTML search interface."),
     TAVILY("tavily", "Tavily", true, false,
             "High-quality search with structured results. Requires TAVILY_API_KEY."),
     BRAVE("brave", "Brave Search", true, false,
@@ -26,7 +26,9 @@ public enum WebSearchProviderType {
     SEARXNG("searxng", "SearXNG", false, false,
             "Self-hosted metasearch engine. Requires a SearXNG instance."),
     FASTCRW("fastcrw", "fastCRW", false, false,
-            "Firecrawl-compatible scraper. May require CRW_API_KEY for cloud.");
+            "Firecrawl-compatible scraper. May require CRW_API_KEY for cloud."),
+    ALIYUN("aliyun", "Aliyun IQS Search", true, true,
+            "Aliyun UnifiedSearch (IQS) API. Requires ALIYUN_API_KEY or DASHSCOPE_API_KEY.");
 
     private final String id;
     private final String displayName;
@@ -70,7 +72,7 @@ public enum WebSearchProviderType {
      * Returns the default provider type.
      */
     public static WebSearchProviderType defaultType() {
-        return DUCKDUCKGO;
+        return ALIYUN;
     }
 
     /**

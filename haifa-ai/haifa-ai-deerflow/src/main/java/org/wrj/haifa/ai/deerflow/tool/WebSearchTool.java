@@ -35,7 +35,7 @@ public class WebSearchTool implements AgentTool {
     public String description() {
         String providerId = properties.getWebSearchProvider();
         return "Search the web for queries to find relevant sources and snippets. "
-                + "Uses the configured search provider (default: DuckDuckGo). "
+                + "Uses the configured search provider (default: " + org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType.defaultType().displayName() + "). "
                 + "Current provider: " + providerId + ". "
                 + "Arguments: {\"query\": \"search query\", \"max_results\": 5}";
     }
