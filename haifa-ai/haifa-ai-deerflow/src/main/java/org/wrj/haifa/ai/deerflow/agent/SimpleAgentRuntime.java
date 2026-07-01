@@ -40,6 +40,7 @@ import org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult;
 import org.wrj.haifa.ai.deerflow.research.EvidenceItem;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
 import org.wrj.haifa.ai.deerflow.research.ResearchSource;
+import org.wrj.haifa.ai.deerflow.research.ResearchLoopObserver;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
@@ -98,7 +99,23 @@ public class SimpleAgentRuntime implements AgentRuntime {
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage) {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
                 agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
+    }
+
+    public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
+            RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
+            AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage,
+            ResearchRuntimeSupport researchRuntimeSupport,
+            ResearchPlanner researchPlanner, ResearchPlanStore researchPlanStore,
+            ClarificationGate clarificationGate, ResearchClarificationStore researchClarificationStore,
+            ResearchProgressTracker researchProgressTracker, ResearchQualityGate researchQualityGate,
+            ReportWriterService reportWriterService) {
+        this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
+                agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
+                null, researchRuntimeSupport, researchPlanner, researchPlanStore, clarificationGate,
+                researchClarificationStore, researchProgressTracker, researchQualityGate, reportWriterService);
     }
 
     @Autowired
@@ -107,6 +124,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.todo.TodoStore todoStore,
             @Autowired(required = false) ResearchRuntimeSupport researchRuntimeSupport,
             @Autowired(required = false) ResearchPlanner researchPlanner,
             @Autowired(required = false) ResearchPlanStore researchPlanStore,
@@ -128,7 +146,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 }))
                 .toList();
         this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
-                researchRuntimeSupport, researchPlanner, researchPlanStore, researchProgressTracker, researchQualityGate);
+                new ResearchLoopObserver(todoStore, researchRuntimeSupport, researchPlanner, researchPlanStore, researchProgressTracker, researchQualityGate));
         this.agentEventStore = agentEventStore;
         this.toolExecutionStore = toolExecutionStore;
         this.modelStepStore = modelStepStore;
@@ -662,7 +680,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private List<ToolResult> executePlannedTools(AgentRequest request, AgentRunConfig config, AtomicInteger seq,
             List<AgentEvent> events, List<Skill> activeSkills) {
         ToolRequest toolRequest = new ToolRequest(request.message(), config.workspaceRoot(), request.uploadedFileIds(),
-                config.threadId());
+                config.threadId(), config.runId());
         List<ToolResult> results = new ArrayList<>();
 
         List<AgentTool> plannedTools = new ArrayList<>(this.toolRegistry.plan(request.message(), config.maxIterations()));

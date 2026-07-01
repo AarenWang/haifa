@@ -40,6 +40,7 @@ haifa:
   ai:
     deerflow:
       model: ${HAIFA_DEERFLOW_MODEL:}
+      model-timeout: ${HAIFA_DEERFLOW_MODEL_TIMEOUT:300000}
       max-iterations: 4
       workspace-root: ${HAIFA_DEERFLOW_WORKSPACE:${user.dir}}
       skills-root: ${HAIFA_DEERFLOW_SKILLS:${user.dir}/skills}

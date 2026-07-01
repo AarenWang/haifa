@@ -58,7 +58,8 @@ class AgentLoopResearchIntegrationTest {
         CountingFetchTool fetchTool = new CountingFetchTool();
         AgentTool searchTool = new FixedSearchTool();
         AgentModelClient modelClient = new ResearchModel();
-        AgentLoop loop = new AgentLoop(modelClient, new ToolRegistry(List.of(searchTool, fetchTool)), null, null, null, support);
+        AgentLoop loop = new AgentLoop(modelClient, new ToolRegistry(List.of(searchTool, fetchTool)), null, null, null,
+                new org.wrj.haifa.ai.deerflow.research.ResearchLoopObserver(support, null, null, null, null));
 
         AgentRunConfig config = new AgentRunConfig(
                 "thread-r",
@@ -139,11 +140,7 @@ class AgentLoopResearchIntegrationTest {
                 null,
                 null,
                 null,
-                support,
-                null,
-                planStore,
-                progressTracker,
-                qualityGate
+                new org.wrj.haifa.ai.deerflow.research.ResearchLoopObserver(support, null, planStore, progressTracker, qualityGate)
         );
 
         AgentRunConfig config = new AgentRunConfig(
@@ -186,7 +183,8 @@ class AgentLoopResearchIntegrationTest {
     @Test
     void researchWithoutPlanDoesNotAcceptImmediateFinalAnswer() {
         AgentLoop loop = new AgentLoop(prompt -> Mono.just(new ModelResponse("<final_answer>premature report</final_answer>")),
-                new ToolRegistry(List.of()));
+                new ToolRegistry(List.of()), null, null, null,
+                new org.wrj.haifa.ai.deerflow.research.ResearchLoopObserver(null, null, null, null, null));
 
         AgentRunConfig config = new AgentRunConfig(
                 "thread-noplan",

@@ -27,5 +27,6 @@ public enum AgentEventType {
     // Loop events
     MODEL_DELTA,
     TOOL_CALL_REQUESTED,
-    RESEARCH_STEP_COMPLETED
+    RESEARCH_STEP_COMPLETED,
+    TODO_INCOMPLETE
 }

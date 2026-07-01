@@ -1,17 +1,22 @@
 package org.wrj.haifa.ai.deerflow.model;
 
-import java.util.List;
 import java.util.ArrayList;
+import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BiFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallParser;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -21,9 +26,21 @@ public class SpringAiAgentModelClient implements AgentModelClient {
     private static final Logger log = LoggerFactory.getLogger(SpringAiAgentModelClient.class);
 
     private final ObjectProvider<ChatClient.Builder> chatClientBuilderProvider;
+    private final DeerFlowProperties properties;
+    private final BiFunction<ChatClient.Builder, ModelPrompt, ModelResponse> modelCaller;
 
-    public SpringAiAgentModelClient(ObjectProvider<ChatClient.Builder> chatClientBuilderProvider) {
+    @Autowired
+    public SpringAiAgentModelClient(ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
+            DeerFlowProperties properties) {
+        this(chatClientBuilderProvider, properties, SpringAiAgentModelClient::callSpringAi);
+    }
+
+    SpringAiAgentModelClient(ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
+            DeerFlowProperties properties,
+            BiFunction<ChatClient.Builder, ModelPrompt, ModelResponse> modelCaller) {
         this.chatClientBuilderProvider = chatClientBuilderProvider;
+        this.properties = properties;
+        this.modelCaller = modelCaller;
     }
 
     @Override
@@ -34,9 +51,12 @@ public class SpringAiAgentModelClient implements AgentModelClient {
             return Mono.just(fallbackAnswer(prompt));
         }
         long startTime = System.currentTimeMillis();
-        log.info("Spring AI model call starting. model={}, systemPromptChars={}, userPromptChars={}",
-                safe(prompt.modelName()), length(prompt.systemPrompt()), length(prompt.userPrompt()));
-        return Mono.fromCallable(() -> callSpringAi(builder, prompt))
+        long timeoutMs = Math.max(1_000, this.properties.getModelTimeout());
+        log.info("Spring AI model call starting. model={}, timeoutMs={}, systemPromptChars={}, userPromptChars={}",
+                safe(prompt.modelName()), timeoutMs, length(prompt.systemPrompt()), length(prompt.userPrompt()));
+        return Mono.fromCallable(() -> this.modelCaller.apply(builder, prompt))
+                .subscribeOn(Schedulers.boundedElastic())
+                .timeout(Duration.ofMillis(timeoutMs))
                 .doOnSuccess(response -> {
                     long duration = System.currentTimeMillis() - startTime;
                     log.info("Spring AI model call succeeded. model={}, durationMs={}, answerLength={}, toolCalls={}",
@@ -51,7 +71,8 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                             duration,
                             ex);
                 })
-                .subscribeOn(Schedulers.boundedElastic());
+                .onErrorMap(TimeoutException.class, ex ->
+                        new IllegalStateException("Model API call timed out after " + timeoutMs + "ms", ex));
     }
 
     private static ModelResponse callSpringAi(ChatClient.Builder builder, ModelPrompt prompt) {

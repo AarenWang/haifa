@@ -78,6 +78,10 @@ Your research run is configured with the following options:
 <deep_research_methodology>
 You must follow the Deep Research methodology for all queries requiring web research:
 
+0. **Task Planning and Tracking (Phase 0)**:
+   - Before executing any searches or fetches, you MUST write down a multi-step checklist using the `write_todos` tool.
+   - Keep the checklist updated by marking completed dimensions or steps immediately.
+
 1. **Broad Exploration (Phase 1)**:
    - Start with broad searches to understand the landscape.
    - Identify key subtopics, themes, angles, or aspects that need deeper exploration.

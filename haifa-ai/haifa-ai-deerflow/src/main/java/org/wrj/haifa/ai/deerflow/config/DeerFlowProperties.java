@@ -17,6 +17,9 @@ public class DeerFlowProperties {
     private boolean mcpEnabled = false;
     private boolean toolSearchEnabled = true;
 
+    @Min(1_000)
+    private long modelTimeout = 300_000; // 5 minutes in ms
+
     private String uploadsRoot = "${user.dir}/uploads";
     private String outputsRoot = "${user.dir}/outputs";
     private boolean writeFileEnabled = true;
@@ -233,6 +236,14 @@ public class DeerFlowProperties {
 
     public void setToolSearchEnabled(boolean toolSearchEnabled) {
         this.toolSearchEnabled = toolSearchEnabled;
+    }
+
+    public long getModelTimeout() {
+        return modelTimeout;
+    }
+
+    public void setModelTimeout(long modelTimeout) {
+        this.modelTimeout = modelTimeout;
     }
 
     public String getUploadsRoot() {

@@ -32,7 +32,7 @@ class AgentLoopTest {
         AgentLoop loop = new AgentLoop(mockModel, registry);
 
         AgentRunConfig config = new AgentRunConfig("thread-1", "run-1", "test-model", false, false,
-                4, Path.of("."), null, null, Map.of());
+                4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH, null, Map.of());
 
         List<AgentEvent> events = loop.run(
                 LoopConfig.fromDefaults(),
