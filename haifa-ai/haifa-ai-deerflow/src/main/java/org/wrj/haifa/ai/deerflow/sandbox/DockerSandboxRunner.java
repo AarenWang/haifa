@@ -1,0 +1,141 @@
+package org.wrj.haifa.ai.deerflow.sandbox;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import org.springframework.stereotype.Component;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+
+@Component
+public class DockerSandboxRunner implements SandboxRunner {
+
+    private final DeerFlowProperties properties;
+
+    public DockerSandboxRunner(DeerFlowProperties properties) {
+        this.properties = properties;
+    }
+
+    @Override
+    public SandboxResult run(SandboxRequest request) {
+        String sandboxId = UUID.randomUUID().toString();
+        long start = System.currentTimeMillis();
+        Path workdir = prepareWorkdir(request, sandboxId);
+        Process process = null;
+        try {
+            List<String> command = dockerCommand(request, workdir);
+            ProcessBuilder processBuilder = new ProcessBuilder(command);
+            processBuilder.environment().clear();
+            processBuilder.environment().put("PATH", System.getenv().getOrDefault("PATH", ""));
+            process = processBuilder.start();
+
+            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            Thread stdoutThread = streamTo(process.getInputStream(), stdout);
+            Thread stderrThread = streamTo(process.getErrorStream(), stderr);
+
+            Duration timeout = request.timeout();
+            boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            boolean timedOut = !finished;
+            if (timedOut) {
+                process.destroyForcibly();
+            }
+            stdoutThread.join(1_000);
+            stderrThread.join(1_000);
+
+            int exitCode = timedOut ? -1 : process.exitValue();
+            LocalRestrictedSandboxRunner.TruncatedOutput truncated = LocalRestrictedSandboxRunner.truncate(
+                    stdout.toString(), stderr.toString(), properties.getSandbox().getMaxOutputChars());
+            return new SandboxResult(sandboxId, exitCode, truncated.stdout(), truncated.stderr(),
+                    System.currentTimeMillis() - start, timedOut, truncated.truncated(), Map.of(
+                            "sandboxBackend", SandboxBackend.DOCKER.id(),
+                            "isolationLevel", "docker",
+                            "strongIsolation", true,
+                            "sandboxWorkdir", workdir.toString(),
+                            "workspaceMounted", workspaceMountAvailable(request),
+                            "workspaceMountMode", workspaceMountAvailable(request) ? "readonly" : "none",
+                            "dockerImage", properties.getSandbox().getDockerImage(),
+                            "networkEnabled", request.networkEnabled(),
+                            "timeoutMs", timeout.toMillis()
+                    ));
+        } catch (Exception ex) {
+            if (process != null) {
+                process.destroyForcibly();
+            }
+            return new SandboxResult(sandboxId, -1, "", "Docker sandbox execution failed: " + ex.getMessage(),
+                    System.currentTimeMillis() - start, false, false, Map.of(
+                            "sandboxBackend", SandboxBackend.DOCKER.id(),
+                            "isolationLevel", "docker",
+                            "strongIsolation", true,
+                            "sandboxWorkdir", workdir.toString(),
+                            "workspaceMounted", workspaceMountAvailable(request),
+                            "workspaceMountMode", workspaceMountAvailable(request) ? "readonly" : "none",
+                            "error", ex.getClass().getName()
+                    ));
+        }
+    }
+
+    private List<String> dockerCommand(SandboxRequest request, Path workdir) {
+        List<String> command = new ArrayList<>();
+        command.add("docker");
+        command.add("run");
+        command.add("--rm");
+        command.add(request.networkEnabled() ? "--network=bridge" : "--network=none");
+        command.add("--memory=512m");
+        command.add("--cpus=1");
+        command.add("--pids-limit=128");
+        command.add("--read-only");
+        command.add("--tmpfs");
+        command.add("/tmp:rw,noexec,nosuid,size=64m");
+        if (workspaceMountAvailable(request)) {
+            command.add("--mount");
+            command.add("type=bind,source=" + DockerPathMapper.bindSource(request.workspaceRoot())
+                    + ",target=/workspace,readonly");
+        }
+        command.add("--mount");
+        command.add("type=bind,source=" + DockerPathMapper.bindSource(workdir) + ",target=/sandbox");
+        command.add("-w");
+        command.add(workspaceMountAvailable(request) ? "/workspace" : "/sandbox");
+        command.add("-e");
+        command.add("SANDBOX_WORKDIR=/sandbox");
+        command.add(properties.getSandbox().getDockerImage());
+        command.add("/bin/bash");
+        command.add("-lc");
+        command.add(request.command());
+        return command;
+    }
+
+    private Path prepareWorkdir(SandboxRequest request, String sandboxId) {
+        String runId = request.runId() == null || request.runId().isBlank() ? "adhoc" : request.runId();
+        Path base = Path.of(properties.getOutputsRoot(), properties.getSandbox().getWorkdirSubdir(), runId, sandboxId);
+        Path normalized = base.toAbsolutePath().normalize();
+        try {
+            Files.createDirectories(normalized);
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to create docker sandbox workdir: " + normalized, ex);
+        }
+        return normalized;
+    }
+
+    private static boolean workspaceMountAvailable(SandboxRequest request) {
+        return request.workspaceRoot() != null && Files.isDirectory(request.workspaceRoot());
+    }
+
+    private static Thread streamTo(java.io.InputStream inputStream, ByteArrayOutputStream target) {
+        Thread thread = new Thread(() -> {
+            try (inputStream; target) {
+                inputStream.transferTo(target);
+            } catch (IOException ignored) {
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+}

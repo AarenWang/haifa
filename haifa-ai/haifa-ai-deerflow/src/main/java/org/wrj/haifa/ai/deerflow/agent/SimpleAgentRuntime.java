@@ -648,9 +648,6 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 results.add(ToolResult.of(tool.name(), "Tool denied by policy: not in allowed-tools for active skills."));
                 events.add(event(seq, config, AgentEventType.TOOL_COMPLETED, "Tool denied by policy",
                         Map.of("tool", tool.name(), "denied", true)));
-                this.toolExecutionStore.saveDenied(config.runId(), config.threadId(), tool.name(),
-                        "Policy denied: not in allowed-tools for active skills",
-                        Map.of("tool", tool.name(), "denied", true));
                 continue;
             }
             long toolStartTime = System.currentTimeMillis();
@@ -699,9 +696,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 if (toolName == null) toolName = (String) event.metadata().get("tool");
                 String desc = (String) event.metadata().getOrDefault("description", "");
                 Boolean denied = (Boolean) event.metadata().getOrDefault("denied", false);
-                if (Boolean.TRUE.equals(denied)) {
-                    this.toolExecutionStore.saveDenied(event.runId(), event.threadId(), toolName, "Policy denied", event.metadata());
-                } else {
+                if (!Boolean.TRUE.equals(denied)) {
                     String reqStr = (String) event.metadata().getOrDefault("arguments", "");
                     this.toolExecutionStore.saveStarted(event.runId(), event.threadId(), toolName, desc, reqStr, event.metadata());
                 }
@@ -709,7 +704,11 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 String toolName = (String) event.metadata().get("toolName");
                 if (toolName == null) toolName = (String) event.metadata().get("tool");
                 Boolean denied = (Boolean) event.metadata().getOrDefault("denied", false);
-                if (!Boolean.TRUE.equals(denied)) {
+                if (Boolean.TRUE.equals(denied)) {
+                    this.toolExecutionStore.saveDenied(event.runId(), event.threadId(), toolName,
+                            (String) event.metadata().getOrDefault("reason", "Tool denied"),
+                            event.metadata());
+                } else {
                     long duration = ((Number) event.metadata().getOrDefault("durationMs", 0L)).longValue();
                     String status = (String) event.metadata().getOrDefault("status", "COMPLETED");
                     if ("FAILED".equals(status) || (event.content() != null && event.content().startsWith("Tool failed:"))) {

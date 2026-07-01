@@ -25,6 +25,7 @@ public class DeerFlowProperties {
     private boolean writeFileEnabled = true;
     private boolean strReplaceEnabled = true;
     private boolean bashEnabled = false;
+    private Sandbox sandbox = new Sandbox();
     private long maxUploadBytes = 10_485_760;
     private int maxConvertedChars = 60_000;
     private String allowedUploadExtensions = "txt,md,json,csv,log,xml,yml,yaml,properties";
@@ -105,6 +106,90 @@ public class DeerFlowProperties {
 
         public void setWebFetch(WebFetchToolConfig webFetch) {
             this.webFetch = webFetch;
+        }
+    }
+
+    public static class Sandbox {
+        private boolean enabled = false;
+        private String backend = "local";
+        private String dockerImage = "ubuntu:24.04";
+        private boolean networkEnabled = false;
+        private long timeoutMs = 30_000;
+        private int maxOutputChars = 20_000;
+        private String workdirSubdir = "sandbox";
+        private String allowedCommands = "mvn,npm,node,python,python3,java,javac,ls,pwd,cat,rg,grep";
+        private String deniedPatterns = "rm -rf,format,shutdown,reboot,del /s,Remove-Item -Recurse";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getBackend() {
+            return backend;
+        }
+
+        public void setBackend(String backend) {
+            this.backend = backend;
+        }
+
+        public String getDockerImage() {
+            return dockerImage;
+        }
+
+        public void setDockerImage(String dockerImage) {
+            this.dockerImage = dockerImage;
+        }
+
+        public boolean isNetworkEnabled() {
+            return networkEnabled;
+        }
+
+        public void setNetworkEnabled(boolean networkEnabled) {
+            this.networkEnabled = networkEnabled;
+        }
+
+        public long getTimeoutMs() {
+            return timeoutMs;
+        }
+
+        public void setTimeoutMs(long timeoutMs) {
+            this.timeoutMs = timeoutMs;
+        }
+
+        public int getMaxOutputChars() {
+            return maxOutputChars;
+        }
+
+        public void setMaxOutputChars(int maxOutputChars) {
+            this.maxOutputChars = maxOutputChars;
+        }
+
+        public String getWorkdirSubdir() {
+            return workdirSubdir;
+        }
+
+        public void setWorkdirSubdir(String workdirSubdir) {
+            this.workdirSubdir = workdirSubdir;
+        }
+
+        public String getAllowedCommands() {
+            return allowedCommands;
+        }
+
+        public void setAllowedCommands(String allowedCommands) {
+            this.allowedCommands = allowedCommands;
+        }
+
+        public String getDeniedPatterns() {
+            return deniedPatterns;
+        }
+
+        public void setDeniedPatterns(String deniedPatterns) {
+            this.deniedPatterns = deniedPatterns;
         }
     }
 
@@ -452,6 +537,14 @@ public class DeerFlowProperties {
 
     public void setBashEnabled(boolean bashEnabled) {
         this.bashEnabled = bashEnabled;
+    }
+
+    public Sandbox getSandbox() {
+        return sandbox;
+    }
+
+    public void setSandbox(Sandbox sandbox) {
+        this.sandbox = sandbox;
     }
 
     // Subagent configuration

@@ -2,23 +2,35 @@ package org.wrj.haifa.ai.deerflow.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.sandbox.CommandPolicy;
+import org.wrj.haifa.ai.deerflow.sandbox.LocalRestrictedSandboxRunner;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxRequest;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxResult;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner;
 
 @Component
 public class BashTool implements AgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final DeerFlowProperties properties;
+    private final SandboxRunner sandboxRunner;
+    private final CommandPolicy commandPolicy;
+
+    @Autowired
+    public BashTool(DeerFlowProperties properties, SandboxRunner sandboxRunner, CommandPolicy commandPolicy) {
+        this.properties = properties;
+        this.sandboxRunner = sandboxRunner;
+        this.commandPolicy = commandPolicy;
+    }
 
     public BashTool(DeerFlowProperties properties) {
-        this.properties = properties;
+        this(properties, new LocalRestrictedSandboxRunner(properties), new CommandPolicy(properties));
     }
 
     @Override
@@ -28,7 +40,7 @@ public class BashTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Run a shell command inside the workspace. Arguments: {\"command\": \"command to run\"}";
+        return "Run a shell command inside the configured sandbox. Arguments: {\"command\": \"command to run\"}";
     }
 
     @Override
@@ -40,6 +52,10 @@ public class BashTool implements AgentTool {
     public ToolResult execute(ToolRequest request) {
         if (!properties.isBashEnabled()) {
             return ToolResult.of(name(), "Tool bash is disabled by security configuration.");
+        }
+        if (properties.getSandbox() == null || !properties.getSandbox().isEnabled()) {
+            return ToolResult.of(name(), "Tool bash sandbox is disabled by security configuration.",
+                    Map.of("denied", true, "reason", "sandbox disabled"));
         }
         try {
             String jsonInput = request.userMessage();
@@ -57,42 +73,48 @@ public class BashTool implements AgentTool {
                 return ToolResult.of(name(), "Error: command is required");
             }
 
-            List<String> cmd = new ArrayList<>();
-            // Determine OS to execute command properly
-            String os = System.getProperty("os.name").toLowerCase();
-            if (os.contains("win")) {
-                cmd.add("cmd.exe");
-                cmd.add("/c");
-                cmd.add(command);
-            } else {
-                cmd.add("/bin/bash");
-                cmd.add("-c");
-                cmd.add(command);
+            CommandPolicy.Decision decision = commandPolicy.evaluate(command, request.workspaceRoot());
+            if (!decision.allowed()) {
+                return ToolResult.of(name(), "Command denied: " + decision.reason(),
+                        Map.of("denied", true, "reason", decision.reason()));
             }
 
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.directory(request.workspaceRoot().toFile());
-            pb.redirectErrorStream(true);
-
-            Process process = pb.start();
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                }
-            }
-
-            boolean finished = process.waitFor(30, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                return ToolResult.of(name(), output.toString() + "\n\nError: command timed out after 30 seconds.");
-            }
-
-            int exitCode = process.exitValue();
-            return ToolResult.of(name(), "Exit code: " + exitCode + "\nOutput:\n" + output.toString());
+            SandboxResult result = sandboxRunner.run(new SandboxRequest(
+                    command,
+                    request.workspaceRoot(),
+                    null,
+                    Duration.ofMillis(properties.getSandbox().getTimeoutMs()),
+                    Map.of(),
+                    properties.getSandbox().isNetworkEnabled(),
+                    request.runId()
+            ));
+            return ToolResult.of(name(), render(result), metadata(result));
         } catch (Exception e) {
             return ToolResult.of(name(), "Error executing command: " + e.getMessage());
         }
+    }
+
+    private static String render(SandboxResult result) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Sandbox ID: ").append(result.sandboxId()).append("\n");
+        builder.append("Exit code: ").append(result.exitCode()).append("\n");
+        builder.append("Timed out: ").append(result.timedOut()).append("\n");
+        builder.append("Duration ms: ").append(result.durationMs()).append("\n");
+        builder.append("Output truncated: ").append(result.outputTruncated()).append("\n");
+        builder.append("Stdout:\n").append(result.stdout().isBlank() ? "(empty)" : result.stdout()).append("\n");
+        builder.append("Stderr:\n").append(result.stderr().isBlank() ? "(empty)" : result.stderr());
+        return builder.toString();
+    }
+
+    private static Map<String, Object> metadata(SandboxResult result) {
+        Map<String, Object> metadata = new HashMap<>(result.metadata());
+        metadata.put("sandboxId", result.sandboxId());
+        metadata.put("exitCode", result.exitCode());
+        metadata.put("stdout", result.stdout());
+        metadata.put("stderr", result.stderr());
+        metadata.put("durationMs", result.durationMs());
+        metadata.put("timedOut", result.timedOut());
+        metadata.put("outputTruncated", result.outputTruncated());
+        return metadata;
     }
 }
