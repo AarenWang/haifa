@@ -43,6 +43,22 @@ class RunManagerTest {
     }
 
     @Test
+    void listByThreadCancelsOlderRunningRunsSupersededByNewerRun() {
+        RunRecord older = manager.create("thread-superseded", "model", Map.of());
+        manager.markRunning(older.runId());
+        RunRecord newer = manager.create("thread-superseded", "model", Map.of());
+        manager.markCompleted(newer.runId());
+
+        assertThat(manager.listByThread("thread-superseded"))
+                .extracting(RunRecord::runId)
+                .containsExactly(newer.runId(), older.runId());
+        assertThat(manager.find(older.runId())).hasValueSatisfying(record -> {
+            assertThat(record.status()).isEqualTo(RunStatus.CANCELLED);
+            assertThat(record.error()).contains("newer run");
+        });
+    }
+
+    @Test
     void markFailedAndCancelledWork() {
         RunRecord run = manager.create("thread-fail", "model", Map.of());
         manager.markRunning(run.runId());

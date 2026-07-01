@@ -59,8 +59,14 @@ public class AgentLoopRunStore {
 
     @Transactional
     public void markCancelled(String runId) {
+        markCancelled(runId, "CANCELLED");
+    }
+
+    @Transactional
+    public void markCancelled(String runId, String stopReason) {
         agentLoopRunRepository.findByRunId(runId).ifPresent(entity -> {
             entity.setStatus(AgentLoopRunEntity.Status.CANCELLED);
+            entity.setStopReason(stopReason);
             entity.setUpdatedAt(Instant.now());
             agentLoopRunRepository.save(entity);
         });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, FileText, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Download, FileText, Loader2 } from 'lucide-react';
 import type { ArtifactRecord } from '../types';
 import { artifactDownloadUrl, fetchArtifact } from '../api/deerflowClient';
 import { renderMarkdown } from '../utils/markdownRenderer';
@@ -25,6 +25,7 @@ export default function ArtifactPanel({ artifacts }: ArtifactPanelProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [previewById, setPreviewById] = useState<Record<string, string>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(true);
 
   const selected = useMemo(
     () => artifacts.find((artifact) => artifact.artifactId === (selectedId || artifacts[0]?.artifactId)),
@@ -76,8 +77,18 @@ export default function ArtifactPanel({ artifacts }: ArtifactPanelProps) {
           <div className="artifact-panel-title">Artifacts</div>
           <div className="artifact-panel-subtitle">{artifacts.length} deliverable files</div>
         </div>
+        <button
+          type="button"
+          className="panel-collapse-button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-label={expanded ? 'Collapse artifacts panel' : 'Expand artifacts panel'}
+          title={expanded ? 'Collapse' : 'Expand'}
+        >
+          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
       </div>
 
+      {expanded && (
       <div className="artifact-panel-grid">
         <div className="artifact-list">
           {artifacts.map((artifact) => {
@@ -124,6 +135,7 @@ export default function ArtifactPanel({ artifacts }: ArtifactPanelProps) {
           )}
         </div>
       </div>
+      )}
     </section>
   );
 }

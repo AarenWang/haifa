@@ -11,6 +11,7 @@ import org.wrj.haifa.ai.deerflow.persistence.entity.RunEntity;
 import org.wrj.haifa.ai.deerflow.persistence.mapper.JsonMapper;
 import org.wrj.haifa.ai.deerflow.persistence.mapper.RunMapper;
 import org.wrj.haifa.ai.deerflow.persistence.repository.RunRepository;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 
 @Component
 public class RunManager {
@@ -18,11 +19,14 @@ public class RunManager {
     private final RunRepository runRepository;
     private final RunMapper runMapper;
     private final JsonMapper jsonMapper;
+    private final AgentLoopRunStore agentLoopRunStore;
 
-    public RunManager(RunRepository runRepository, RunMapper runMapper, JsonMapper jsonMapper) {
+    public RunManager(RunRepository runRepository, RunMapper runMapper, JsonMapper jsonMapper,
+            AgentLoopRunStore agentLoopRunStore) {
         this.runRepository = runRepository;
         this.runMapper = runMapper;
         this.jsonMapper = jsonMapper;
+        this.agentLoopRunStore = agentLoopRunStore;
     }
 
     @Transactional
@@ -49,11 +53,29 @@ public class RunManager {
         return runRepository.findByRunId(runId).map(runMapper::toRecord);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<RunRecord> listByThread(String threadId) {
-        return runRepository.findByThreadIdOrderByCreatedAtDesc(threadId).stream()
+        List<RunEntity> runs = runRepository.findByThreadIdOrderByCreatedAtDesc(threadId);
+        cancelSupersededRunningRuns(runs);
+        return runs.stream()
                 .map(runMapper::toRecord)
                 .toList();
+    }
+
+    private void cancelSupersededRunningRuns(List<RunEntity> runsNewestFirst) {
+        boolean hasNewerRun = false;
+        for (RunEntity entity : runsNewestFirst) {
+            if (entity.getStatus() == RunStatus.RUNNING && hasNewerRun) {
+                entity.setStatus(RunStatus.CANCELLED);
+                entity.setError("Run cancelled because a newer run exists for this thread.");
+                entity.setUpdatedAt(Instant.now());
+                runRepository.save(entity);
+                if (this.agentLoopRunStore != null) {
+                    this.agentLoopRunStore.markCancelled(entity.getRunId(), "SUPERSEDED_BY_NEWER_RUN");
+                }
+            }
+            hasNewerRun = true;
+        }
     }
 
     @Transactional

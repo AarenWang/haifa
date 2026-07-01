@@ -1765,6 +1765,10 @@ body {
 }
 
 .research-plan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-light);
   background: var(--bg-tertiary);
@@ -1772,7 +1776,30 @@ body {
 
 .research-plan-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+}
+
+.panel-collapse-button {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.panel-collapse-button:hover {
+  background: var(--accent-blue-light);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
 }
 
 .research-plan-tab {
@@ -1846,6 +1873,23 @@ body {
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
+}
+
+.dim-status-icon {
+  flex: 0 0 auto;
+}
+
+.dim-status-icon.completed {
+  color: var(--accent-green);
+  stroke-width: 2.5;
+}
+
+.dim-status-icon.in-progress {
+  color: var(--accent-blue);
+}
+
+.dim-status-icon.pending {
+  color: var(--accent-gray);
 }
 
 .plan-dimension-title {
@@ -2065,6 +2109,10 @@ body {
 }
 
 .artifact-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-light);
   background: var(--bg-tertiary);

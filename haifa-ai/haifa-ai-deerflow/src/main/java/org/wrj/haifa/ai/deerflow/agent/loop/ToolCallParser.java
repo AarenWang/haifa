@@ -13,7 +13,16 @@ import java.util.regex.Pattern;
 public class ToolCallParser {
 
     private static final Pattern TOOL_CALL_PATTERN = Pattern.compile(
-            "<tool_call\\s+name=\"([^\"]+)\"\\s*>([^<]*)</tool_call>");
+            "<tool_call\\s+name=\"([^\"]+)\"\\s*>(.*?)</tool_call>", Pattern.DOTALL);
+
+    private static final Pattern TOOL_CALL_BLOCK_PATTERN = Pattern.compile(
+            "<tool_call\\s*>(.*?)</tool_call>", Pattern.DOTALL);
+
+    private static final Pattern TOOL_NAME_TAG = Pattern.compile(
+            "<tool_name\\s*>(.*?)</tool_name>", Pattern.DOTALL);
+
+    private static final Pattern JSON_TAG = Pattern.compile(
+            "<json\\s*>(.*?)</json>", Pattern.DOTALL);
 
     private static final Pattern INVOKE_START = Pattern.compile(
             "<[^>]*?invoke\\s+name=\"([^\"]+)\"[^>]*>");
@@ -38,7 +47,23 @@ public class ToolCallParser {
             calls.add(new ParsedToolCall(toolName, argsJson.trim(), matcher.start(), matcher.end()));
         }
 
-        // 2. Parse XML invoke/parameter formats (Function calls and DSML)
+        // 2. Parse nested tool_call format used by some models:
+        // <tool_call><tool_name>web_search</tool_name><json>{...}</json></tool_call>
+        Matcher blockMatcher = TOOL_CALL_BLOCK_PATTERN.matcher(modelResponse);
+        while (blockMatcher.find()) {
+            String blockContent = blockMatcher.group(1);
+            Matcher toolNameMatcher = TOOL_NAME_TAG.matcher(blockContent);
+            Matcher jsonMatcher = JSON_TAG.matcher(blockContent);
+            if (toolNameMatcher.find() && jsonMatcher.find()) {
+                String toolName = toolNameMatcher.group(1).trim();
+                String argsJson = jsonMatcher.group(1).trim();
+                if (!toolName.isBlank()) {
+                    calls.add(new ParsedToolCall(toolName, argsJson, blockMatcher.start(), blockMatcher.end()));
+                }
+            }
+        }
+
+        // 3. Parse XML invoke/parameter formats (Function calls and DSML)
         Matcher invokeStartMatcher = INVOKE_START.matcher(modelResponse);
         int searchIdx = 0;
         while (invokeStartMatcher.find(searchIdx)) {
@@ -92,7 +117,9 @@ public class ToolCallParser {
         if (modelResponse == null || modelResponse.isBlank()) {
             return false;
         }
-        return TOOL_CALL_PATTERN.matcher(modelResponse).find() || INVOKE_START.matcher(modelResponse).find();
+        return TOOL_CALL_PATTERN.matcher(modelResponse).find()
+                || TOOL_CALL_BLOCK_PATTERN.matcher(modelResponse).find()
+                || INVOKE_START.matcher(modelResponse).find();
     }
 
     public boolean hasFinalAnswer(String modelResponse) {
@@ -123,7 +150,8 @@ public class ToolCallParser {
         }
         String cleaned = text;
         // Remove standard tool_call tags
-        cleaned = Pattern.compile("<tool_call\\s+name=\"[^\"]+\"\\s*>([^<]*)</tool_call>").matcher(cleaned).replaceAll("");
+        cleaned = Pattern.compile("<tool_call\\s+name=\"[^\"]+\"\\s*>.*?</tool_call>", Pattern.DOTALL).matcher(cleaned).replaceAll("");
+        cleaned = Pattern.compile("<tool_call\\s*>.*?</tool_call>", Pattern.DOTALL).matcher(cleaned).replaceAll("");
         // Remove invoke and parameter tags
         cleaned = Pattern.compile("<[^>]*?invoke\\s+name=\"[^\"]+\"[^>]*>").matcher(cleaned).replaceAll("");
         cleaned = Pattern.compile("</[^>]*?invoke[^>]*>").matcher(cleaned).replaceAll("");

@@ -41,7 +41,7 @@ haifa:
     deerflow:
       model: ${HAIFA_DEERFLOW_MODEL:}
       model-timeout: ${HAIFA_DEERFLOW_MODEL_TIMEOUT:300000}
-      max-iterations: 4
+      max-iterations: 20
       workspace-root: ${HAIFA_DEERFLOW_WORKSPACE:${user.dir}}
       skills-root: ${HAIFA_DEERFLOW_SKILLS:${user.dir}/skills}
       skills-enabled: true
@@ -71,9 +71,9 @@ haifa:
         web-fetch:
           provider: aliyun
           api-key: ${ALIYUN_API_KEY:${DASHSCOPE_API_KEY:}}
-      max-research-steps: 20
-      max-research-sources: 20
-      max-fetches-per-run: 10
+      max-research-steps: 100
+      max-research-sources: 100
+      max-fetches-per-run: 200
       research-timeout: 300000
       default-research-depth: STANDARD
       research-enabled: true
