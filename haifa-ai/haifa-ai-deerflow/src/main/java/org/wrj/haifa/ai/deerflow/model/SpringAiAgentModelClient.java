@@ -19,6 +19,7 @@ import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallParser;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import reactor.util.retry.Retry;
 
 @Component
 public class SpringAiAgentModelClient implements AgentModelClient {
@@ -57,6 +58,13 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         return Mono.fromCallable(() -> this.modelCaller.apply(builder, prompt))
                 .subscribeOn(Schedulers.boundedElastic())
                 .timeout(Duration.ofMillis(timeoutMs))
+                .retryWhen(Retry.fixedDelay(3, Duration.ofSeconds(3))
+                        .doBeforeRetry(retrySignal -> {
+                            log.warn("Spring AI model call failed. Retrying (attempt {}/3)... Error: {}",
+                                    retrySignal.totalRetries() + 1,
+                                    retrySignal.failure() != null ? retrySignal.failure().getMessage() : "unknown");
+                        })
+                        .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
                 .doOnSuccess(response -> {
                     long duration = System.currentTimeMillis() - startTime;
                     log.info("Spring AI model call succeeded. model={}, durationMs={}, answerLength={}, toolCalls={}",
