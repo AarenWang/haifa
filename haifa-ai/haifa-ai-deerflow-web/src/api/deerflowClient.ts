@@ -1,4 +1,5 @@
 import type {
+  ArtifactRecord,
   DeerFlowEvent,
   EvidenceItem,
   MessageListResponse,
@@ -196,6 +197,33 @@ export async function fetchRunQualityGate(runId: string): Promise<QualityGateRes
     throw new Error(`HTTP ${res.status}`);
   }
   return res.json();
+}
+
+export async function fetchArtifacts(params: { threadId?: string; runId?: string } = {}): Promise<ArtifactRecord[]> {
+  const url = new URL('/api/deerflow/artifacts', window.location.origin);
+  if (params.threadId) {
+    url.searchParams.set('threadId', params.threadId);
+  }
+  if (params.runId) {
+    url.searchParams.set('runId', params.runId);
+  }
+  const res = await fetch(url.toString(), { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchArtifact(artifactId: string): Promise<ArtifactRecord> {
+  const res = await fetch(`/api/deerflow/artifacts/${encodeURIComponent(artifactId)}`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export function artifactDownloadUrl(artifactId: string): string {
+  return `/api/deerflow/artifacts/${encodeURIComponent(artifactId)}/download`;
 }
 
 

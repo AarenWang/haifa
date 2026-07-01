@@ -3,6 +3,7 @@ import type { RunRequest, UploadRecord } from './types';
 import { deerflowReducer, initialState } from './state/deerflowReducer';
 import {
   readDeerFlowStream,
+  fetchArtifacts,
   checkBackendHealth,
   listUploads,
   deleteUpload,
@@ -20,6 +21,7 @@ import Header from './components/Header';
 import TaskComposer from './components/TaskComposer';
 import AnswerWorkspace from './components/AnswerWorkspace';
 import ActivityTrace from './components/ActivityTrace';
+import ArtifactPanel from './components/ArtifactPanel';
 import ResearchInspector from './components/ResearchInspector';
 import ResearchPlanView from './components/ResearchPlanView';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
@@ -111,6 +113,19 @@ function App() {
     }
   }, []);
 
+  const refreshArtifactData = useCallback(async (threadId?: string, runId?: string) => {
+    if (!threadId && !runId) {
+      dispatch({ type: 'SET_ARTIFACTS', payload: [] });
+      return;
+    }
+    try {
+      const artifacts = await fetchArtifacts({ threadId, runId });
+      dispatch({ type: 'SET_ARTIFACTS', payload: artifacts });
+    } catch {
+      dispatch({ type: 'SET_ARTIFACTS', payload: [] });
+    }
+  }, []);
+
   const refreshEvents = useCallback(async (threadId?: string) => {
     if (!threadId) {
       dispatch({ type: 'SET_EVENTS', payload: [] });
@@ -127,16 +142,19 @@ function App() {
         const events = await fetchRunEvents(latestRun.runId);
         dispatch({ type: 'SET_EVENTS', payload: events });
         refreshResearchData(latestRun.runId);
+        refreshArtifactData(threadId, latestRun.runId);
       } else {
         dispatch({ type: 'SET_EVENTS', payload: [] });
         refreshResearchData();
+        refreshArtifactData(threadId);
       }
     } catch (err) {
       console.error('Failed to load historical events', err);
       dispatch({ type: 'SET_EVENTS', payload: [] });
       refreshResearchData();
+      refreshArtifactData(threadId);
     }
-  }, [refreshResearchData]);
+  }, [refreshArtifactData, refreshResearchData]);
 
   // Poll backend health
   useEffect(() => {
@@ -239,10 +257,20 @@ function App() {
               evt.type === 'QUALITY_GATE_STARTED' ||
               evt.type === 'QUALITY_GATE_PASSED' ||
               evt.type === 'QUALITY_GATE_FAILED' ||
+              evt.type === 'REPORT_STARTED' ||
+              evt.type === 'REPORT_COMPLETED' ||
+              evt.type === 'ARTIFACT_CREATED' ||
               evt.type === 'MODEL_COMPLETED' ||
               evt.type === 'RUN_COMPLETED'
             ) {
               refreshResearchData(evt.runId);
+            }
+            if (
+              evt.type === 'ARTIFACT_CREATED' ||
+              evt.type === 'REPORT_COMPLETED' ||
+              evt.type === 'RUN_COMPLETED'
+            ) {
+              refreshArtifactData(evt.threadId, evt.runId);
             }
           },
           onError: (err) => {
@@ -260,7 +288,7 @@ function App() {
         abortRef.current = null;
       });
     },
-    [refreshMessages, refreshResearchData, refreshThreads, state.selectedUploadIds, state.threadId]
+    [refreshArtifactData, refreshMessages, refreshResearchData, refreshThreads, state.selectedUploadIds, state.threadId]
   );
 
   const handleStop = useCallback(() => {
@@ -338,6 +366,7 @@ function App() {
     dispatch({ type: 'SET_MESSAGES', payload: [] });
     dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
     dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
+    dispatch({ type: 'SET_ARTIFACTS', payload: [] });
     dispatch({ type: 'SET_THREAD_ID', payload: threadId });
     dispatch({ type: 'SET_LAST_REQUEST' });
   }, []);
@@ -352,6 +381,7 @@ function App() {
     dispatch({ type: 'SET_MESSAGES', payload: [] });
     dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
     dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
+    dispatch({ type: 'SET_ARTIFACTS', payload: [] });
     dispatch({ type: 'SET_THREAD_ID' });
     dispatch({ type: 'SET_LAST_REQUEST' });
   }, []);
@@ -388,6 +418,7 @@ function App() {
             progress={state.researchProgress}
             qualityGate={state.qualityGate}
           />
+          <ArtifactPanel artifacts={state.artifacts} />
           <ResearchInspector
             sources={state.researchSources}
             evidenceItems={state.evidenceItems}

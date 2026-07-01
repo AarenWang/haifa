@@ -79,6 +79,17 @@ export interface QualityGateResult {
   citationComplete: boolean;
 }
 
+export interface ArtifactRecord {
+  artifactId: string;
+  runId: string;
+  threadId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+  preview?: string;
+}
+
 export interface DeerFlowEvent {
   eventId: string;
   runId: string;
@@ -239,6 +250,7 @@ export interface AppState {
   researchPlan?: ResearchPlan;
   researchProgress?: ResearchProgress;
   qualityGate?: QualityGateResult;
+  artifacts: ArtifactRecord[];
   uploads: UploadRecord[];
   selectedUploadIds: string[];
   runHistory: RunHistoryEntry[];
@@ -254,6 +266,7 @@ export type AppAction =
   | { type: 'SET_RESEARCH_PLAN'; payload?: ResearchPlan }
   | { type: 'SET_RESEARCH_PROGRESS'; payload?: ResearchProgress }
   | { type: 'SET_QUALITY_GATE'; payload?: QualityGateResult }
+  | { type: 'SET_ARTIFACTS'; payload: ArtifactRecord[] }
   | { type: 'SET_THREAD_ID'; payload?: string }
   | { type: 'SET_THREADS'; payload: ThreadRecord[] }
   | { type: 'SET_MESSAGES'; payload: MessageRecord[] }

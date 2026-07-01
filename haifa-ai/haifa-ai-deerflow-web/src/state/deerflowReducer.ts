@@ -42,6 +42,7 @@ export const initialState: AppState = {
   events: [],
   researchSources: [],
   evidenceItems: [],
+  artifacts: [],
   uploads: [],
   selectedUploadIds: [],
   runHistory: [],
@@ -68,6 +69,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         messages: state.messages,
         researchSources: state.researchSources,
         evidenceItems: state.evidenceItems,
+        artifacts: state.artifacts,
         uploads: state.uploads,
         selectedUploadIds: state.selectedUploadIds,
         runHistory: [entry, ...state.runHistory],
@@ -171,6 +173,11 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         ...state,
         qualityGate: action.payload,
       };
+    case 'SET_ARTIFACTS':
+      return {
+        ...state,
+        artifacts: action.payload,
+      };
     case 'SET_THREAD_ID':
       return {
         ...state,
@@ -210,6 +217,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         messages: state.threadId ? state.messages : [],
         researchSources: state.threadId ? state.researchSources : [],
         evidenceItems: state.threadId ? state.evidenceItems : [],
+        artifacts: state.threadId ? state.artifacts : [],
         uploads: state.uploads,
         selectedUploadIds: state.selectedUploadIds,
         runHistory: state.runHistory,
@@ -226,6 +234,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         messages: state.messages,
         researchSources: state.researchSources,
         evidenceItems: state.evidenceItems,
+        artifacts: state.artifacts,
         uploads: state.uploads,
         selectedUploadIds: state.selectedUploadIds,
         runHistory: state.runHistory,

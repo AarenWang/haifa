@@ -3,11 +3,18 @@ package org.wrj.haifa.ai.deerflow.tool;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
+import org.wrj.haifa.ai.deerflow.artifact.ArtifactRecord;
+import org.wrj.haifa.ai.deerflow.artifact.ArtifactService;
 
 @Component
 public class PresentFilesTool implements AgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private final ArtifactService artifactService;
+
+    public PresentFilesTool(ArtifactService artifactService) {
+        this.artifactService = artifactService;
+    }
 
     @Override
     public String name() {
@@ -16,7 +23,7 @@ public class PresentFilesTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Present final deliverables to the user. Arguments: {\"files\": [\"relative/path/to/file1\", \"relative/path/to/file2\"]}";
+        return "Present registered research artifacts to the user. Arguments: {\"files\": [\"artifactId-or-filename.md\"]}. Only already registered artifacts are allowed.";
     }
 
     @Override
@@ -42,9 +49,21 @@ public class PresentFilesTool implements AgentTool {
                 return ToolResult.of(name(), "Error: files array is required");
             }
 
-            StringBuilder sb = new StringBuilder("Presented the following files to the user:\n");
+            StringBuilder sb = new StringBuilder("Presented registered artifacts:\n");
             for (JsonNode file : filesNode) {
-                sb.append("- ").append(file.asText()).append("\n");
+                String requested = file.asText();
+                java.util.Optional<ArtifactRecord> artifact = artifactService.findVisible(request.threadId(), requested);
+                if (artifact.isEmpty()) {
+                    return ToolResult.of(name(), "Error: file is not a registered artifact: " + requested);
+                }
+                ArtifactRecord record = artifact.get();
+                sb.append("- ")
+                        .append(record.filename())
+                        .append(" (artifactId=")
+                        .append(record.artifactId())
+                        .append(", download=/api/deerflow/artifacts/")
+                        .append(record.artifactId())
+                        .append("/download)\n");
             }
             return ToolResult.of(name(), sb.toString().trim());
         } catch (Exception e) {

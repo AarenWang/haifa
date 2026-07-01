@@ -277,6 +277,7 @@ class SimpleAgentRuntimeTest {
                 new ClarificationGate(),
                 clarificationStore,
                 progressTracker,
+                null,
                 null
         );
 

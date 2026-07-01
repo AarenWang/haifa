@@ -14,6 +14,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
 import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
+import org.wrj.haifa.ai.deerflow.artifact.ReportWriteResult;
+import org.wrj.haifa.ai.deerflow.artifact.ReportWriterService;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.middleware.AgentMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.AgentRuntimeContext;
@@ -35,7 +37,9 @@ import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanner;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchQualityGate;
 import org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult;
+import org.wrj.haifa.ai.deerflow.research.EvidenceItem;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
+import org.wrj.haifa.ai.deerflow.research.ResearchSource;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
@@ -79,6 +83,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final ResearchClarificationStore researchClarificationStore;
     private final ResearchProgressTracker researchProgressTracker;
     private final ResearchQualityGate researchQualityGate;
+    private final ReportWriterService reportWriterService;
 
     @Autowired(required = false)
     private ToolPolicyService toolPolicyService;
@@ -93,7 +98,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage) {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
                 agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -108,7 +113,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
             @Autowired(required = false) ClarificationGate clarificationGate,
             @Autowired(required = false) ResearchClarificationStore researchClarificationStore,
             @Autowired(required = false) ResearchProgressTracker researchProgressTracker,
-            @Autowired(required = false) ResearchQualityGate researchQualityGate) {
+            @Autowired(required = false) ResearchQualityGate researchQualityGate,
+            @Autowired(required = false) ReportWriterService reportWriterService) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
@@ -136,6 +142,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this.researchClarificationStore = researchClarificationStore;
         this.researchProgressTracker = researchProgressTracker;
         this.researchQualityGate = researchQualityGate;
+        this.reportWriterService = reportWriterService;
     }
 
     @Override
@@ -487,59 +494,24 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
             // After loop completes, mark run status based on last event type
             final java.util.concurrent.atomic.AtomicReference<String> lastEventType = new java.util.concurrent.atomic.AtomicReference<>();
+            final java.util.concurrent.atomic.AtomicReference<String> lastModelContent = new java.util.concurrent.atomic.AtomicReference<>("");
+            final java.util.concurrent.atomic.AtomicReference<Map<String, Object>> lastModelMetadata = new java.util.concurrent.atomic.AtomicReference<>(Map.of());
             final java.util.concurrent.atomic.AtomicReference<org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan> finalPlan = new java.util.concurrent.atomic.AtomicReference<>(plan);
             Flux<AgentEvent> wrappedLoopEvents = loopEvents
-                    .doOnNext(evt -> {
+                    .map(evt -> {
                         lastEventType.set(evt.type().name());
                         if (this.researchPlanStore != null) {
                             this.researchPlanStore.findByRunId(run.runId()).ifPresent(finalPlan::set);
                         }
                         if (evt.type() == AgentEventType.MODEL_COMPLETED) {
-                            this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, evt.content(),
-                                    Map.of("mode", "research", "toolCount", evt.metadata().getOrDefault("totalToolCalls", 0)));
+                            lastModelContent.set(evt.content() == null ? "" : evt.content());
+                            lastModelMetadata.set(evt.metadata() == null ? Map.of() : evt.metadata());
+                            return event(seq, config, AgentEventType.MODEL_COMPLETED,
+                                    "Research synthesis captured. Preparing report artifact.",
+                                    Map.of("mode", "research", "reportPending", true,
+                                            "stopReason", evt.metadata().getOrDefault("stopReason", "")));
                         }
-                    })
-                    .doOnComplete(() -> {
-                        String lastType = lastEventType.get();
-                        long totalDuration = System.currentTimeMillis() - runStartTime;
-                        if ("RUN_FAILED".equals(lastType)) {
-                            this.threadManager.touch(threadId);
-                            log.info("Research run failed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
-                        } else if ("RUN_CANCELLED".equals(lastType)) {
-                            this.threadManager.touch(threadId);
-                            log.info("Research run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
-                        } else {
-                            // --- Quality Gate Check ---
-                            List<AgentEvent> qualityEvents = new ArrayList<>();
-                            if (this.researchQualityGate != null && this.researchRuntimeSupport != null) {
-                                List<org.wrj.haifa.ai.deerflow.research.ResearchSource> sources = this.researchRuntimeSupport.listSourcesByRun(run.runId());
-                                List<org.wrj.haifa.ai.deerflow.research.EvidenceItem> evidenceItems = this.researchRuntimeSupport.listEvidenceByRun(run.runId());
-                                org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult qgResult = this.researchQualityGate.evaluate(finalPlan.get(), sources, evidenceItems,
-                                        researchOptions.requireCitations());
-                                qualityEvents.add(event(seq, config, AgentEventType.QUALITY_GATE_STARTED,
-                                        "Quality gate evaluation started", Map.of()));
-                                if (qgResult.passed()) {
-                                    qualityEvents.add(event(seq, config, AgentEventType.QUALITY_GATE_PASSED,
-                                            "Quality gate passed. Score: " + String.format("%.1f", qgResult.score()),
-                                            Map.of("score", qgResult.score(), "dimensionCount", qgResult.dimensionCount(),
-                                                    "fetchedSourceCount", qgResult.fetchedSourceCount())));
-                                } else {
-                                    qualityEvents.add(event(seq, config, AgentEventType.QUALITY_GATE_FAILED,
-                                            "Quality gate failed. Score: " + String.format("%.1f", qgResult.score()) + 
-                                                    ". Gaps: " + String.join("; ", qgResult.gaps()),
-                                            Map.of("score", qgResult.score(), "gaps", qgResult.gaps(),
-                                                    "recommendation", qgResult.recommendation(),
-                                                    "dimensionCount", qgResult.dimensionCount(),
-                                                    "fetchedSourceCount", qgResult.fetchedSourceCount())));
-                                }
-                                for (AgentEvent qe : qualityEvents) {
-                                    try { this.saveEvent(qe); } catch (Exception ignored) {}
-                                }
-                            }
-                            this.runManager.markCompleted(run.runId());
-                            this.threadManager.touch(threadId);
-                            log.info("Research run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
-                        }
+                        return evt;
                     })
                     .doOnError(ex -> {
                         String errorMessage = describeException(ex);
@@ -558,10 +530,126 @@ public class SimpleAgentRuntime implements AgentRuntime {
                         this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, "Research run cancelled",
                                 Map.of("status", "CANCELLED", "totalDurationMs", totalDuration, "mode", "research"));
                     });
+            Flux<AgentEvent> deliveryEvents = Flux.defer(() -> Flux.fromIterable(finishResearchDelivery(
+                    lastEventType.get(),
+                    run,
+                    threadId,
+                    config,
+                    seq,
+                    runStartTime,
+                    finalPlan.get(),
+                    researchOptions,
+                    lastModelContent.get(),
+                    lastModelMetadata.get()
+            )));
 
-            return Flux.concat(Flux.fromIterable(prefixEvents), wrappedLoopEvents)
+            return Flux.concat(Flux.fromIterable(prefixEvents), wrappedLoopEvents, deliveryEvents)
                     .doOnNext(this::saveEvent);
         }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private List<AgentEvent> finishResearchDelivery(String lastType, RunRecord run, String threadId,
+            AgentRunConfig config, AtomicInteger seq, long runStartTime, ResearchPlan plan,
+            ResearchOptions researchOptions, String synthesisResult, Map<String, Object> modelMetadata) {
+        long totalDuration = System.currentTimeMillis() - runStartTime;
+        if ("RUN_FAILED".equals(lastType)) {
+            this.runManager.markFailed(run.runId(), "Research run failed");
+            this.threadManager.touch(threadId);
+            log.info("Research run failed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+            return List.of();
+        }
+        if ("RUN_CANCELLED".equals(lastType)) {
+            this.threadManager.touch(threadId);
+            log.info("Research run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+            return List.of();
+        }
+
+        List<AgentEvent> events = new ArrayList<>();
+        List<ResearchSource> sources = this.researchRuntimeSupport == null
+                ? List.of()
+                : this.researchRuntimeSupport.listSourcesByRun(run.runId());
+        List<EvidenceItem> evidenceItems = this.researchRuntimeSupport == null
+                ? List.of()
+                : this.researchRuntimeSupport.listEvidenceByRun(run.runId());
+        QualityGateResult qgResult = null;
+
+        if (this.researchQualityGate != null) {
+            events.add(event(seq, config, AgentEventType.QUALITY_GATE_STARTED,
+                    "Quality gate evaluation started", Map.of()));
+            qgResult = this.researchQualityGate.evaluate(plan, sources, evidenceItems,
+                    researchOptions == null || Boolean.TRUE.equals(researchOptions.requireCitations()));
+            if (qgResult.passed()) {
+                events.add(event(seq, config, AgentEventType.QUALITY_GATE_PASSED,
+                        "Quality gate passed. Score: " + String.format("%.1f", qgResult.score()),
+                        Map.of("score", qgResult.score(), "dimensionCount", qgResult.dimensionCount(),
+                                "fetchedSourceCount", qgResult.fetchedSourceCount())));
+            } else {
+                events.add(event(seq, config, AgentEventType.QUALITY_GATE_FAILED,
+                        "Quality gate failed. Score: " + String.format("%.1f", qgResult.score())
+                                + ". Gaps: " + String.join("; ", qgResult.gaps()),
+                        Map.of("score", qgResult.score(), "gaps", qgResult.gaps(),
+                                "recommendation", qgResult.recommendation(),
+                                "dimensionCount", qgResult.dimensionCount(),
+                                "fetchedSourceCount", qgResult.fetchedSourceCount())));
+            }
+        }
+
+        if (this.reportWriterService != null) {
+            events.add(event(seq, config, AgentEventType.REPORT_STARTED,
+                    "Research report generation started", Map.of()));
+            ReportWriteResult result = this.reportWriterService.writeReport(
+                    threadId, run.runId(), plan, sources, evidenceItems, qgResult,
+                    synthesisResult, researchOptions);
+            events.add(event(seq, config, AgentEventType.ARTIFACT_CREATED,
+                    "Research report artifact created: " + result.artifact().filename(),
+                    Map.of("artifactId", result.artifact().artifactId(),
+                            "filename", result.artifact().filename(),
+                            "mimeType", result.artifact().mimeType(),
+                            "size", result.artifact().size(),
+                            "downloadUrl", "/api/deerflow/artifacts/" + result.artifact().artifactId() + "/download")));
+            events.add(event(seq, config, AgentEventType.REPORT_COMPLETED,
+                    "Research report completed: " + result.artifact().filename(),
+                    Map.of("artifactId", result.artifact().artifactId(),
+                            "filename", result.artifact().filename(),
+                            "previewUrl", "/api/deerflow/artifacts/" + result.artifact().artifactId(),
+                            "downloadUrl", "/api/deerflow/artifacts/" + result.artifact().artifactId() + "/download")));
+            this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
+                    buildArtifactSummary(result),
+                    Map.of("mode", "research", "artifactId", result.artifact().artifactId(),
+                            "filename", result.artifact().filename(),
+                            "toolCount", modelMetadata == null ? 0 : modelMetadata.getOrDefault("totalToolCalls", 0)));
+        } else {
+            this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
+                    compactResearchAnswer(synthesisResult, qgResult),
+                    Map.of("mode", "research", "artifactUnavailable", true));
+        }
+
+        this.runManager.markCompleted(run.runId());
+        this.threadManager.touch(threadId);
+        log.info("Research run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+        return events;
+    }
+
+    private static String buildArtifactSummary(ReportWriteResult result) {
+        return "Summary\n\n" + result.summary()
+                + "\n\nLimitations\n\n" + result.limitations()
+                + "\n\nArtifact\n\n- [" + result.artifact().filename() + "](/api/deerflow/artifacts/"
+                + result.artifact().artifactId() + "/download)";
+    }
+
+    private static String compactResearchAnswer(String synthesisResult, QualityGateResult qualityGateResult) {
+        String answer = synthesisResult == null ? "" : synthesisResult
+                .replace("<final_answer>", "")
+                .replace("</final_answer>", "")
+                .trim();
+        if (answer.length() > 900) {
+            answer = answer.substring(0, 900).trim() + "...";
+        }
+        String limitations = qualityGateResult == null || qualityGateResult.passed()
+                ? "No blocking quality gate gaps were recorded."
+                : String.join("; ", qualityGateResult.gaps());
+        return "Summary\n\n" + (answer.isBlank() ? "Research completed." : answer)
+                + "\n\nLimitations\n\n" + limitations;
     }
 
     private List<Skill> resolveActiveSkills(AgentRequest request) {
