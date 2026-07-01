@@ -10,6 +10,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.config.GraphRuntimeMode;
 import org.wrj.haifa.ai.deerflow.graph.AgentGraphShadowResult;
+import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntime;
+import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntimeRequest;
 import org.wrj.haifa.ai.deerflow.graph.GraphShadowRuntime;
 import org.wrj.haifa.ai.deerflow.middleware.DynamicContextMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.TokenBudgetMiddleware;
@@ -40,6 +42,7 @@ import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 import org.wrj.haifa.ai.deerflow.tool.AskClarificationTool;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -281,6 +284,37 @@ class SimpleAgentRuntimeTest {
     }
 
     @Test
+    void activeChatGraphModeRunsThroughGraphAdapterAndCompletesLegacyLoop() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("test system");
+        properties.getGraph().setEnabled(true);
+        properties.getGraph().setMode(GraphRuntimeMode.ACTIVE_CHAT);
+
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>active graph answer</final_answer>"));
+        ToolRegistry tools = new ToolRegistry(List.of());
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore, toolExecutionStore,
+                modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
+        RecordingGraphChatRuntime graphRuntime = new RecordingGraphChatRuntime();
+        runtime.setGraphChatRuntime(graphRuntime);
+
+        List<AgentEvent> events = runtime.stream(new AgentRequest("thread-active-graph", "hello", null))
+                .collectList()
+                .block();
+
+        assertThat(graphRuntime.callCount()).isEqualTo(1);
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.RUN_STARTED,
+                        AgentEventType.MODEL_STARTED,
+                        AgentEventType.MODEL_COMPLETED,
+                        AgentEventType.RUN_COMPLETED);
+        assertThat(events).anySatisfy(event -> assertThat(event.content()).contains("active graph answer"));
+    }
+
+    @Test
     void resumesResearchOnSameThreadAfterClarification() {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setWorkspaceRoot(".");
@@ -414,6 +448,21 @@ class SimpleAgentRuntimeTest {
             callCount++;
             return Mono.just(new AgentGraphShadowResult(config.runId(), config.threadId(), List.of("shadow"),
                     Map.of(), 1));
+        }
+
+        int callCount() {
+            return callCount;
+        }
+    }
+
+    private static final class RecordingGraphChatRuntime extends GraphChatRuntime {
+
+        private int callCount;
+
+        @Override
+        public Flux<AgentEvent> run(GraphChatRuntimeRequest request) {
+            callCount++;
+            return super.run(request);
         }
 
         int callCount() {

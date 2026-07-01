@@ -24,6 +24,8 @@ import org.wrj.haifa.ai.deerflow.artifact.ReportWriteResult;
 import org.wrj.haifa.ai.deerflow.artifact.ReportWriterService;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.config.GraphRuntimeMode;
+import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntime;
+import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntimeRequest;
 import org.wrj.haifa.ai.deerflow.graph.GraphShadowRuntime;
 import org.wrj.haifa.ai.deerflow.middleware.AgentMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.AgentRuntimeContext;
@@ -100,6 +102,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
     @Autowired(required = false)
     private GraphShadowRuntime graphShadowRuntime;
+
+    @Autowired(required = false)
+    private GraphChatRuntime graphChatRuntime;
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
             RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
@@ -262,12 +267,29 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 LoopConfig loopConfig = new LoopConfig(
                         maxSteps, maxToolCalls, this.properties.getResearchTimeout(), researchOptions);
 
-                triggerGraphShadow(config, effectiveRequest, prompt);
+                boolean activeChatGraph = shouldUseActiveChatGraph(effectiveRequest);
+                if (!activeChatGraph) {
+                    triggerGraphShadow(config, effectiveRequest, prompt);
+                }
 
-                Flux<AgentEvent> loopEvents = this.agentLoop.run(
-                        loopConfig, config,
-                        prompt.systemPrompt(), prompt.userPrompt(),
-                        seq, this.toolPolicyService, activeSkills, request.uploadedFileIds());
+                Flux<AgentEvent> loopEvents = activeChatGraph
+                        ? this.graphChatRuntime.run(new GraphChatRuntimeRequest(
+                                this.agentLoop,
+                                loopConfig,
+                                config,
+                                effectiveRequest,
+                                prompt.systemPrompt(),
+                                prompt.userPrompt(),
+                                seq,
+                                this.toolPolicyService,
+                                activeSkills,
+                                request.uploadedFileIds(),
+                                this.messageStore.listByThread(config.threadId())
+                        ))
+                        : this.agentLoop.run(
+                                loopConfig, config,
+                                prompt.systemPrompt(), prompt.userPrompt(),
+                                seq, this.toolPolicyService, activeSkills, request.uploadedFileIds());
 
                 final AtomicReference<String> lastEventType = new AtomicReference<>();
                 final AtomicReference<String> lastContent = new AtomicReference<>("");
@@ -425,6 +447,19 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
     void setGraphShadowRuntime(GraphShadowRuntime graphShadowRuntime) {
         this.graphShadowRuntime = graphShadowRuntime;
+    }
+
+    void setGraphChatRuntime(GraphChatRuntime graphChatRuntime) {
+        this.graphChatRuntime = graphChatRuntime;
+    }
+
+    private boolean shouldUseActiveChatGraph(AgentRequest request) {
+        return this.graphChatRuntime != null
+                && this.properties.getGraph() != null
+                && this.properties.getGraph().isEnabled()
+                && this.properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_CHAT
+                && request != null
+                && request.isChatMode();
     }
 
     private void triggerGraphShadow(AgentRunConfig config, AgentRequest request, ModelPrompt prompt) {
