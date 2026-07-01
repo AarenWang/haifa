@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
@@ -48,7 +49,7 @@ public class LocalRestrictedSandboxRunner implements SandboxRunner {
             boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
             boolean timedOut = !finished;
             if (timedOut) {
-                process.destroyForcibly();
+                terminateProcessTree(process);
             }
             stdoutThread.join(1_000);
             stderrThread.join(1_000);
@@ -69,7 +70,7 @@ public class LocalRestrictedSandboxRunner implements SandboxRunner {
                     ));
         } catch (Exception ex) {
             if (process != null) {
-                process.destroyForcibly();
+                terminateProcessTree(process);
             }
             long durationMs = System.currentTimeMillis() - start;
             return new SandboxResult(sandboxId, -1, "", "Sandbox execution failed: " + ex.getMessage(), durationMs,
@@ -95,6 +96,21 @@ public class LocalRestrictedSandboxRunner implements SandboxRunner {
             throw new IllegalStateException("Failed to create sandbox workdir: " + normalized, ex);
         }
         return normalized;
+    }
+
+    private static void terminateProcessTree(Process process) {
+        List<ProcessHandle> descendants = process.descendants().toList();
+        descendants.forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+        waitForExit(process.toHandle().onExit(), 2_000);
+        descendants.forEach(handle -> waitForExit(handle.onExit(), 2_000));
+    }
+
+    private static void waitForExit(CompletableFuture<ProcessHandle> exit, long timeoutMs) {
+        try {
+            exit.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (Exception ignored) {
+        }
     }
 
     private static Thread streamTo(java.io.InputStream inputStream, ByteArrayOutputStream target) {
