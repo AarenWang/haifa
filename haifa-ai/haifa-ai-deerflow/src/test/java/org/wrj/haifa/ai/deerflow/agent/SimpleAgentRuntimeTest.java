@@ -12,6 +12,8 @@ import org.wrj.haifa.ai.deerflow.config.GraphRuntimeMode;
 import org.wrj.haifa.ai.deerflow.graph.AgentGraphShadowResult;
 import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntime;
 import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntimeRequest;
+import org.wrj.haifa.ai.deerflow.graph.GraphResearchRuntime;
+import org.wrj.haifa.ai.deerflow.graph.GraphResearchRuntimeRequest;
 import org.wrj.haifa.ai.deerflow.graph.GraphShadowRuntime;
 import org.wrj.haifa.ai.deerflow.middleware.DynamicContextMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.TokenBudgetMiddleware;
@@ -315,6 +317,40 @@ class SimpleAgentRuntimeTest {
     }
 
     @Test
+    void activeResearchGraphModeRunsThroughGraphAdapterAndCompletesLegacyResearchLoop() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("test system");
+        properties.setResearchSystemPrompt("research system");
+        properties.setMaxResearchSteps(2);
+        properties.getGraph().setEnabled(true);
+        properties.getGraph().setMode(GraphRuntimeMode.ACTIVE_RESEARCH);
+
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>active research answer</final_answer>"));
+        ToolRegistry tools = new ToolRegistry(List.of());
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore, toolExecutionStore,
+                modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
+        RecordingGraphResearchRuntime graphRuntime = new RecordingGraphResearchRuntime();
+        runtime.setGraphResearchRuntime(graphRuntime);
+
+        List<AgentEvent> events = runtime.stream(new AgentRequest("thread-active-research-graph", "research topic", null,
+                        List.of(), RunMode.RESEARCH, ResearchOptions.defaults()))
+                .collectList()
+                .block();
+
+        assertThat(graphRuntime.callCount()).isEqualTo(1);
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.RUN_STARTED,
+                        AgentEventType.MODEL_STARTED,
+                        AgentEventType.MODEL_COMPLETED,
+                        AgentEventType.RUN_COMPLETED);
+        assertThat(events).anySatisfy(event -> assertThat(event.content()).contains("active research answer"));
+    }
+
+    @Test
     void resumesResearchOnSameThreadAfterClarification() {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setWorkspaceRoot(".");
@@ -461,6 +497,21 @@ class SimpleAgentRuntimeTest {
 
         @Override
         public Flux<AgentEvent> run(GraphChatRuntimeRequest request) {
+            callCount++;
+            return super.run(request);
+        }
+
+        int callCount() {
+            return callCount;
+        }
+    }
+
+    private static final class RecordingGraphResearchRuntime extends GraphResearchRuntime {
+
+        private int callCount;
+
+        @Override
+        public Flux<AgentEvent> run(GraphResearchRuntimeRequest request) {
             callCount++;
             return super.run(request);
         }
