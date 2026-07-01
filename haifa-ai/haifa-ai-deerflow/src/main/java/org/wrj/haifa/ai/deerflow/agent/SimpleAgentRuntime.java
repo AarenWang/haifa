@@ -23,6 +23,8 @@ import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallParser;
 import org.wrj.haifa.ai.deerflow.artifact.ReportWriteResult;
 import org.wrj.haifa.ai.deerflow.artifact.ReportWriterService;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.config.GraphRuntimeMode;
+import org.wrj.haifa.ai.deerflow.graph.GraphShadowRuntime;
 import org.wrj.haifa.ai.deerflow.middleware.AgentMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.AgentRuntimeContext;
 import org.wrj.haifa.ai.deerflow.middleware.MiddlewareChain;
@@ -95,6 +97,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
     @Autowired(required = false)
     private org.wrj.haifa.ai.deerflow.memory.MemoryReflectionService memoryReflectionService;
+
+    @Autowired(required = false)
+    private GraphShadowRuntime graphShadowRuntime;
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
             RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
@@ -257,6 +262,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 LoopConfig loopConfig = new LoopConfig(
                         maxSteps, maxToolCalls, this.properties.getResearchTimeout(), researchOptions);
 
+                triggerGraphShadow(config, effectiveRequest, prompt);
+
                 Flux<AgentEvent> loopEvents = this.agentLoop.run(
                         loopConfig, config,
                         prompt.systemPrompt(), prompt.userPrompt(),
@@ -414,6 +421,28 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 Map.of("status", "CANCELLED", "totalDurationMs", totalDuration));
                     });
         }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    void setGraphShadowRuntime(GraphShadowRuntime graphShadowRuntime) {
+        this.graphShadowRuntime = graphShadowRuntime;
+    }
+
+    private void triggerGraphShadow(AgentRunConfig config, AgentRequest request, ModelPrompt prompt) {
+        if (this.graphShadowRuntime == null
+                || this.properties.getGraph() == null
+                || !this.properties.getGraph().isEnabled()
+                || this.properties.getGraph().getMode() != GraphRuntimeMode.SHADOW
+                || request == null
+                || !request.isChatMode()) {
+            return;
+        }
+        this.graphShadowRuntime.run(config, request, this.messageStore.listByThread(config.threadId()), prompt)
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnSuccess(result -> log.debug("Graph shadow completed. runId={}, threadId={}, nodes={}, durationMs={}",
+                        result.runId(), result.threadId(), result.visitedNodes(), result.durationMs()))
+                .doOnError(ex -> log.warn("Graph shadow failed without affecting legacy runtime. runId={}",
+                        config.runId(), ex))
+                .subscribe();
     }
 
     private List<AgentEvent> finishResearchDelivery(String lastType, RunRecord run, String threadId,

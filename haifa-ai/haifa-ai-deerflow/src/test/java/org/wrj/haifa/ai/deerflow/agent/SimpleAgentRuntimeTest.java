@@ -8,6 +8,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.config.GraphRuntimeMode;
+import org.wrj.haifa.ai.deerflow.graph.AgentGraphShadowResult;
+import org.wrj.haifa.ai.deerflow.graph.GraphShadowRuntime;
 import org.wrj.haifa.ai.deerflow.middleware.DynamicContextMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.TokenBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.ToolErrorHandlingMiddleware;
@@ -244,6 +247,40 @@ class SimpleAgentRuntimeTest {
     }
 
     @Test
+    void shadowGraphModeStillUsesLegacyChatRuntimeForVisibleEvents() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("test system");
+        properties.getGraph().setEnabled(true);
+        properties.getGraph().setMode(GraphRuntimeMode.SHADOW);
+
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>legacy answer</final_answer>"));
+        ToolRegistry tools = new ToolRegistry(List.of());
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore, toolExecutionStore,
+                modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
+        RecordingGraphShadowRuntime shadowRuntime = new RecordingGraphShadowRuntime();
+        runtime.setGraphShadowRuntime(shadowRuntime);
+
+        List<AgentEvent> events = runtime.stream(new AgentRequest("thread-shadow-runtime", "hello", null))
+                .collectList()
+                .block();
+
+        assertThat(shadowRuntime.callCount()).isEqualTo(1);
+        assertThat(events).extracting(AgentEvent::type)
+                .containsExactly(
+                        AgentEventType.RUN_STARTED,
+                        AgentEventType.MODEL_STARTED,
+                        AgentEventType.MODEL_DELTA,
+                        AgentEventType.MODEL_COMPLETED,
+                        AgentEventType.RUN_COMPLETED
+                );
+        assertThat(events).anySatisfy(event -> assertThat(event.content()).contains("legacy answer"));
+    }
+
+    @Test
     void resumesResearchOnSameThreadAfterClarification() {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setWorkspaceRoot(".");
@@ -364,6 +401,23 @@ class SimpleAgentRuntimeTest {
         @Override
         public ToolResult execute(ToolRequest request) {
             throw new IllegalStateException("boom");
+        }
+    }
+
+    private static final class RecordingGraphShadowRuntime extends GraphShadowRuntime {
+
+        private int callCount;
+
+        @Override
+        public Mono<AgentGraphShadowResult> run(AgentRunConfig config, AgentRequest request,
+                List<MessageRecord> threadHistory, ModelPrompt prompt) {
+            callCount++;
+            return Mono.just(new AgentGraphShadowResult(config.runId(), config.threadId(), List.of("shadow"),
+                    Map.of(), 1));
+        }
+
+        int callCount() {
+            return callCount;
         }
     }
 }
