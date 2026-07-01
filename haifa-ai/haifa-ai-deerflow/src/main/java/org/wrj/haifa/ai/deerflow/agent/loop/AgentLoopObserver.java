@@ -31,6 +31,15 @@ public interface AgentLoopObserver {
             AtomicInteger seq, int step, int totalToolCalls, List<String> history);
 
     /**
+     * Invoked before a final answer is accepted. Return a rejection to append
+     * a retry instruction to history and continue the loop.
+     */
+    default FinalAnswerDecision onFinalAnswerProposed(AgentRunConfig runConfig, String rawAnswer, List<AgentEvent> events,
+            AtomicInteger seq, int step, int totalToolCalls) {
+        return FinalAnswerDecision.accept(rawAnswer, Map.of());
+    }
+
+    /**
      * Invoked when the loop terminates with an accepted final answer.
      * Returns the finalized answer text along with any additional metadata.
      */

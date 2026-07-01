@@ -25,6 +25,11 @@ public interface TodoStore {
         saveTodos(threadId, null, todos);
     }
 
+    default boolean hasIncomplete(String threadId, String runId) {
+        return listTodos(threadId, runId).stream()
+                .anyMatch(todo -> !"completed".equalsIgnoreCase(todo.getStatus()));
+    }
+
     /**
      * Clears all todos associated with a thread/run ID.
      */

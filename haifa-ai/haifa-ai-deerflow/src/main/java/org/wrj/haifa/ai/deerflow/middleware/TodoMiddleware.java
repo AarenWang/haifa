@@ -32,10 +32,13 @@ public class TodoMiddleware implements AgentMiddleware {
                 String todoInstruction = """
                         
                         <todo_system>
-                        You have access to the `write_todos` tool to help you manage and track complex multi-step objectives.
-                        - Create a plan using `write_todos` for any complex work sessions (3+ steps).
-                        - Mark todos as completed IMMEDIATELY after finishing each step.
-                        - Keep exactly one task as `in_progress` at any time.
+                        Complex tasks must use `write_todos` to manage the plan.
+                        For work that needs 3+ steps, research, coding, verification, comparison, or report output:
+                        1. Call `write_todos` to create the plan before external tool work.
+                        2. Submit the full todo list on every `write_todos` call.
+                        3. Mark a todo completed immediately after finishing that step.
+                        4. Keep at most one todo as `in_progress`.
+                        5. Do not output a final answer while any todo is pending or in_progress.
                         </todo_system>
                         """;
                 String baseSystem = prompt.systemPrompt();
@@ -45,13 +48,12 @@ public class TodoMiddleware implements AgentMiddleware {
                 return new ModelPrompt(updatedSystem, prompt.userPrompt(), prompt.modelName());
             } else {
                 StringBuilder sb = new StringBuilder();
-                sb.append("\n<system_reminder>\n");
-                sb.append("Your todo list is still active. Current state:\n");
+                sb.append("\n<todo_state>\n");
                 for (TodoItem item : todos) {
                     sb.append("- [").append(item.getStatus()).append("] ").append(item.getContent()).append(" (id: ").append(item.getId()).append(")\n");
                 }
-                sb.append("Call `write_todos` to update task statuses as you progress.\n");
-                sb.append("</system_reminder>\n");
+                sb.append("Update this full list with `write_todos` as work progresses. Do not finish until all items are completed.\n");
+                sb.append("</todo_state>\n");
                 
                 String baseUser = prompt.userPrompt();
                 String updatedUser = (baseUser == null || baseUser.isBlank())

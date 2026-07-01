@@ -198,11 +198,11 @@ class UnifiedStreamRuntimeTest {
                 .collectList()
                 .block();
 
-        // Should contain TODO_INCOMPLETE when the model tried to finish early
+        // Should contain TODO_GATE_BLOCKED when the model tried to finish early
         assertThat(events).extracting(AgentEvent::type)
                 .contains(AgentEventType.RUN_STARTED,
                         AgentEventType.TOOL_COMPLETED,   // write_todos step 1
-                        AgentEventType.TODO_INCOMPLETE,  // quality gate intercept
+                        AgentEventType.TODO_GATE_BLOCKED, // todo gate intercept
                         AgentEventType.TOOL_COMPLETED,   // write_todos step 3
                         AgentEventType.MODEL_COMPLETED,  // final answer accepted
                         AgentEventType.RUN_COMPLETED);

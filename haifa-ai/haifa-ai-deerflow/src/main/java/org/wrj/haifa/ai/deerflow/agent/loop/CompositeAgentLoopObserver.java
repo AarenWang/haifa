@@ -51,6 +51,27 @@ public class CompositeAgentLoopObserver implements AgentLoopObserver {
     }
 
     @Override
+    public FinalAnswerDecision onFinalAnswerProposed(AgentRunConfig runConfig, String rawAnswer, List<AgentEvent> events,
+                                                     AtomicInteger seq, int step, int totalToolCalls) {
+        String answer = rawAnswer;
+        java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+        for (AgentLoopObserver observer : observers) {
+            FinalAnswerDecision decision = observer.onFinalAnswerProposed(runConfig, answer, events, seq, step, totalToolCalls);
+            if (decision == null) {
+                continue;
+            }
+            if (decision.metadata() != null) {
+                metadata.putAll(decision.metadata());
+            }
+            if (!decision.accepted()) {
+                return FinalAnswerDecision.reject(decision.retryInstruction(), metadata);
+            }
+            answer = decision.answer();
+        }
+        return FinalAnswerDecision.accept(answer, metadata);
+    }
+
+    @Override
     public FinalAnswerResult onFinalAnswerAccepted(AgentRunConfig runConfig, String rawAnswer, List<AgentEvent> events,
                                                    AtomicInteger seq, int step, int totalToolCalls) {
         String answer = rawAnswer;

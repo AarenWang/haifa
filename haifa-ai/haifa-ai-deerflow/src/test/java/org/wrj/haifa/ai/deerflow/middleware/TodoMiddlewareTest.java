@@ -69,7 +69,7 @@ class TodoMiddlewareTest {
         ModelPrompt processed = middleware.apply(context, chain).block();
 
         assertThat(processed.systemPrompt()).isEqualTo("Original system prompt");
-        assertThat(processed.userPrompt()).contains("system_reminder").contains("Do research").contains("Write report");
+        assertThat(processed.userPrompt()).contains("todo_state").contains("Do research").contains("Write report");
         assertThat(processed.userPrompt()).doesNotContain("Old run task");
     }
 }

@@ -36,54 +36,45 @@ public class DefaultAgentLoopObserver implements AgentLoopObserver {
     @Override
     public boolean shouldContinue(AgentRunConfig runConfig, String responseContent, List<AgentEvent> events,
             AtomicInteger seq, int step, int totalToolCalls, List<String> history) {
+        return false;
+    }
+
+    @Override
+    public FinalAnswerDecision onFinalAnswerProposed(AgentRunConfig runConfig, String rawAnswer, List<AgentEvent> events,
+            AtomicInteger seq, int step, int totalToolCalls) {
         if (todoStore == null) {
-            return false;
+            return FinalAnswerDecision.accept(rawAnswer, Map.of());
         }
+
         List<TodoItem> todos = todoStore.listTodos(runConfig.threadId(), runConfig.runId());
+        if (todos.isEmpty() && runConfig.mode() == org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH) {
+            return FinalAnswerDecision.reject(
+                    "Do not finish yet. This research run has no TodoList. Call `write_todos` first to create a complete plan, then continue the work.",
+                    Map.of("reason", "missing_todos", "todoCount", 0));
+        }
+
         List<TodoItem> incomplete = todos.stream()
                 .filter(t -> !"completed".equalsIgnoreCase(t.getStatus()))
                 .toList();
         if (!incomplete.isEmpty()) {
-            String instruction = "Do not finish yet. The following tasks are still incomplete: "
-                    + String.join("; ", incomplete.stream().map(TodoItem::getContent).toList())
-                    + ". Continue working through the todo list. Mark each task as completed immediately after finishing it.";
-            history.add("System: " + instruction);
-            events.add(AgentEvent.of(Integer.toString(seq.incrementAndGet()), runConfig.runId(), runConfig.threadId(),
-                    AgentEventType.TODO_INCOMPLETE, "Incomplete todos prevent final answer",
-                    Map.of("incompleteTodos", incomplete.stream().map(TodoItem::getId).toList())));
-            return true;
+            String instruction = "Do not finish yet. The following todos are still incomplete: "
+                    + String.join("; ", incomplete.stream()
+                            .map(todo -> "[" + todo.getStatus() + "] " + todo.getContent())
+                            .toList())
+                    + ". Continue working through the todo list and call `write_todos` after each status change.";
+            return FinalAnswerDecision.reject(instruction, Map.of(
+                    "reason", "incomplete_todos",
+                    "incompleteTodos", incomplete.stream().map(TodoItem::getId).toList(),
+                    "incompleteCount", incomplete.size()));
         }
-        return false;
+
+        return FinalAnswerDecision.accept(rawAnswer, Map.of("todoCount", todos.size()));
     }
 
     @Override
     public FinalAnswerResult onFinalAnswerAccepted(AgentRunConfig runConfig, String rawAnswer, List<AgentEvent> events,
             AtomicInteger seq, int step, int totalToolCalls) {
-        String finalAnswer = rawAnswer;
-        if (todoStore != null) {
-            List<TodoItem> todos = todoStore.listTodos(runConfig.threadId(), runConfig.runId());
-            List<TodoItem> incomplete = todos.stream()
-                    .filter(t -> !"completed".equalsIgnoreCase(t.getStatus()))
-                    .toList();
-            if (!incomplete.isEmpty()) {
-                List<String> incompleteDesc = incomplete.stream().map(TodoItem::getContent).toList();
-                events.add(AgentEvent.of(Integer.toString(seq.incrementAndGet()), runConfig.runId(), runConfig.threadId(),
-                        AgentEventType.TODO_INCOMPLETE, "Some tasks were left incomplete: " + String.join(", ", incompleteDesc),
-                        Map.of("incompleteTodos", incomplete.stream().map(TodoItem::getId).toList())));
-                
-                StringBuilder sb = new StringBuilder(rawAnswer);
-                sb.append("\n\n**Limitations**: The following planned tasks were not completed: ");
-                for (int i = 0; i < incomplete.size(); i++) {
-                    sb.append(incomplete.get(i).getContent());
-                    if (i < incomplete.size() - 1) {
-                        sb.append("; ");
-                    }
-                }
-                sb.append(".");
-                finalAnswer = sb.toString();
-            }
-        }
-        return new FinalAnswerResult(finalAnswer, Map.of());
+        return new FinalAnswerResult(rawAnswer, Map.of());
     }
 
     @Override

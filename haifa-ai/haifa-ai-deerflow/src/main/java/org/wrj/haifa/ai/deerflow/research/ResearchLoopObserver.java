@@ -12,6 +12,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver;
 import org.wrj.haifa.ai.deerflow.agent.loop.DefaultAgentLoopObserver;
+import org.wrj.haifa.ai.deerflow.agent.loop.FinalAnswerDecision;
 import org.wrj.haifa.ai.deerflow.agent.loop.FinalAnswerResult;
 import org.wrj.haifa.ai.deerflow.agent.loop.ToolCall;
 import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallResult;
@@ -180,6 +181,29 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
             return true;
         }
         return false;
+    }
+
+    @Override
+    public FinalAnswerDecision onFinalAnswerProposed(AgentRunConfig runConfig, String rawAnswer, List<AgentEvent> events,
+            AtomicInteger seq, int step, int totalToolCalls) {
+        FinalAnswerDecision todoDecision = super.onFinalAnswerProposed(runConfig, rawAnswer, events, seq, step, totalToolCalls);
+        if (!todoDecision.accepted()) {
+            return todoDecision;
+        }
+        if (runConfig.mode() != RunMode.RESEARCH) {
+            return todoDecision;
+        }
+
+        QualityGateResult readiness = evaluateResearchReadiness(runConfig);
+        if (shouldContinueResearch(runConfig, readiness)) {
+            return FinalAnswerDecision.reject(
+                    buildContinuationInstruction(runConfig, readiness),
+                    Map.of("legacyResearchGate", true,
+                            "qualityGaps", readiness == null ? List.of("missing_plan") : readiness.gaps(),
+                            "step", step,
+                            "totalToolCalls", totalToolCalls));
+        }
+        return todoDecision;
     }
 
     @Override

@@ -208,15 +208,16 @@ public class AgentLoop {
 
                 // Check for final answer
                 if (toolCallParser.hasFinalAnswer(modelResponse.content())) {
-                    boolean continueAfterFinalAnswer = observer.shouldContinue(
-                            runConfig, modelResponse.content(), events, seq, step + 1, totalToolCalls, history);
+                    String rawAnswer = toolCallParser.extractFinalAnswer(modelResponse.content());
+                    FinalAnswerDecision decision = observer.onFinalAnswerProposed(
+                            runConfig, rawAnswer, events, seq, step + 1, totalToolCalls);
                     emitter.flush();
-                    if (continueAfterFinalAnswer) {
+                    if (!decision.accepted()) {
+                        emitFinalAnswerRejected(seq, runConfig, emitter, history, decision, step + 1, totalToolCalls);
                         continue;
                     }
-                    String rawAnswer = toolCallParser.extractFinalAnswer(modelResponse.content());
                     FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
-                            runConfig, rawAnswer, events, seq, step + 1, totalToolCalls);
+                            runConfig, decision.answer(), events, seq, step + 1, totalToolCalls);
                     emitter.flush();
                     stopReason = "FINAL_ANSWER";
 
@@ -308,8 +309,15 @@ public class AgentLoop {
                         continue;
                     }
                     stopReason = runConfig.mode() == RunMode.CHAT ? "ASSISTANT_COMPLETED" : "NO_TOOL_CALLS";
-                    FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
+                    FinalAnswerDecision decision = observer.onFinalAnswerProposed(
                             runConfig, modelResponse.content(), events, seq, step + 1, totalToolCalls);
+                    emitter.flush();
+                    if (!decision.accepted()) {
+                        emitFinalAnswerRejected(seq, runConfig, emitter, history, decision, step + 1, totalToolCalls);
+                        continue;
+                    }
+                    FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
+                            runConfig, decision.answer(), events, seq, step + 1, totalToolCalls);
                     emitter.flush();
 
                     java.util.Map<String, Object> metadata = new java.util.HashMap<>();
@@ -434,6 +442,8 @@ public class AgentLoop {
                             log.warn("Failed to persist tool call result: {}", e.getMessage());
                         }
                     }
+
+                    emitTodoMutationEventIfNeeded(seq, runConfig, emitter, pending, rawToolResult);
 
                     // Add raw history entry for observer source/evidence processing
                     history.add("Tool result (" + toolCall.toolName() + "): " + rawToolResult.result());
@@ -606,6 +616,35 @@ public class AgentLoop {
             Map<String, Object> metadata) {
         return AgentEvent.of(Integer.toString(seq.incrementAndGet()), config.runId(), config.threadId(), type, content,
                 metadata);
+    }
+
+    private static void emitFinalAnswerRejected(AtomicInteger seq, AgentRunConfig runConfig, EventEmitter emitter,
+            List<String> history, FinalAnswerDecision decision, int step, int totalToolCalls) {
+        String retryInstruction = decision.retryInstruction() == null || decision.retryInstruction().isBlank()
+                ? "Do not finish yet. Continue the pending todo work."
+                : decision.retryInstruction();
+        history.add("System: " + retryInstruction);
+        Map<String, Object> metadata = new HashMap<>(decision.metadata());
+        metadata.put("step", step);
+        metadata.put("totalToolCalls", totalToolCalls);
+        metadata.put("stopReason", "TODO_GATE_BLOCKED");
+        emitter.emit(event(seq, runConfig, AgentEventType.TODO_GATE_BLOCKED, retryInstruction, metadata));
+    }
+
+    private static void emitTodoMutationEventIfNeeded(AtomicInteger seq, AgentRunConfig runConfig, EventEmitter emitter,
+            PendingToolExecution pending, ToolCallResult toolResult) {
+        if (!"write_todos".equals(pending.targetToolName()) || toolResult.status() != ToolCallResult.Status.SUCCESS) {
+            return;
+        }
+        if (Boolean.TRUE.equals(toolResult.metadata().get("error"))) {
+            return;
+        }
+        String operation = String.valueOf(toolResult.metadata().getOrDefault("todoOperation", "updated"));
+        AgentEventType type = "created".equals(operation) ? AgentEventType.TODO_CREATED : AgentEventType.TODO_UPDATED;
+        Map<String, Object> metadata = new HashMap<>(toolResult.metadata());
+        metadata.put("toolCallId", pending.toolCall().id());
+        metadata.put("toolName", pending.targetToolName());
+        emitter.emit(event(seq, runConfig, type, toolResult.result(), metadata));
     }
 
     private record PendingToolExecution(
