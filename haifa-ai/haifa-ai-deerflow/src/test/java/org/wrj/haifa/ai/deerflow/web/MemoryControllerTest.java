@@ -78,9 +78,51 @@ class MemoryControllerTest {
     }
 
     @Test
+    void testSavePersonaValidatesRequiredFields() {
+        // Empty Name
+        AgentPersonaRecord requestEmptyName = new AgentPersonaRecord(
+                null, "alice", "agent1", "", "Desc", "SoulRules", true, Instant.now(), Instant.now()
+        );
+        StepVerifier.create(controller.savePersona(requestEmptyName, exchange))
+                .expectErrorMatches(ex -> ex instanceof ResponseStatusException &&
+                        ((ResponseStatusException) ex).getStatusCode() == HttpStatus.BAD_REQUEST &&
+                        "Persona name cannot be empty".equals(((ResponseStatusException) ex).getReason()))
+                .verify();
+
+        // Empty Soul
+        AgentPersonaRecord requestEmptySoul = new AgentPersonaRecord(
+                null, "alice", "agent1", "Name", "Desc", "   ", true, Instant.now(), Instant.now()
+        );
+        StepVerifier.create(controller.savePersona(requestEmptySoul, exchange))
+                .expectErrorMatches(ex -> ex instanceof ResponseStatusException &&
+                        ((ResponseStatusException) ex).getStatusCode() == HttpStatus.BAD_REQUEST &&
+                        "Persona soul rules cannot be empty".equals(((ResponseStatusException) ex).getReason()))
+                .verify();
+    }
+
+    @Test
+    void testSavePersonaEnforcesSingleActiveLimit() {
+        AgentPersonaRecord existingActive = new AgentPersonaRecord(
+                "p1", "alice", "agent1", "PersonaName", "Desc", "SoulRules", true, Instant.now(), Instant.now()
+        );
+        when(personaStore.findByUserId("alice")).thenReturn(List.of(existingActive));
+
+        AgentPersonaRecord newActiveRequest = new AgentPersonaRecord(
+                "p2", "alice", "agent1", "NewName", "NewDesc", "NewSoul", true, Instant.now(), Instant.now()
+        );
+
+        // Trying to enable p2 should fail because p1 is already active for agent1
+        StepVerifier.create(controller.savePersona(newActiveRequest, exchange))
+                .expectErrorMatches(ex -> ex instanceof ResponseStatusException &&
+                        ((ResponseStatusException) ex).getStatusCode() == HttpStatus.BAD_REQUEST &&
+                        "Only one enabled Persona is allowed per context".equals(((ResponseStatusException) ex).getReason()))
+                .verify();
+    }
+
+    @Test
     void testApproveCandidateWithAddAction() {
         MemoryCandidateRecord candidate = new MemoryCandidateRecord(
-                "c1", "alice", "agent1", "preference", "PrefContent", "reflection", "t1", "r1", 0.9, "pending", "ADD", null, Instant.now(), Instant.now()
+                "c1", "alice", "agent1", "preference", "PrefContent", "reflection", "t1", "r1", 0.9, "pending", "ADD", null, "SomeErrorText", Instant.now(), Instant.now()
         );
         when(candidateStore.findById("c1")).thenReturn(Optional.of(candidate));
         when(factStore.save(any(MemoryFactRecord.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -90,6 +132,7 @@ class MemoryControllerTest {
                     assertThat(fact.userId()).isEqualTo("alice");
                     assertThat(fact.content()).isEqualTo("PrefContent");
                     assertThat(fact.status()).isEqualTo("active");
+                    assertThat(fact.sourceError()).isEqualTo("SomeErrorText");
                 })
                 .verifyComplete();
 
@@ -97,12 +140,36 @@ class MemoryControllerTest {
     }
 
     @Test
-    void testApproveCandidateWithUpdateAction() {
+    void testApproveCandidateDeduplicatesAdd() {
         MemoryCandidateRecord candidate = new MemoryCandidateRecord(
-                "c2", "alice", "agent1", "preference", "NewPrefContent", "reflection", "t1", "r1", 0.9, "pending", "UPDATE", "f1", Instant.now(), Instant.now()
+                "c1", "alice", "agent1", "preference", "PrefContent", "reflection", "t1", "r1", 0.9, "pending", "ADD", null, null, Instant.now(), Instant.now()
         );
         MemoryFactRecord existingFact = new MemoryFactRecord(
-                "f1", "alice", "agent1", "preference", "OldPrefContent", "manual", "t0", "r0", 0.8, "active", Instant.now(), Instant.now(), Instant.now()
+                "f1", "alice", "agent1", "preference", "PrefContent", "manual", "t0", "r0", 0.8, "active", null, Instant.now(), Instant.now(), Instant.now()
+        );
+
+        when(candidateStore.findById("c1")).thenReturn(Optional.of(candidate));
+        when(factStore.findByUserIdAndStatus("alice", "active")).thenReturn(List.of(existingFact));
+
+        StepVerifier.create(controller.approveCandidate("c1", exchange))
+                .assertNext(fact -> {
+                    // It should return the existing match f1 instead of creating/saving a new one
+                    assertThat(fact.id()).isEqualTo("f1");
+                    assertThat(fact.content()).isEqualTo("PrefContent");
+                })
+                .verifyComplete();
+
+        // Verify save was not called for new fact
+        verify(factStore, never()).save(argThat(f -> f.id() == null));
+    }
+
+    @Test
+    void testApproveCandidateWithUpdateAction() {
+        MemoryCandidateRecord candidate = new MemoryCandidateRecord(
+                "c2", "alice", "agent1", "preference", "NewPrefContent", "reflection", "t1", "r1", 0.9, "pending", "UPDATE", "f1", null, Instant.now(), Instant.now()
+        );
+        MemoryFactRecord existingFact = new MemoryFactRecord(
+                "f1", "alice", "agent1", "preference", "OldPrefContent", "manual", "t0", "r0", 0.8, "active", "PriorErrorText", Instant.now(), Instant.now(), Instant.now()
         );
 
         when(candidateStore.findById("c2")).thenReturn(Optional.of(candidate));
@@ -115,6 +182,7 @@ class MemoryControllerTest {
                     assertThat(fact.userId()).isEqualTo("alice");
                     assertThat(fact.content()).isEqualTo("NewPrefContent");
                     assertThat(fact.status()).isEqualTo("active");
+                    assertThat(fact.sourceError()).isEqualTo("PriorErrorText");
                 })
                 .verifyComplete();
 
@@ -124,10 +192,10 @@ class MemoryControllerTest {
     @Test
     void testApproveCandidateWithArchiveAction() {
         MemoryCandidateRecord candidate = new MemoryCandidateRecord(
-                "c3", "alice", "agent1", "preference", "PrefContent", "reflection", "t1", "r1", 0.9, "pending", "ARCHIVE", "f2", Instant.now(), Instant.now()
+                "c3", "alice", "agent1", "preference", "PrefContent", "reflection", "t1", "r1", 0.9, "pending", "ARCHIVE", "f2", null, Instant.now(), Instant.now()
         );
         MemoryFactRecord existingFact = new MemoryFactRecord(
-                "f2", "alice", "agent1", "preference", "OldPrefContent", "manual", "t0", "r0", 0.8, "active", Instant.now(), Instant.now(), Instant.now()
+                "f2", "alice", "agent1", "preference", "OldPrefContent", "manual", "t0", "r0", 0.8, "active", null, Instant.now(), Instant.now(), Instant.now()
         );
 
         when(candidateStore.findById("c3")).thenReturn(Optional.of(candidate));
@@ -148,7 +216,7 @@ class MemoryControllerTest {
     @Test
     void testApproveCandidateRejectsBobResourceForAlice() {
         MemoryCandidateRecord candidateOfBob = new MemoryCandidateRecord(
-                "c4", "bob", "agent1", "preference", "PrefContent", "reflection", "t1", "r1", 0.9, "pending", "ADD", null, Instant.now(), Instant.now()
+                "c4", "bob", "agent1", "preference", "PrefContent", "reflection", "t1", "r1", 0.9, "pending", "ADD", null, null, Instant.now(), Instant.now()
         );
         when(candidateStore.findById("c4")).thenReturn(Optional.of(candidateOfBob));
 

@@ -18,6 +18,8 @@ import reactor.core.publisher.Mono;
 @RequestMapping("/api/deerflow")
 public class MemoryController {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(MemoryController.class);
+
     private final AgentPersonaStore personaStore;
     private final MemoryFactStore factStore;
     private final MemoryCandidateStore candidateStore;
@@ -43,13 +45,32 @@ public class MemoryController {
     public Mono<AgentPersonaRecord> savePersona(@RequestBody AgentPersonaRecord request, ServerWebExchange exchange) {
         String userId = UserIdResolver.resolve(exchange);
         
+        if (request.name() == null || request.name().trim().isBlank()) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Persona name cannot be empty"));
+        }
+        if (request.soul() == null || request.soul().trim().isBlank()) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Persona soul rules cannot be empty"));
+        }
+        if (request.soul().length() > 10000) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Persona soul rules content too long (max 10000 characters)"));
+        }
+
+        if (request.enabled()) {
+            List<AgentPersonaRecord> existingPersonas = personaStore.findByUserId(userId);
+            boolean hasOtherEnabled = existingPersonas.stream()
+                    .anyMatch(p -> p.enabled() && !p.id().equals(request.id()) &&
+                                   (p.agentId() == null ? request.agentId() == null : p.agentId().equals(request.agentId())));
+            if (hasOtherEnabled) {
+                return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only one enabled Persona is allowed per context"));
+            }
+        }
+
         // If updating existing, verify ownership
         if (request.id() != null && !request.id().isBlank()) {
-            personaStore.findById(request.id()).ifPresent(existing -> {
-                if (!existing.userId().equals(userId)) {
-                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
-                }
-            });
+            var existingOpt = personaStore.findById(request.id());
+            if (existingOpt.isPresent() && !existingOpt.get().userId().equals(userId)) {
+                return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied"));
+            }
         }
 
         AgentPersonaRecord toSave = new AgentPersonaRecord(
@@ -91,6 +112,7 @@ public class MemoryController {
                 request.sourceRunId(),
                 request.confidence() != null ? request.confidence() : 1.0,
                 "active",
+                request.sourceError(),
                 Instant.now(),
                 Instant.now(),
                 Instant.now()
@@ -118,6 +140,7 @@ public class MemoryController {
                             request.sourceRunId() != null ? request.sourceRunId() : existing.sourceRunId(),
                             request.confidence() != null ? request.confidence() : existing.confidence(),
                             request.status() != null ? request.status() : existing.status(),
+                            request.sourceError() != null ? request.sourceError() : existing.sourceError(),
                             existing.createdAt(),
                             Instant.now(),
                             request.lastUsedAt() != null ? request.lastUsedAt() : existing.lastUsedAt()
@@ -146,6 +169,7 @@ public class MemoryController {
                             existing.sourceRunId(),
                             existing.confidence(),
                             "archived",
+                            existing.sourceError(),
                             existing.createdAt(),
                             Instant.now(),
                             existing.lastUsedAt()
@@ -187,6 +211,7 @@ public class MemoryController {
                             "approved",
                             candidate.action(),
                             candidate.targetFactId(),
+                            candidate.sourceError(),
                             candidate.createdAt(),
                             Instant.now()
                     );
@@ -214,6 +239,7 @@ public class MemoryController {
                                             existing.sourceRunId(),
                                             existing.confidence(),
                                             "archived",
+                                            existing.sourceError(),
                                             existing.createdAt(),
                                             Instant.now(),
                                             existing.lastUsedAt()
@@ -241,6 +267,7 @@ public class MemoryController {
                                             candidate.sourceRunId(),
                                             candidate.confidence(),
                                             "active",
+                                            candidate.sourceError() != null ? candidate.sourceError() : existing.sourceError(),
                                             existing.createdAt(),
                                             Instant.now(),
                                             existing.lastUsedAt()
@@ -249,6 +276,18 @@ public class MemoryController {
                                 });
                     } else {
                         // ADD
+                        // Deduplication: check if active fact with same content already exists
+                        List<MemoryFactRecord> activeFacts = factStore.findByUserIdAndStatus(userId, "active");
+                        String normalizedCandidateContent = candidate.content().trim().toLowerCase();
+                        MemoryFactRecord existingMatch = activeFacts.stream()
+                                .filter(fact -> fact.content() != null && fact.content().trim().toLowerCase().equals(normalizedCandidateContent))
+                                .findFirst()
+                                .orElse(null);
+                        if (existingMatch != null) {
+                            log.info("Deduplicated candidate: active fact with same content already exists (factId={})", existingMatch.id());
+                            return Mono.just(existingMatch);
+                        }
+
                         MemoryFactRecord newFact = new MemoryFactRecord(
                                 null,
                                 candidate.userId(),
@@ -260,6 +299,7 @@ public class MemoryController {
                                 candidate.sourceRunId(),
                                 candidate.confidence(),
                                 "active",
+                                candidate.sourceError(),
                                 Instant.now(),
                                 Instant.now(),
                                 Instant.now()
@@ -291,6 +331,7 @@ public class MemoryController {
                             "rejected",
                             candidate.action(),
                             candidate.targetFactId(),
+                            candidate.sourceError(),
                             candidate.createdAt(),
                             Instant.now()
                     );

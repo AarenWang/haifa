@@ -78,6 +78,7 @@ public class MemoryCandidateStore {
         e.setStatus(r.status());
         e.setAction(r.action());
         e.setTargetFactId(r.targetFactId());
+        e.setSourceError(r.sourceError());
         e.setCreatedAt(r.createdAt());
         e.setUpdatedAt(r.updatedAt());
         return e;
@@ -97,6 +98,7 @@ public class MemoryCandidateStore {
                 e.getStatus(),
                 e.getAction(),
                 e.getTargetFactId(),
+                e.getSourceError(),
                 e.getCreatedAt(),
                 e.getUpdatedAt()
         );

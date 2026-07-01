@@ -73,6 +73,7 @@ public class MemoryFactStore {
         e.setSourceRunId(r.sourceRunId());
         e.setConfidence(r.confidence());
         e.setStatus(r.status());
+        e.setSourceError(r.sourceError());
         e.setCreatedAt(r.createdAt());
         e.setUpdatedAt(r.updatedAt());
         e.setLastUsedAt(r.lastUsedAt());
@@ -91,6 +92,7 @@ public class MemoryFactStore {
                 e.getSourceRunId(),
                 e.getConfidence(),
                 e.getStatus(),
+                e.getSourceError(),
                 e.getCreatedAt(),
                 e.getUpdatedAt(),
                 e.getLastUsedAt()

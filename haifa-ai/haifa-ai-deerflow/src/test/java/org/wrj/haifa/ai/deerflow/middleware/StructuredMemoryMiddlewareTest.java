@@ -24,10 +24,10 @@ class StructuredMemoryMiddlewareTest {
     void testStructuredMemoryMiddlewareInjectsMemoryFacts() {
         MemoryFactStore factStore = Mockito.mock(MemoryFactStore.class);
         MemoryFactRecord fact1 = new MemoryFactRecord(
-                "f1", "default-user", null, "constraint", "Always use Java 25", "reflection", "t1", "r1", 0.9, "active", Instant.now(), Instant.now(), Instant.now()
+                "f1", "default-user", null, "constraint", "Always use Java 25", "reflection", "t1", "r1", 0.9, "active", null, Instant.now(), Instant.now(), Instant.now()
         );
         MemoryFactRecord fact2 = new MemoryFactRecord(
-                "f2", "default-user", null, "preference", "User prefers dark theme", "reflection", "t1", "r1", 0.8, "active", Instant.now(), Instant.now(), Instant.now()
+                "f2", "default-user", null, "preference", "User prefers dark theme", "reflection", "t1", "r1", 0.8, "active", null, Instant.now(), Instant.now(), Instant.now()
         );
         when(factStore.findByUserIdAndStatus(anyString(), anyString())).thenReturn(List.of(fact1, fact2));
 

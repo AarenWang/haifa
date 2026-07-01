@@ -56,6 +56,7 @@ class MemoryReflectionServiceTest {
                     "content": "User prefers Java 25",
                     "action": "ADD",
                     "targetFactId": null,
+                    "sourceError": "Old wrong instruction",
                     "confidence": 0.9
                   }
                 ]
@@ -82,6 +83,7 @@ class MemoryReflectionServiceTest {
         assertThat(saved.status()).isEqualTo("pending");
         assertThat(saved.action()).isEqualTo("ADD");
         assertThat(saved.targetFactId()).isNull();
+        assertThat(saved.sourceError()).isEqualTo("Old wrong instruction");
         assertThat(saved.sourceThreadId()).isEqualTo("thread-1");
         assertThat(saved.sourceRunId()).isEqualTo("run-1");
     }

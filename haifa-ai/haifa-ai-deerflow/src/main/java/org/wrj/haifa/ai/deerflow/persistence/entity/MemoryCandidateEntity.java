@@ -56,6 +56,9 @@ public class MemoryCandidateEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "source_error", length = 2000)
+    private String sourceError;
+
     public MemoryCandidateEntity() {
     }
 
@@ -169,5 +172,13 @@ public class MemoryCandidateEntity {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getSourceError() {
+        return sourceError;
+    }
+
+    public void setSourceError(String sourceError) {
+        this.sourceError = sourceError;
     }
 }

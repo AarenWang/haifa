@@ -13,6 +13,7 @@ public record MemoryFactRecord(
         String sourceRunId,
         Double confidence,
         String status,
+        String sourceError,
         Instant createdAt,
         Instant updatedAt,
         Instant lastUsedAt

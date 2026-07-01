@@ -53,6 +53,9 @@ public class MemoryFactEntity {
     @Column(name = "last_used_at")
     private Instant lastUsedAt;
 
+    @Column(name = "source_error", length = 2000)
+    private String sourceError;
+
     public MemoryFactEntity() {
     }
 
@@ -158,5 +161,13 @@ public class MemoryFactEntity {
 
     public void setLastUsedAt(Instant lastUsedAt) {
         this.lastUsedAt = lastUsedAt;
+    }
+
+    public String getSourceError() {
+        return sourceError;
+    }
+
+    public void setSourceError(String sourceError) {
+        this.sourceError = sourceError;
     }
 }

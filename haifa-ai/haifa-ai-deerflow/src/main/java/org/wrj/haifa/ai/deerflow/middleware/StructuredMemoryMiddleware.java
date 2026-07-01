@@ -78,6 +78,7 @@ public class StructuredMemoryMiddleware implements AgentMiddleware {
                         fact.sourceRunId(),
                         fact.confidence(),
                         fact.status(),
+                        fact.sourceError(),
                         fact.createdAt(),
                         Instant.now(), // updatedAt
                         Instant.now()  // lastUsedAt

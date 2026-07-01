@@ -15,6 +15,7 @@ public record MemoryCandidateRecord(
         String status,
         String action,
         String targetFactId,
+        String sourceError,
         Instant createdAt,
         Instant updatedAt
 ) {
