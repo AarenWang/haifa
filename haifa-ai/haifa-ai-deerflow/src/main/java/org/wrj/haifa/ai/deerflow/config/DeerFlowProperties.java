@@ -26,6 +26,7 @@ public class DeerFlowProperties {
     private boolean strReplaceEnabled = true;
     private boolean bashEnabled = false;
     private Sandbox sandbox = new Sandbox();
+    private Graph graph = new Graph();
     private long maxUploadBytes = 10_485_760;
     private int maxConvertedChars = 60_000;
     private String allowedUploadExtensions = "txt,md,json,csv,log,xml,yml,yaml,properties";
@@ -190,6 +191,48 @@ public class DeerFlowProperties {
 
         public void setDeniedPatterns(String deniedPatterns) {
             this.deniedPatterns = deniedPatterns;
+        }
+    }
+
+    public static class Graph {
+        private boolean enabled = false;
+        private GraphRuntimeMode mode = GraphRuntimeMode.OFF;
+        private Checkpoint checkpoint = new Checkpoint();
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public GraphRuntimeMode getMode() {
+            return mode;
+        }
+
+        public void setMode(GraphRuntimeMode mode) {
+            this.mode = mode == null ? GraphRuntimeMode.OFF : mode;
+        }
+
+        public Checkpoint getCheckpoint() {
+            return checkpoint;
+        }
+
+        public void setCheckpoint(Checkpoint checkpoint) {
+            this.checkpoint = checkpoint == null ? new Checkpoint() : checkpoint;
+        }
+    }
+
+    public static class Checkpoint {
+        private boolean enabled = false;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
         }
     }
 
@@ -545,6 +588,14 @@ public class DeerFlowProperties {
 
     public void setSandbox(Sandbox sandbox) {
         this.sandbox = sandbox;
+    }
+
+    public Graph getGraph() {
+        return graph;
+    }
+
+    public void setGraph(Graph graph) {
+        this.graph = graph == null ? new Graph() : graph;
     }
 
     // Subagent configuration
