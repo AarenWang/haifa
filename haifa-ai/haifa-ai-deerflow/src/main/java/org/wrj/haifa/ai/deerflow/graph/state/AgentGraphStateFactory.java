@@ -5,12 +5,15 @@ import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
 
+import org.springframework.stereotype.Component;
+
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+@Component
 public class AgentGraphStateFactory {
 
     public static final int DEFAULT_MESSAGE_WINDOW_LIMIT = 20;
@@ -54,6 +57,7 @@ public class AgentGraphStateFactory {
         state.put(AgentGraphStateKeys.PENDING_TOOL_CALLS, List.of());
         state.put(AgentGraphStateKeys.TODOS, Map.of());
         state.put(AgentGraphStateKeys.RESEARCH_PLAN_REF, Map.of());
+        state.put("researchOptions", config.researchOptions());
         state.put(AgentGraphStateKeys.RESEARCH_PHASE, "");
         state.put(AgentGraphStateKeys.SUBAGENTS, Map.of());
         state.put(AgentGraphStateKeys.CLARIFICATION, Map.of());
