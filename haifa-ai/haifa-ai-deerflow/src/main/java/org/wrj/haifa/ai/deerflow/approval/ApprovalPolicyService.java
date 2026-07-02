@@ -98,9 +98,9 @@ public class ApprovalPolicyService {
             }
         }
 
-        // 4. Always approvals lookup (within current session for now; user-level persistence requires Phase 3)
+        // 4. Always approvals lookup (persistent/global user allowlist)
         if (properties.getApproval().isAllowAlwaysApproval()) {
-            List<ApprovalRequestRecord> alwaysApprovals = approvalStore.findByThreadId(runConfig.threadId());
+            List<ApprovalRequestRecord> alwaysApprovals = approvalStore.findAlwaysApprovals();
             for (ApprovalRequestRecord record : alwaysApprovals) {
                 boolean isValidAlwaysApproval = (record.status() == ApprovalStatus.APPROVED || record.status() == ApprovalStatus.EXECUTED)
                         && record.decisionType() == ApprovalDecisionType.APPROVE_ALWAYS
@@ -108,7 +108,7 @@ public class ApprovalPolicyService {
                         && argsHash.equals(record.argsHash());
                 
                 if (isValidAlwaysApproval) {
-                    return new ApprovalPolicyDecision(ApprovalPolicyDecisionType.ALLOW, record.riskLevel(), "Always approved action matched", riskKey, record.preview(), Map.of());
+                    return new ApprovalPolicyDecision(ApprovalPolicyDecisionType.ALLOW, record.riskLevel(), "Always approved action matched globally", riskKey, record.preview(), Map.of());
                 }
             }
         }

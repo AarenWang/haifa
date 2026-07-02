@@ -5,9 +5,15 @@ interface HeaderProps {
   backendStatus: 'connected' | 'disconnected' | 'unknown';
   runStatus: AppStatus;
   onOpenMemorySettings: () => void;
+  hasPendingClarification?: boolean;
 }
 
-export default function Header({ backendStatus, runStatus, onOpenMemorySettings }: HeaderProps) {
+export default function Header({
+  backendStatus,
+  runStatus,
+  onOpenMemorySettings,
+  hasPendingClarification,
+}: HeaderProps) {
   const backendPill = (() => {
     if (backendStatus === 'connected') {
       return (
@@ -40,7 +46,7 @@ export default function Header({ backendStatus, runStatus, onOpenMemorySettings 
       completed: 'Completed',
       failed: 'Failed',
       stopped: 'Stopped',
-      suspended: 'Waiting for approval',
+      suspended: hasPendingClarification ? 'Waiting for clarification' : 'Waiting for approval',
     };
     return (
       <span className={`status-pill ${runStatus}`}>

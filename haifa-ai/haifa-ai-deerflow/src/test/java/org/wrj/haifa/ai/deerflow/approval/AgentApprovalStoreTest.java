@@ -92,4 +92,21 @@ class AgentApprovalStoreTest {
         assertThat(expired).isPresent();
         assertThat(expired.get().status()).isEqualTo(ApprovalStatus.EXPIRED);
     }
+
+    @Test
+    void testFindAlwaysApprovals() {
+        ApprovalCreateRequest request = new ApprovalCreateRequest(
+                "run-1", "thread-1", "call-1", "run_script", "{\"script\":\"echo\"}",
+                "hash-123", "risk-key", RiskLevel.MEDIUM, "reason", "", "preview", Map.of()
+        );
+
+        ApprovalRequestRecord record = store.create(request);
+        ApprovalDecisionRequest decisionReq = new ApprovalDecisionRequest(ApprovalDecisionType.APPROVE_ALWAYS, "ok always");
+        store.decide(record.approvalId(), decisionReq, "user");
+
+        var alwaysList = store.findAlwaysApprovals();
+        assertThat(alwaysList).hasSize(1);
+        assertThat(alwaysList.get(0).decisionType()).isEqualTo(ApprovalDecisionType.APPROVE_ALWAYS);
+        assertThat(alwaysList.get(0).comment()).isEqualTo("ok always");
+    }
 }

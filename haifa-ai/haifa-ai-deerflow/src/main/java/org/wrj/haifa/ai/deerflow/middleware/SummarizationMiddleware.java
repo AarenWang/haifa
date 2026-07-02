@@ -62,9 +62,6 @@ public class SummarizationMiddleware implements AgentMiddleware {
     @Override
     public Mono<ModelPrompt> apply(AgentRuntimeContext context, MiddlewareChain next) {
         DeerFlowProperties.Summarization config = properties.getSummarization();
-        if (!config.isEnabled()) {
-            return next.next(context);
-        }
 
         String threadId = context.config().threadId();
         String runId = context.config().runId();
@@ -101,7 +98,7 @@ public class SummarizationMiddleware implements AgentMiddleware {
 
         long totalChars = activeMessages.stream().mapToLong(m -> m.content() == null ? 0 : m.content().length()).sum();
 
-        if (activeMessages.size() > messageCountThreshold || totalChars > charLengthThreshold) {
+        if (config.isEnabled() && (activeMessages.size() > messageCountThreshold || totalChars > charLengthThreshold)) {
             log.info("Thread history exceeds threshold (count={}, chars={}). Compressing...", activeMessages.size(), totalChars);
 
             // Separate messages to summarize from messages to keep

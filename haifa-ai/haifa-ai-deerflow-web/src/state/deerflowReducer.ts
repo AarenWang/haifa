@@ -30,7 +30,7 @@ function getPhaseFromEvent(type: string): AppPhase {
     case 'ARTIFACT_CREATED':
       return 'answering';
     case 'RUN_SUSPENDED':
-      return 'suspended';
+      return 'idle';
     default:
       return 'idle';
   }
@@ -152,6 +152,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         status: 'failed',
+        phase: 'idle',
         error: action.payload,
       };
     case 'SET_RESEARCH_SOURCES':
@@ -203,6 +204,11 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         events: action.payload,
+      };
+    case 'SET_STATUS':
+      return {
+        ...state,
+        status: action.payload,
       };
     case 'SET_LAST_REQUEST':
       return {

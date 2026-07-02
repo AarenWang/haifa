@@ -134,4 +134,30 @@ class ApprovalPolicyServiceTest {
 
         assertThat(decision.type()).isEqualTo(ApprovalPolicyDecisionType.ALLOW);
     }
+
+    @Test
+    void testAlwaysApprovalAllowsGlobally() {
+        properties.getApproval().setAllowAlwaysApproval(true);
+        String args = "{\"language\":\"python\",\"code\":\"print('cpu')\"}";
+        String riskKey = approvalPolicyService.generateRiskKey("run_script", args);
+        ApprovalRequestRecord approved = new ApprovalRequestRecord(
+                "app-1", "run-1", "thread-1", "call-1", "run_script", args,
+                approvalPolicyService.hashArgs("run_script", args),
+                riskKey, RiskLevel.HIGH, "reason", "", "preview",
+                Map.of(), ApprovalStatus.APPROVED, java.time.Instant.now(), java.time.Instant.now().plusSeconds(120),
+                "user", java.time.Instant.now(), ApprovalDecisionType.APPROVE_ALWAYS, "ok"
+        );
+        when(approvalStore.findAlwaysApprovals()).thenReturn(List.of(approved));
+
+        ModelToolCall toolCall = new ModelToolCall("call-2", "run_script", args);
+        AgentTool tool = mock(AgentTool.class);
+        when(tool.name()).thenReturn("run_script");
+        AgentRunConfig runConfig = mock(AgentRunConfig.class);
+        when(runConfig.threadId()).thenReturn("thread-different");
+
+        ApprovalPolicyDecision decision = approvalPolicyService.evaluate(toolCall, tool, runConfig);
+
+        assertThat(decision.type()).isEqualTo(ApprovalPolicyDecisionType.ALLOW);
+        assertThat(decision.reason()).contains("Always approved action matched globally");
+    }
 }

@@ -279,6 +279,50 @@ export async function readDeerFlowResumeStream(
   handlers.onDone();
 }
 
+interface ClarificationRecord {
+  clarificationId: string;
+  runId: string;
+  threadId: string;
+  question: string;
+  answer?: string;
+  status: string;
+}
+
+export async function answerClarification(params: {
+  clarificationId?: string;
+  threadId?: string;
+  answer: string;
+}): Promise<ClarificationRecord> {
+  let clarificationId = params.clarificationId;
+  if (!clarificationId && params.threadId) {
+    const pendingRes = await fetchWithUser(
+      `/api/deerflow/clarifications/pending?threadId=${encodeURIComponent(params.threadId)}`
+    );
+    if (!pendingRes.ok) {
+      const text = await pendingRes.text().catch(() => 'Unknown error');
+      throw new Error(`HTTP ${pendingRes.status}: ${text}`);
+    }
+    const pending = await pendingRes.json() as ClarificationRecord;
+    clarificationId = pending.clarificationId;
+  }
+  if (!clarificationId) {
+    throw new Error('No pending clarification id found');
+  }
+
+  const res = await fetchWithUser(`/api/deerflow/clarifications/${encodeURIComponent(clarificationId)}/answer`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ answer: params.answer }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error');
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  return await res.json() as ClarificationRecord;
+}
+
 export async function fetchRunStatus(runId: string): Promise<unknown> {
   const res = await fetchWithUser(`/api/deerflow/runs/${runId}`);
   if (!res.ok) {

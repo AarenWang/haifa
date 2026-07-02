@@ -3,6 +3,8 @@ import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw, RefreshCw } from
 import type { AppPhase, AppStatus, MessageRecord } from '../types';
 import { renderMarkdown } from '../utils/markdownRenderer';
 import ApprovalCard from './ApprovalCard';
+import ClarificationCard from './ClarificationCard';
+import type { PendingClarification } from './TaskComposer';
 
 interface AnswerWorkspaceProps {
   phase: AppPhase;
@@ -13,6 +15,8 @@ interface AnswerWorkspaceProps {
   onReRun?: () => void;
   onRefreshMessage?: (messageId: string) => void;
   onResumeRun?: (runId: string) => void;
+  pendingClarification?: PendingClarification;
+  onAnswerClarification?: (answer: string, clarification: PendingClarification) => void;
 }
 
 const phaseLabels: Record<AppPhase, string> = {
@@ -34,10 +38,24 @@ export default function AnswerWorkspace({
   onReRun,
   onRefreshMessage,
   onResumeRun,
+  pendingClarification,
+  onAnswerClarification,
 }: AnswerWorkspaceProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+
+  // Find the last clarification message's ID if there is a pending clarification
+  const pendingClarificationMsgId = (() => {
+    if (!pendingClarification) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === 'SYSTEM' && m.metadata?.clarificationPending) {
+        return m.messageId;
+      }
+    }
+    return null;
+  })();
 
   const visibleMessages = messages.filter((message) =>
     message.role === 'USER'
@@ -136,6 +154,16 @@ export default function AnswerWorkspace({
                       runId={message.runId}
                       onResumeRun={onResumeRun}
                     />
+                  ) : message.role === 'SYSTEM' && message.metadata?.clarificationPending ? (
+                    <ClarificationCard
+                      message={message}
+                      isPending={pendingClarificationMsgId === message.messageId}
+                      onAnswer={(answer) => {
+                        if (pendingClarification && onAnswerClarification) {
+                          onAnswerClarification(answer, pendingClarification);
+                        }
+                      }}
+                    />
                   ) : (
                     <div
                       className="conversation-message-content"
@@ -182,6 +210,15 @@ export default function AnswerWorkspace({
             <div className="stopped-card">
               <Loader2 size={16} style={{ opacity: 0.7 }} />
               Stopped locally
+            </div>
+          )}
+
+          {status === 'suspended' && (
+            <div className="stopped-card">
+              <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+              {pendingClarification
+                ? 'Execution suspended. Waiting for user clarification...'
+                : 'Execution suspended. Waiting for human approval...'}
             </div>
           )}
 

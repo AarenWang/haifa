@@ -25,7 +25,7 @@ public class AskClarificationTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Ask the user a clarifying question when information is missing or requirements are ambiguous. Arguments: {\"question\": \"Is X correct?\", \"clarification_type\": \"missing_info\", \"context\": \"Need this to start coding\"}";
+        return "Ask the user a clarifying question when information is missing or requirements are ambiguous. Arguments: {\"question\": \"Is X correct?\", \"clarification_type\": \"missing_info\", \"context\": \"Need this to start coding\", \"options\": [\"Option 1\", \"Option 2\"]}";
     }
 
     @Override
@@ -54,12 +54,20 @@ public class AskClarificationTool implements AgentTool {
             String type = node.has("clarification_type") ? node.get("clarification_type").asText() : "missing_info";
             String context = node.has("context") ? node.get("context").asText() : "";
 
+            java.util.List<String> options = new java.util.ArrayList<>();
+            if (node.has("options") && node.get("options").isArray()) {
+                for (JsonNode optionNode : node.get("options")) {
+                    options.add(optionNode.asText());
+                }
+            }
+
             ClarificationRecord record = clarificationStore.create(
                     request.threadId(),
                     request.runId(),
                     question,
                     type,
-                    context
+                    context,
+                    options
             );
 
             return ToolResult.of(
@@ -69,7 +77,8 @@ public class AskClarificationTool implements AgentTool {
                             "clarificationRequired", true,
                             "clarificationId", record.clarificationId(),
                             "question", question,
-                            "clarificationType", type
+                            "clarificationType", type,
+                            "options", options
                     )
             );
         } catch (Exception e) {

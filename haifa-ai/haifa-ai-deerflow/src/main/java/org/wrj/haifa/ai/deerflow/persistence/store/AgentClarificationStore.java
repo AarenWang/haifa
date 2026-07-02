@@ -13,7 +13,7 @@ public class AgentClarificationStore implements ClarificationStore {
     private final Map<String, ClarificationRecord> store = new ConcurrentHashMap<>();
 
     @Override
-    public ClarificationRecord create(String threadId, String runId, String question, String type, String context) {
+    public ClarificationRecord create(String threadId, String runId, String question, String type, String context, java.util.List<String> options) {
         findPending(threadId).ifPresent(c -> cancel(c.clarificationId()));
 
         String clarificationId = UUID.randomUUID().toString();
@@ -27,7 +27,8 @@ public class AgentClarificationStore implements ClarificationStore {
                 ClarificationStatus.PENDING,
                 null,
                 Instant.now(),
-                null
+                null,
+                options
         );
         store.put(clarificationId, record);
         return record;
@@ -90,7 +91,8 @@ public class AgentClarificationStore implements ClarificationStore {
                 ClarificationStatus.ANSWERED,
                 answer,
                 old.createdAt(),
-                Instant.now()
+                Instant.now(),
+                old.options()
         );
         store.put(clarificationId, updated);
         return updated;
@@ -110,7 +112,8 @@ public class AgentClarificationStore implements ClarificationStore {
                     ClarificationStatus.CANCELLED,
                     old.answer(),
                     old.createdAt(),
-                    Instant.now()
+                    Instant.now(),
+                    old.options()
             );
             store.put(clarificationId, updated);
         }

@@ -15,4 +15,5 @@ public interface ApprovalStore {
     ApprovalRequestRecord markExecuted(String approvalId);
     ApprovalRequestRecord markInvalidated(String approvalId, String reason);
     void cancelByRunId(String runId);
+    List<ApprovalRequestRecord> findAlwaysApprovals();
 }

@@ -11,6 +11,79 @@ function escapeHtml(raw: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function splitMarkdownTableRow(row: string): string[] {
+  let normalized = row.trim();
+  if (normalized.startsWith('|')) {
+    normalized = normalized.slice(1);
+  }
+  if (normalized.endsWith('|')) {
+    normalized = normalized.slice(0, -1);
+  }
+  return normalized.split('|').map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparator(row: string): boolean {
+  const cells = splitMarkdownTableRow(row);
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function tableAlignClass(separatorCell: string): string {
+  const trimmed = separatorCell.trim();
+  if (trimmed.startsWith(':') && trimmed.endsWith(':')) {
+    return ' align-center';
+  }
+  if (trimmed.endsWith(':')) {
+    return ' align-right';
+  }
+  return '';
+}
+
+function renderMarkdownTables(input: string): string {
+  const lines = input.split('\n');
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const headerLine = lines[i];
+    const separatorLine = lines[i + 1];
+    if (
+      headerLine?.includes('|')
+      && separatorLine?.includes('|')
+      && isMarkdownTableSeparator(separatorLine)
+    ) {
+      const headers = splitMarkdownTableRow(headerLine);
+      const separators = splitMarkdownTableRow(separatorLine);
+      const rows: string[][] = [];
+      i += 2;
+
+      while (i < lines.length && lines[i].trim().includes('|') && lines[i].trim() !== '') {
+        rows.push(splitMarkdownTableRow(lines[i]));
+        i += 1;
+      }
+      i -= 1;
+
+      const thead = headers
+        .map((cell, index) => `<th class="${tableAlignClass(separators[index] || '')}">${cell}</th>`)
+        .join('');
+      const tbody = rows
+        .map((row) => {
+          const cells = headers
+            .map((_header, index) => `<td class="${tableAlignClass(separators[index] || '')}">${row[index] || ''}</td>`)
+            .join('');
+          return `<tr>${cells}</tr>`;
+        })
+        .join('');
+
+      out.push(
+        `<div class="markdown-table-wrapper"><table class="markdown-table"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></div>`
+      );
+    } else {
+      out.push(headerLine);
+    }
+  }
+
+  return out.join('\n');
+}
+
 function renderMarkdownProtected(text: string): string {
   let html = escapeHtml(text);
   const codeBlocks: string[] = [];
@@ -48,6 +121,8 @@ function renderMarkdownProtected(text: string): string {
   html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
   html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  html = renderMarkdownTables(html);
 
   html = html.replace(
     /(?:\n(?:-|\*)\s+(.+))+/g,

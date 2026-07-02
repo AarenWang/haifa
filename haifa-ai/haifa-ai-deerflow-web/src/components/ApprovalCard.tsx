@@ -91,10 +91,15 @@ export default function ApprovalCard({ approvalId, runId, onResumeRun }: Approva
         if (prev === null) return null;
         if (prev <= 1) {
           clearInterval(timer);
-          // Trigger run resume so backend auto-expires and emits APPROVAL_EXPIRED
-          if (onResumeRun) {
-            onResumeRun(runId);
-          }
+          // refresh record to get EXPIRED status
+          fetch(`/api/deerflow/approvals/${approvalId}`, { headers: { 'X-User-Id': 'default-user' } })
+            .then(res => res.json())
+            .then(data => {
+              setRecord(data);
+              if (onResumeRun) {
+                onResumeRun(runId);
+              }
+            });
           return 0;
         }
         return prev - 1;

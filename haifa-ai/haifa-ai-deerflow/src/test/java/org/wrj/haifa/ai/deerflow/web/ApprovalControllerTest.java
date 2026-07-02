@@ -41,6 +41,18 @@ class ApprovalControllerTest {
                         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
     }
 
+    private org.springframework.web.server.ServerWebExchange mockExchange(String userId) {
+        org.springframework.web.server.ServerWebExchange exchange = mock(org.springframework.web.server.ServerWebExchange.class);
+        org.springframework.http.server.reactive.ServerHttpRequest request = mock(org.springframework.http.server.reactive.ServerHttpRequest.class);
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        if (userId != null) {
+            headers.add("X-User-Id", userId);
+        }
+        when(exchange.getRequest()).thenReturn(request);
+        when(request.getHeaders()).thenReturn(headers);
+        return exchange;
+    }
+
     @Test
     void testApproveAlwaysForbiddenWhenDisabled() {
         DeerFlowProperties.Approval approvalProps = new DeerFlowProperties.Approval();
@@ -48,8 +60,9 @@ class ApprovalControllerTest {
         properties.setApproval(approvalProps);
 
         ApprovalDecisionRequest req = new ApprovalDecisionRequest(ApprovalDecisionType.APPROVE_ALWAYS, "comment");
+        org.springframework.web.server.ServerWebExchange exchange = mockExchange("user");
 
-        assertThatThrownBy(() -> controller.decide("app-1", req, "user").block())
+        assertThatThrownBy(() -> controller.decide("app-1", req, exchange).block())
                 .isInstanceOfSatisfying(ResponseStatusException.class, ex ->
                         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
     }
@@ -68,8 +81,9 @@ class ApprovalControllerTest {
                 "user", java.time.Instant.now(), ApprovalDecisionType.APPROVE_ALWAYS, "comment"
         );
         when(approvalStore.decide(eq("app-1"), eq(req), eq("user"))).thenReturn(record);
+        org.springframework.web.server.ServerWebExchange exchange = mockExchange("user");
 
-        ApprovalRequestRecord response = controller.decide("app-1", req, "user").block();
+        ApprovalRequestRecord response = controller.decide("app-1", req, exchange).block();
         assertThat(response).isNotNull();
         assertThat(response.decisionType()).isEqualTo(ApprovalDecisionType.APPROVE_ALWAYS);
     }
@@ -84,8 +98,9 @@ class ApprovalControllerTest {
                 "alice", java.time.Instant.now(), ApprovalDecisionType.APPROVE_ONCE, "comment"
         );
         when(approvalStore.decide(eq("app-1"), eq(req), eq("alice"))).thenReturn(record);
+        org.springframework.web.server.ServerWebExchange exchange = mockExchange("alice");
 
-        ApprovalRequestRecord response = controller.decide("app-1", req, "alice").block();
+        ApprovalRequestRecord response = controller.decide("app-1", req, exchange).block();
 
         assertThat(response).isNotNull();
         assertThat(response.resolvedBy()).isEqualTo("alice");

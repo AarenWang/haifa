@@ -48,8 +48,10 @@ public class ApprovalController {
     }
 
     @PostMapping("/{approvalId}/decision")
-    public Mono<ApprovalRequestRecord> decide(@PathVariable String approvalId, @RequestBody ApprovalDecisionRequest request,
-            @RequestHeader(value = "X-User-Id", required = false) String userId) {
+    public Mono<ApprovalRequestRecord> decide(
+            @PathVariable String approvalId,
+            @RequestBody ApprovalDecisionRequest request,
+            org.springframework.web.server.ServerWebExchange exchange) {
         if (request == null || request.decision() == null) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Decision type is required"));
         }
@@ -58,9 +60,9 @@ public class ApprovalController {
                 return Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "APPROVE_ALWAYS decision type is disabled by configuration."));
             }
         }
+        String resolvedUser = UserIdResolver.resolve(exchange);
         try {
-            String resolvedBy = userId != null ? userId : "anonymous";
-            return Mono.just(approvalStore.decide(approvalId, request, resolvedBy));
+            return Mono.just(approvalStore.decide(approvalId, request, resolvedUser));
         } catch (IllegalArgumentException ex) {
             return Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage()));
         } catch (IllegalStateException ex) {

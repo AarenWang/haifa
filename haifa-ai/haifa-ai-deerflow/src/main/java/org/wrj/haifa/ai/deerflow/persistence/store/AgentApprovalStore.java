@@ -327,4 +327,13 @@ public class AgentApprovalStore implements ApprovalStore {
     public void clearAll() {
         store.clear();
     }
+
+    @Override
+    public List<ApprovalRequestRecord> findAlwaysApprovals() {
+        return store.values().stream()
+                .map(this::checkTimeout)
+                .filter(c -> c.decisionType() == ApprovalDecisionType.APPROVE_ALWAYS && 
+                             (c.status() == ApprovalStatus.APPROVED || c.status() == ApprovalStatus.EXECUTED))
+                .toList();
+    }
 }

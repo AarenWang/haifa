@@ -1,6 +1,7 @@
 package org.wrj.haifa.ai.deerflow.persistence.store;
 
 import java.time.Instant;
+import java.util.List;
 
 public record ClarificationRecord(
         String clarificationId,
@@ -12,5 +13,6 @@ public record ClarificationRecord(
         ClarificationStatus status,
         String answer,
         Instant createdAt,
-        Instant answeredAt
+        Instant answeredAt,
+        List<String> options
 ) {}

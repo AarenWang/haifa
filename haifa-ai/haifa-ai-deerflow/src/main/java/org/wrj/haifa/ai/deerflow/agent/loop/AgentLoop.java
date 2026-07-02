@@ -652,6 +652,7 @@ public class AgentLoop {
                         String question = (String) rawToolResult.metadata().get("question");
                         String clarificationId = (String) rawToolResult.metadata().get("clarificationId");
                         String type = (String) rawToolResult.metadata().getOrDefault("clarificationType", "missing_info");
+                        Object options = rawToolResult.metadata().getOrDefault("options", java.util.List.of());
 
                         emitter.emit(event(seq, runConfig, AgentEventType.CLARIFICATION_REQUIRED,
                                 "Clarification required: " + question,
@@ -659,14 +660,16 @@ public class AgentLoop {
                                         "clarificationType", type,
                                         "clarificationId", clarificationId,
                                         "resumeThreadId", runConfig.threadId(),
-                                        "resumeRunId", runConfig.runId())));
+                                        "resumeRunId", runConfig.runId(),
+                                        "options", options)));
                         emitter.emit(event(seq, runConfig, AgentEventType.RUN_SUSPENDED,
                                 "Run suspended waiting for user clarification.",
                                 Map.of("question", question,
                                         "clarificationType", type,
                                         "clarificationId", clarificationId,
                                         "resumeThreadId", runConfig.threadId(),
-                                        "resumeRunId", runConfig.runId())));
+                                        "resumeRunId", runConfig.runId(),
+                                        "options", options)));
                         if (agentLoopRunStore != null) {
                             agentLoopRunStore.markSuspended(runConfig.runId(), "CLARIFICATION_REQUIRED");
                         }

@@ -1,7 +1,8 @@
 import { useReducer, useRef, useCallback, useEffect, useState } from 'react';
-import type { RunRequest, UploadRecord } from './types';
+import type { RunRequest, UploadRecord, AppStatus } from './types';
 import { deerflowReducer, initialState } from './state/deerflowReducer';
 import {
+  answerClarification,
   readDeerFlowStream,
   fetchArtifacts,
   checkBackendHealth,
@@ -19,7 +20,7 @@ import {
   readDeerFlowResumeStream,
 } from './api/deerflowClient';
 import Header from './components/Header';
-import TaskComposer from './components/TaskComposer';
+import TaskComposer, { type PendingClarification } from './components/TaskComposer';
 import AnswerWorkspace from './components/AnswerWorkspace';
 import ActivityTrace from './components/ActivityTrace';
 import ArtifactPanel from './components/ArtifactPanel';
@@ -34,6 +35,12 @@ function App() {
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'unknown'>('unknown');
   const [externalMessage, setExternalMessage] = useState<string | undefined>(undefined);
   const [isMemoryOpen, setIsMemoryOpen] = useState<boolean>(false);
+
+  const pendingClarification = getPendingClarification(
+    state.messages,
+    state.status,
+    state.threadId
+  );
 
   useEffect(() => {
     const threadId = getThreadIdFromUrl();
@@ -145,6 +152,25 @@ function App() {
         const latestRun = sorted[0];
         const events = await fetchRunEvents(latestRun.runId);
         dispatch({ type: 'SET_EVENTS', payload: events });
+
+        // Sync latest run status to state
+        let appStatus: AppStatus = 'idle';
+        if (latestRun) {
+          const runStatus = latestRun.status.toUpperCase();
+          if (runStatus === 'RUNNING' || runStatus === 'PENDING') {
+            appStatus = 'running';
+          } else if (runStatus === 'SUSPENDED') {
+            appStatus = 'suspended';
+          } else if (runStatus === 'COMPLETED') {
+            appStatus = 'completed';
+          } else if (runStatus === 'FAILED') {
+            appStatus = 'failed';
+          } else if (runStatus === 'CANCELLED') {
+            appStatus = 'stopped';
+          }
+        }
+        dispatch({ type: 'SET_STATUS', payload: appStatus });
+
         if (latestRun.mode === 'research') {
           refreshResearchData(latestRun.runId);
         } else {
@@ -153,12 +179,14 @@ function App() {
         refreshArtifactData(threadId, latestRun.runId);
       } else {
         dispatch({ type: 'SET_EVENTS', payload: [] });
+        dispatch({ type: 'SET_STATUS', payload: 'idle' });
         refreshResearchData();
         refreshArtifactData(threadId);
       }
     } catch (err) {
       console.error('Failed to load historical events', err);
       dispatch({ type: 'SET_EVENTS', payload: [] });
+      dispatch({ type: 'SET_STATUS', payload: 'idle' });
       refreshResearchData();
       refreshArtifactData(threadId);
     }
@@ -287,6 +315,7 @@ function App() {
             }
           },
           onError: (err) => {
+            abortRef.current = null;
             dispatch({ type: 'SET_ERROR', payload: err });
           },
           onDone: () => {
@@ -366,6 +395,7 @@ function App() {
           }
         },
         onError: (err) => {
+          abortRef.current = null;
           dispatch({ type: 'SET_ERROR', payload: err });
         },
         onDone: () => {
@@ -383,6 +413,19 @@ function App() {
       abortRef.current = null;
     });
   }, [refreshArtifactData, refreshMessages, refreshResearchData, refreshThreads, state.lastRequest, state.threadId]);
+
+  const handleAnswerClarification = useCallback((answer: string, clarification: PendingClarification) => {
+    answerClarification({
+      clarificationId: clarification.clarificationId,
+      threadId: clarification.threadId || state.threadId,
+      answer,
+    }).then((record) => {
+      handleResumeRun(record.runId || clarification.runId);
+    }).catch((err) => {
+      setExternalMessage(answer);
+      dispatch({ type: 'SET_ERROR', payload: (err as Error).message });
+    });
+  }, [handleResumeRun, state.threadId]);
 
   const handleStop = useCallback(() => {
     if (abortRef.current) {
@@ -485,6 +528,7 @@ function App() {
         backendStatus={backendStatus}
         runStatus={state.status}
         onOpenMemorySettings={() => setIsMemoryOpen(true)}
+        hasPendingClarification={!!pendingClarification}
       />
       <div className="main">
         <WorkspaceSidebar
@@ -510,6 +554,8 @@ function App() {
             onReRun={state.status === 'failed' ? handleReRun : undefined}
             onRefreshMessage={handleRefreshMessage}
             onResumeRun={handleResumeRun}
+            pendingClarification={pendingClarification}
+            onAnswerClarification={handleAnswerClarification}
           />
           {state.lastRequest?.mode === 'research' && (
             <ResearchPlanView
@@ -535,12 +581,16 @@ function App() {
           )}
           <TaskComposer
             onRun={handleRun}
+            onAnswerClarification={handleAnswerClarification}
             onStop={handleStop}
             isRunning={state.status === 'running'}
+            status={state.status}
             lastRequest={state.lastRequest}
             selectedUploadCount={state.selectedUploadIds.length}
             externalMessage={externalMessage}
             onClearExternalMessage={() => setExternalMessage(undefined)}
+            pendingClarification={pendingClarification}
+            activeThreadId={state.threadId}
           />
         </div>
         <ActivityTrace events={state.events} />
@@ -548,6 +598,33 @@ function App() {
       {isMemoryOpen && <MemorySettingsModal onClose={() => setIsMemoryOpen(false)} />}
     </div>
   );
+}
+
+function getPendingClarification(
+  messages: Array<{ role: string; runId: string; metadata?: Record<string, unknown> }>,
+  status: string,
+  threadId?: string
+): PendingClarification | undefined {
+  if (status !== 'suspended' && status !== 'failed') {
+    return undefined;
+  }
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role !== 'SYSTEM' || !message.metadata?.clarificationPending) {
+      continue;
+    }
+    const metadata = message.metadata;
+    const clarificationId = typeof metadata.clarificationId === 'string' && metadata.clarificationId
+      ? metadata.clarificationId
+      : undefined;
+    return {
+      clarificationId,
+      runId: typeof metadata.resumeRunId === 'string' ? metadata.resumeRunId : message.runId,
+      threadId: typeof metadata.resumeThreadId === 'string' ? metadata.resumeThreadId : threadId,
+      question: typeof metadata.question === 'string' ? metadata.question : undefined,
+    };
+  }
+  return undefined;
 }
 
 function getThreadIdFromUrl() {

@@ -166,6 +166,40 @@ class Phase7Tests {
     }
 
     @Test
+    void summarizationMiddlewareInjectsThreadHistoryEvenWhenCompressionDisabled() {
+        MessageStore messageStore = mock(MessageStore.class);
+        AgentModelClient modelClient = prompt -> Mono.error(new AssertionError("summary model should not be called"));
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.getSummarization().setEnabled(false);
+
+        List<MessageRecord> messages = List.of(
+                new MessageRecord("msg-1", "t1", "r-prev", MessageRole.USER,
+                        "三家公司是阿里云、百度智能云、火山引擎。", Collections.emptyMap(), java.time.Instant.now()),
+                new MessageRecord("msg-2", "t1", "r-prev", MessageRole.ASSISTANT,
+                        "好的，我会按这三家公司比较主流模型版本。", Collections.emptyMap(), java.time.Instant.now()),
+                new MessageRecord("msg-3", "t1", "r-current", MessageRole.USER,
+                        "模型版本是当前这三家公司的几个主流模型版本，按token计费，中国内地部署，不需要附加需求。", Collections.emptyMap(), java.time.Instant.now())
+        );
+        when(messageStore.listByThread("t1")).thenReturn(messages);
+
+        SummarizationMiddleware middleware = new SummarizationMiddleware(messageStore, modelClient, properties);
+        AgentRunConfig config = new AgentRunConfig("t1", "r-current", "model-1", false, false, 5, java.nio.file.Paths.get("."), RunMode.RESEARCH, null, java.util.Collections.emptyMap());
+        AgentRequest request = new AgentRequest("t1", "模型版本是当前这三家公司的几个主流模型版本，按token计费，中国内地部署，不需要附加需求。", "model-1");
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, Collections.emptyList(), properties);
+        ModelPrompt initialPrompt = new ModelPrompt("System prompt", "User request:\n" + request.message(), "model-1");
+        MiddlewareChain chain = new MiddlewareChain(List.of((ctx, next) -> Mono.just(initialPrompt)));
+
+        ModelPrompt resultPrompt = middleware.apply(context, chain).block();
+
+        assertThat(resultPrompt).isNotNull();
+        assertThat(resultPrompt.userPrompt())
+                .contains("<conversation_history>")
+                .contains("三家公司是阿里云、百度智能云、火山引擎")
+                .contains("好的，我会按这三家公司比较主流模型版本")
+                .contains("User request:");
+    }
+
+    @Test
     void threadMemoryMiddlewareInjectsPreviousStateIntoSystemPrompt() {
         ResearchPlanStore planStore = mock(ResearchPlanStore.class);
         SourceRegistry sourceRegistry = mock(SourceRegistry.class);

@@ -367,10 +367,20 @@ public class SimpleAgentRuntime implements AgentRuntime {
                             }
                             if (evt.type() == AgentEventType.CLARIFICATION_REQUIRED) {
                                 String question = (String) evt.metadata().get("question");
+                                String clarificationId = (String) evt.metadata().get("clarificationId");
+                                Object options = evt.metadata().get("options");
+                                java.util.Map<String, Object> meta = new java.util.HashMap<>();
+                                meta.put("clarificationPending", true);
+                                meta.put("question", question);
+                                meta.put("clarificationId", clarificationId != null ? clarificationId : "");
+                                meta.put("resumeThreadId", threadId);
+                                meta.put("resumeRunId", run.runId());
+                                if (options != null) {
+                                    meta.put("options", options);
+                                }
                                 this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM,
                                         "Clarification needed: " + question,
-                                        Map.of("clarificationPending", true, "question", question,
-                                                "resumeThreadId", threadId, "resumeRunId", run.runId()));
+                                        meta);
                                 this.runManager.markSuspended(run.runId());
                                 this.threadManager.touch(threadId);
                             }

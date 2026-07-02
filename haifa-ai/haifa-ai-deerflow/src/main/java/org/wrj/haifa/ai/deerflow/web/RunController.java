@@ -112,6 +112,20 @@ public class RunController {
             @Valid @RequestBody RunCreateRequest request,
             org.springframework.web.server.ServerWebExchange exchange) {
         String userId = UserIdResolver.resolve(exchange);
+
+        if (request.threadId() != null && !request.threadId().isBlank() && this.clarificationStore != null) {
+            Optional<ClarificationRecord> pendingClarification = this.clarificationStore.findPending(request.threadId());
+            if (pendingClarification.isPresent()) {
+                if (request.message() == null || request.message().isBlank()) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Clarification answer is required");
+                }
+                ClarificationRecord answered = this.clarificationStore.answer(
+                        pendingClarification.get().clarificationId(),
+                        request.message());
+                return resumeAnsweredRun(answered.runId(), userId);
+            }
+        }
+
         Flux<ServerSentEvent<AgentEvent>> body = this.agentRuntime.stream(new AgentRequest(
                 request.threadId(), request.message(), request.model(), request.uploadedFileIds(),
                 request.mode(), request.researchOptions(), userId))
@@ -120,6 +134,9 @@ public class RunController {
                         .event(event.type().name().toLowerCase())
                         .build());
         return org.springframework.http.ResponseEntity.ok()
+                .header("Content-Type", "text/event-stream")
+                .header("Cache-Control", "no-cache")
+                .header("Connection", "keep-alive")
                 .header("X-Accel-Buffering", "no")
                 .body(body);
     }
@@ -129,7 +146,12 @@ public class RunController {
             @PathVariable String runId,
             org.springframework.web.server.ServerWebExchange exchange) {
         String userId = UserIdResolver.resolve(exchange);
+        return resumeAnsweredRun(runId, userId);
+    }
 
+    private org.springframework.http.ResponseEntity<Flux<ServerSentEvent<AgentEvent>>> resumeAnsweredRun(
+            String runId,
+            String userId) {
         org.wrj.haifa.ai.deerflow.run.RunRecord originalRun = this.runManager.find(runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
 
@@ -191,6 +213,9 @@ public class RunController {
                         .build());
 
         return org.springframework.http.ResponseEntity.ok()
+                .header("Content-Type", "text/event-stream")
+                .header("Cache-Control", "no-cache")
+                .header("Connection", "keep-alive")
                 .header("X-Accel-Buffering", "no")
                 .body(body);
     }
