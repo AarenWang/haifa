@@ -3,6 +3,7 @@ import {
   Trash2,
   MessageSquare,
   Plus,
+  X,
 } from 'lucide-react';
 import type { UploadRecord, ThreadRecord } from '../types';
 import UploadPanel from './UploadPanel';
@@ -19,6 +20,8 @@ interface WorkspaceSidebarProps {
   onToggleUploadSelection: (fileId: string) => void;
   onRemoveUpload: (fileId: string) => void;
   onClearUploads: () => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 export default function WorkspaceSidebar({
@@ -33,9 +36,11 @@ export default function WorkspaceSidebar({
   onToggleUploadSelection,
   onRemoveUpload,
   onClearUploads,
+  isOpen = false,
+  onClose,
 }: WorkspaceSidebarProps) {
   return (
-    <aside className="workspace-sidebar">
+    <aside className={`workspace-sidebar ${isOpen ? 'open' : ''}`}>
       <div className="sidebar-section">
         <div className="sidebar-backend-status">
           <Server size={14} />
@@ -45,6 +50,16 @@ export default function WorkspaceSidebar({
             title={backendStatus}
           />
           <span className="backend-label">{backendStatus}</span>
+          {onClose && (
+            <button
+              type="button"
+              className="sidebar-close-btn"
+              onClick={onClose}
+              title="Close sidebar"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       </div>
 

@@ -59,7 +59,7 @@ export default function AnswerWorkspace({
 
   const visibleMessages = messages.filter((message) =>
     message.role === 'USER'
-    || message.role === 'ASSISTANT'
+    || (message.role === 'ASSISTANT' && message.content.trim() !== '')
     || (message.role === 'SYSTEM' && (Boolean(message.metadata?.clarificationPending) || Boolean(message.metadata?.approvalPending)))
   );
   const hasAssistantContent = visibleMessages.some((message) => message.role === 'ASSISTANT');

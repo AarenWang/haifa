@@ -1,13 +1,15 @@
-import { Activity, Inbox } from 'lucide-react';
+import { Activity, Inbox, X } from 'lucide-react';
 import { useRef, useEffect, useState } from 'react';
 import type { DeerFlowEvent } from '../types';
 import EventCard from './EventCard';
 
 interface ActivityTraceProps {
   events: DeerFlowEvent[];
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export default function ActivityTrace({ events }: ActivityTraceProps) {
+export default function ActivityTrace({ events, isOpen = false, onClose }: ActivityTraceProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const prevLength = useRef(events.length);
@@ -28,13 +30,25 @@ export default function ActivityTrace({ events }: ActivityTraceProps) {
   };
 
   return (
-    <aside className="trace-panel">
+    <aside className={`trace-panel ${isOpen ? 'open' : ''}`}>
       <div className="trace-header">
         <div className="trace-header-title">
           <Activity size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} />
           Activity Trace
         </div>
-        <span className="trace-count">{events.length}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="trace-count">{events.length}</span>
+          {onClose && (
+            <button
+              type="button"
+              className="trace-close-btn"
+              onClick={onClose}
+              title="Close trace"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
       </div>
       <div
         className="trace-list"

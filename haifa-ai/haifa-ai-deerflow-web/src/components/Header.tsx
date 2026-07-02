@@ -1,4 +1,4 @@
-import { Zap, Brain } from 'lucide-react';
+import { Zap, Brain, Menu, Activity } from 'lucide-react';
 import type { AppStatus } from '../types';
 
 interface HeaderProps {
@@ -6,6 +6,10 @@ interface HeaderProps {
   runStatus: AppStatus;
   onOpenMemorySettings: () => void;
   hasPendingClarification?: boolean;
+  isSidebarOpen?: boolean;
+  isTraceOpen?: boolean;
+  onToggleSidebar?: () => void;
+  onToggleTrace?: () => void;
 }
 
 export default function Header({
@@ -13,6 +17,10 @@ export default function Header({
   runStatus,
   onOpenMemorySettings,
   hasPendingClarification,
+  isSidebarOpen = false,
+  isTraceOpen = false,
+  onToggleSidebar,
+  onToggleTrace,
 }: HeaderProps) {
   const backendPill = (() => {
     if (backendStatus === 'connected') {
@@ -59,8 +67,17 @@ export default function Header({
   return (
     <header className="header">
       <div className="header-brand">
+        <button
+          type="button"
+          className={`header-toggle-btn sidebar-toggle ${isSidebarOpen ? 'active' : ''}`}
+          onClick={onToggleSidebar}
+          title="Toggle Sidebar"
+          style={{ marginRight: '8px' }}
+        >
+          <Menu size={18} />
+        </button>
         <Zap size={22} className="logo-icon" />
-        DeerFlow Studio
+        <span>DeerFlow Studio</span>
       </div>
       <div className="header-meta">
         {backendPill}
@@ -84,6 +101,15 @@ export default function Header({
         >
           <Brain size={14} style={{ color: 'var(--accent-blue)' }} />
           <span>Memory & Persona</span>
+        </button>
+        <button
+          type="button"
+          className={`header-toggle-btn trace-toggle ${isTraceOpen ? 'active' : ''}`}
+          onClick={onToggleTrace}
+          title="Toggle Activity Trace"
+          style={{ marginLeft: '4px' }}
+        >
+          <Activity size={18} />
         </button>
       </div>
     </header>

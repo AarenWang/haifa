@@ -35,6 +35,8 @@ function App() {
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'unknown'>('unknown');
   const [externalMessage, setExternalMessage] = useState<string | undefined>(undefined);
   const [isMemoryOpen, setIsMemoryOpen] = useState<boolean>(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const [isTraceOpen, setIsTraceOpen] = useState<boolean>(false);
 
   const pendingClarification = getPendingClarification(
     state.messages,
@@ -506,6 +508,7 @@ function App() {
     dispatch({ type: 'SET_ARTIFACTS', payload: [] });
     dispatch({ type: 'SET_THREAD_ID', payload: threadId });
     dispatch({ type: 'SET_LAST_REQUEST' });
+    setIsSidebarOpen(false);
   }, []);
 
   const handleNewThread = useCallback(() => {
@@ -521,6 +524,7 @@ function App() {
     dispatch({ type: 'SET_ARTIFACTS', payload: [] });
     dispatch({ type: 'SET_THREAD_ID' });
     dispatch({ type: 'SET_LAST_REQUEST' });
+    setIsSidebarOpen(false);
   }, []);
 
   return (
@@ -530,8 +534,12 @@ function App() {
         runStatus={state.status}
         onOpenMemorySettings={() => setIsMemoryOpen(true)}
         hasPendingClarification={!!pendingClarification}
+        isSidebarOpen={isSidebarOpen}
+        isTraceOpen={isTraceOpen}
+        onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+        onToggleTrace={() => setIsTraceOpen(!isTraceOpen)}
       />
-      <div className="main">
+      <div className={`main ${state.threadId ? 'thread-selected' : 'thread-empty'}`}>
         <WorkspaceSidebar
           backendStatus={backendStatus}
           uploads={state.uploads}
@@ -544,6 +552,8 @@ function App() {
           onToggleUploadSelection={handleToggleUploadSelection}
           onRemoveUpload={handleRemoveUpload}
           onClearUploads={handleClearUploads}
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
         />
         <div className="workspace">
           <AnswerWorkspace
@@ -594,8 +604,22 @@ function App() {
             activeThreadId={state.threadId}
           />
         </div>
-        <ActivityTrace events={state.events} />
+        <ActivityTrace
+          events={state.events}
+          isOpen={isTraceOpen}
+          onClose={() => setIsTraceOpen(false)}
+        />
       </div>
+      {/* Sidebar/Drawer Backdrop */}
+      {(isSidebarOpen || isTraceOpen) && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => {
+            setIsSidebarOpen(false);
+            setIsTraceOpen(false);
+          }}
+        />
+      )}
       {isMemoryOpen && <MemorySettingsModal onClose={() => setIsMemoryOpen(false)} />}
     </div>
   );
