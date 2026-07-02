@@ -1,6 +1,6 @@
 # haifa-ai-deerflow
 
-`haifa-ai-deerflow` 是一个用 Java / Spring Boot 实现的 DeerFlow 风格 Agent Runtime。它把对话线程、SSE 流式运行、工具调用、深度研究、文件上传、产物生成、长期记忆、Persona、技能系统和 SQLite 持久化放在一个可本地运行的 WebFlux 服务中，作为 `deer-flow` Python 参考实现的 Java 探索版本。
+`haifa-ai-deerflow` 是一个用 Java / Spring Boot 实现的 DeerFlow 风格 Agent Runtime。它把对话线程、SSE 流式运行、工具调用、深度研究、文件上传、产物生成、长期记忆、Persona、技能系统、SQLite 持久化、**Graph 静态流图运行时** 以及 **人机协同（HITL）审核门禁** 放在一个可本地运行的 WebFlux 服务中，作为 `deer-flow` Python 参考实现的 Java 探索版本。
 
 当前模块不是完整生产版 DeerFlow，而是一个可运行、可测试、可继续演进的 Java Agent 后端。
 
@@ -16,10 +16,13 @@
 | Tool Search | 支持 deferred tool catalog，按需暴露工具描述，减少一次性 prompt 膨胀 |
 | Web Provider | 已注册 Aliyun IQS、DuckDuckGo Search、Jina Fetch 等 provider；配置决定实际 search/fetch 后端 |
 | Sandbox Bash | 可选启用 `bash` 工具，支持 local-restricted 与 docker backend，带命令 allowlist、路径拒绝、超时、输出截断和审计 metadata |
+| Guarded Run Script | 支持 `run_script` 工具，在受控沙箱中执行轻量脚本（Python/PowerShell/NodeJS/Bash），支持 Windows (PowerShell) / Unix (pwsh/bash) 跨平台切换 |
+| Human-in-the-Loop | 支持人工审批干预门禁，针对高风险操作（如脚本/命令运行）自动拦截并生成审批候选，可通过 REST API 审核决定并恢复 Run |
+| Graph Core 运行时 | 集成 `spring-ai-alibaba-graph-core`，支持 `SHADOW`（影子图流）、`ACTIVE_CHAT`（接管对话）和 `ACTIVE_RESEARCH`（接管研究）三种图引擎运行模式 |
 | 文件上传 | 支持文本类文件上传、转换、查看、删除，并可在 run 中引用 uploaded file ids |
 | 产物管理 | 研究报告 / 工具输出等产物写入 outputs，可通过 artifact API 预览和下载 |
-| 记忆与 Persona | 支持 Persona 配置、memory facts、候选记忆审批 / 拒绝、运行后反思候选生成 |
-| 持久化与审计 | 使用 SQLite + JPA 保存 threads、messages、runs、events、tool calls、tool executions、model steps、uploads、memory 等 |
+| 记忆与 Persona | 支持 Persona 配置、memory facts、候选记忆审批 / 拒绝、运行后反思候选生成，并排除瞬态噪音 |
+| 持久化与审计 | 使用 SQLite + JPA 保存 threads、messages、runs、events, memory, approvals 和 graph checkpoints |
 
 ## 架构图
 
@@ -28,20 +31,30 @@ flowchart TB
     Client["Client / Frontend / curl"]
     API["Spring WebFlux REST + SSE<br/>/api/deerflow/**"]
     Runtime["SimpleAgentRuntime<br/>Run + Thread orchestration"]
+    RuntimeRoute{"GraphRuntimeMode"}
     Chain["MiddlewareChain<br/>persona / memory / skills / budget / research context"]
     Loop["AgentLoop<br/>model step + tool call loop"]
+    ApprovalGate["ApprovalPolicyService<br/>HITL Approval Gate"]
+    GraphRuntime["GraphChatRuntime / GraphResearchRuntime<br/>Graph Execution Adapter"]
+    AlibabaGraph["Spring AI Alibaba Graph Core<br/>Static stateful graph flows"]
     Model["AgentModelClient<br/>Spring AI / fallback"]
     Registry["ToolRegistry + ToolPolicyService"]
-    Tools["AgentTool implementations<br/>web_search, web_fetch, read_file, write_file,<br/>grep, glob, task, bash, write_todos, present_files"]
+    Tools["AgentTool implementations<br/>web_search, web_fetch, read_file, write_file,<br/>grep, glob, task, bash, run_script, write_todos"]
     Sandbox["SandboxRunner<br/>local-restricted / docker"]
     Providers["External Providers<br/>Aliyun IQS, DuckDuckGo, Jina"]
-    Stores["SQLite Stores<br/>runs, threads, messages, events,<br/>tool calls, model steps, uploads, memory"]
+    Stores["SQLite Stores<br/>runs, threads, messages, events, memory,<br/>approvals, graph checkpoints"]
     Artifacts["Filesystem<br/>uploads / outputs / skills / sandbox workdirs"]
 
     Client --> API
     API --> Runtime
-    Runtime --> Chain
+    Runtime --> RuntimeRoute
+    RuntimeRoute -->|STANDARD| Chain
+    RuntimeRoute -->|SHADOW / ACTIVE_*| GraphRuntime
+    GraphRuntime --> AlibabaGraph
+    AlibabaGraph --> Model
+    AlibabaGraph --> Registry
     Chain --> Loop
+    Loop --> ApprovalGate
     Loop --> Model
     Loop --> Registry
     Registry --> Tools
@@ -60,9 +73,11 @@ flowchart TB
 | 包 | 职责 |
 | --- | --- |
 | `agent` / `agent.loop` | Run 编排、Agent 事件、模型循环、工具调用解析、研究交付 |
+| `graph` / `graph.state` | Graph 运行适配器、状态 Schema 转换与 SQLite Checkpoint 索引保存 |
+| `approval` | 人工审批策略、候选状态存储、决策审批控制器与干预拦截门禁 |
 | `middleware` | prompt 上下文控制、技能激活、工具输出预算、subagent 限流、Persona / memory 等 |
-| `tool` | Agent 工具接口与内置工具实现 |
-| `sandbox` | bash 命令执行后端、命令策略、Docker 路径映射 |
+| `tool` | Agent 工具接口与内置工具（包括 run_script）实现 |
+| `sandbox` | bash 命令行与脚本受控执行后端、命令安全拦截策略、Docker 挂载目录映射 |
 | `provider` | Web search / fetch provider SPI 与注册表 |
 | `research` / `research.plan` | source/evidence、研究计划、进度、质量门禁 |
 | `skill` | Markdown skill 加载、解析、渲染、slash resolver |
@@ -74,7 +89,7 @@ flowchart TB
 
 ## 环境要求
 
-- JDK 21+（本模块 Maven compiler 使用 release 21）
+- JDK 21+（本模块 Maven compiler 使用 release 21，运行建议使用 JDK 21/25）
 - Maven 3.x
 - SQLite JDBC 由 Maven 依赖自动提供
 - 可选：Docker，用于 `sandbox.backend=docker`
@@ -118,7 +133,7 @@ $env:HAIFA_DEERFLOW_MODEL = "gpt-4o-mini"
 mvn -Popenai -pl haifa-ai/haifa-ai-deerflow -am spring-boot:run
 ```
 
-`openai` profile 会引入 `spring-ai-starter-model-openai`。如果没有配置真实模型，运行时会使用项目内的 fallback 行为，适合本地接口调试和测试。
+`openai` profile 会引入 `spring-ai-starter-model-openai`。如果没有配置真实模型，运行时会使用项目内的 fallback 行为，适合本地接口调试 and 测试。
 
 ### 配置 Web Search / Fetch
 
@@ -195,27 +210,44 @@ mvn -pl haifa-ai/haifa-ai-deerflow -am spring-boot:run
 #### 安全与隔离说明
 
 - **默认关闭**：`run_script` 默认处于关闭状态（`run-script-enabled=false`），必须显式配置才能开启。
-- **允许的脚本语言**：可在配置项 `haifa.ai.deerflow.sandbox.allowed-script-languages`（默认值为 `python,powershell`）中精细化管控允许的解释器。
+- **允许的脚本语言**：可在配置项 `haifa.ai.deerflow.sandbox.allowed-script-languages`（默认值为 `python,powershell,bash`）中精细化管控允许的解释器。
+- **跨平台适配**：
+  - 在 Windows 上，若请求 `powershell` 脚本，执行调用原生的 `powershell`。
+  - 在 macOS / Linux 上，若请求 `powershell` 脚本，会自动路由到 `pwsh` 执行；并提供 `bash` 支持。
 - **沙箱隔离等级**：
   - `local` backend 在宿主机执行子进程，元数据将标记 `strongIsolation=false`，属于受限隔离。
   - `docker` backend 在独立容器中运行（将只读挂载 `/workspace` 并挂载可写的 `/sandbox` 工作区目录），具备强隔离性。
 - **路径及越界保护**：脚本文件会自动生成于临时工作区 `outputs/sandbox/{runId}/scripts/{randomId}/` 下，执行过程中的工作目录被锁定为该工作区，禁止访问工作区外部的绝对路径。
 - **命令审计**：所有生成的脚本命令都会流经 `CommandPolicy` 策略服务进行合法性与安全性校验，执行过程审计保存在 `tool_executions` 审计日志中。
 
-#### CPU/内存观测示例
+### 配置 Graph 静态流图运行时
 
-通过发送包含本地观测关键字（如 `CPU`、`内存` 等）的请求，系统将自动激活 `local-script-execution` 技能并执行相关脚本：
+`haifa-ai-deerflow` 集成了 `spring-ai-alibaba-graph-core` 作为流图（Graph）引擎。通过更改 `haifa.ai.deerflow.graph.mode` 参数，可以将 Agent 的运行委托给 Graph 运行时：
 
-```bash
-curl -N -X POST http://localhost:8095/api/deerflow/runs/stream \
-  -H "Content-Type: application/json" \
-  -d '{"message":"查看下当前电脑 CPU 和内存使用率","mode":"CHAT"}'
+```powershell
+# 运行模式: STANDARD (默认，标准 Agent 循环) / SHADOW (影子图流) / ACTIVE_CHAT (接管对话) / ACTIVE_RESEARCH (接管研究)
+$env:HAIFA_AI_DEERFLOW_GRAPH_MODE = "ACTIVE_CHAT"
+mvn -pl haifa-ai/haifa-ai-deerflow -am spring-boot:run
 ```
 
-常见问题排查：
-- **工具关闭/沙箱未启用**：请确保 `run-script-enabled` 与 `sandbox.enabled` 均为 `true`。
-- **Python 缺失第三方依赖**：如果在 Windows 的 local backend 下执行 Python 脚本，由于未安装 `psutil` 导致失败，Agent 会自动捕获 stderr 并在第二次尝试中自动切换为原生 PowerShell 脚本执行。
-- **Docker 容器视角**：使用 docker backend 时，读取的指标为容器视角的 CPU/内存配额，而非宿主机真实的硬件使用率。
+- **SHADOW**：仍通过标准 Agent 循环执行，但在后台会启动 Graph 引擎平行运转用于校验和影子分析。
+- **ACTIVE_CHAT / ACTIVE_RESEARCH**：完全接管普通的对话或深度研究流，所有的执行和工具调用都由 Graph 的节点图状态机驱动，并自动写入 Graph Checkpoints 持久化数据。
+
+### 配置人机协同（HITL）审批门禁
+
+系统支持对高风险动作（目前为 `run_script` 脚本执行）进行人机审核（Human-in-the-Loop）。
+
+当 Agent 尝试执行这些工具时，`ApprovalPolicyService` 会识别风险并中断运行，进入 `AWAITING_APPROVAL` 挂起状态。用户通过前端或 API 进行决策：
+
+```bash
+# 1. 批准某次挂起的审批
+curl -X POST http://localhost:8095/api/deerflow/approvals/{approvalId}/decision \
+  -H "Content-Type: application/json" \
+  -d '{"decision":"APPROVE","reason":"Looks good to execute"}'
+
+# 2. 恢复挂起的 Run 运行
+curl -X POST http://localhost:8095/api/deerflow/runs/{runId}/resume
+```
 
 ## API 使用示例
 
@@ -225,14 +257,6 @@ curl -N -X POST http://localhost:8095/api/deerflow/runs/stream \
 curl -N -X POST http://localhost:8095/api/deerflow/runs/stream \
   -H "Content-Type: application/json" \
   -d '{"message":"List the workspace files, then explain what you saw","mode":"CHAT"}'
-```
-
-Windows `cmd.exe` 示例：
-
-```bat
-curl -N -X POST http://localhost:8095/api/deerflow/runs/stream ^
-  -H "Content-Type: application/json" ^
-  -d "{\"message\":\"List the workspace files, then explain what you saw\",\"mode\":\"CHAT\"}"
 ```
 
 ### Research Run
@@ -273,8 +297,8 @@ curl -N -X POST http://localhost:8095/api/deerflow/runs/stream \
 | --- | --- |
 | `GET /api/deerflow/health` | 健康状态、工具数、run/thread/message/upload 计数 |
 | `POST /api/deerflow/runs/stream` | 创建并流式执行 run |
-| `POST /api/deerflow/runs/{runId}/resume` | 在 clarification 已回答后恢复 run |
-| `GET /api/deerflow/runs/{runId}` | 查询 run |
+| `POST /api/deerflow/runs/{runId}/resume` | 在 clarification 或 approval 回复后恢复 run |
+| `GET /api/deerflow/runs/{runId}` | 查询 run 详情与状态 |
 | `GET /api/deerflow/runs/{runId}/events` | 查询事件流历史 |
 | `GET /api/deerflow/runs/{runId}/tool-executions` | 查询工具执行审计 |
 | `GET /api/deerflow/runs/{runId}/tool-calls` | 查询模型工具调用 |
@@ -284,6 +308,8 @@ curl -N -X POST http://localhost:8095/api/deerflow/runs/stream \
 | `GET /api/deerflow/runs/{runId}/plan` | 查询研究计划 |
 | `GET /api/deerflow/runs/{runId}/progress` | 查询研究进度 |
 | `GET /api/deerflow/runs/{runId}/quality-gate` | 查询研究质量门禁 |
+| `GET /api/deerflow/approvals/pending` | 获取挂起等待审核的审批请求 |
+| `POST /api/deerflow/approvals/{approvalId}/decision` | 提交审批决策（`APPROVE` 或 `DENY`） |
 | `POST /api/deerflow/threads` | 创建 thread |
 | `GET /api/deerflow/threads` | 列出 threads |
 | `GET /api/deerflow/threads/{threadId}/messages` | 查询 thread 消息 |
@@ -299,7 +325,7 @@ curl -N -X POST http://localhost:8095/api/deerflow/runs/stream \
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
 | `server.port` | `8095` | HTTP 端口 |
-| `deerflow.persistence.sqlite.path` | `${user.dir}/data/deerflow.sqlite` | SQLite 数据库 |
+| `deerflow.persistence.sqlite.path` | `${user.dir}/data/deerflow.sqlite` | SQLite 数据库路径 |
 | `haifa.ai.deerflow.model` | 空 | 默认模型名；也可每个 run 指定 |
 | `haifa.ai.deerflow.workspace-root` | `${user.dir}` | workspace 文件工具根目录 |
 | `haifa.ai.deerflow.skills-root` | `${user.dir}/skills` | 文件系统 skills 根目录 |
@@ -308,14 +334,17 @@ curl -N -X POST http://localhost:8095/api/deerflow/runs/stream \
 | `haifa.ai.deerflow.max-upload-bytes` | `10485760` | 单文件上传大小上限 |
 | `haifa.ai.deerflow.allowed-upload-extensions` | `txt,md,json,csv,log,xml,yml,yaml,properties` | 允许上传的扩展名 |
 | `haifa.ai.deerflow.research-enabled` | `true` | 是否启用研究模式 |
-| `haifa.ai.deerflow.max-research-steps` | `20` 类默认，`application.yml` 中覆盖为 `100` | 研究模式最大步骤 |
-| `haifa.ai.deerflow.max-fetches-per-run` | `10` 类默认，`application.yml` 中覆盖为 `200` | 单 run 最大 fetch 数 |
+| `haifa.ai.deerflow.max-research-steps` | `100` | 研究模式最大步骤 |
+| `haifa.ai.deerflow.max-fetches-per-run` | `200` | 单 run 最大 fetch 数 |
 | `haifa.ai.deerflow.write-file-enabled` | `true` | 是否启用写文件工具 |
 | `haifa.ai.deerflow.str-replace-enabled` | `true` | 是否启用局部替换工具 |
 | `haifa.ai.deerflow.bash-enabled` | `false` | 是否启用 bash 工具 |
 | `haifa.ai.deerflow.sandbox.enabled` | `false` | 是否启用 bash sandbox |
 | `haifa.ai.deerflow.sandbox.backend` | `local` | `local` 或 `docker` |
 | `haifa.ai.deerflow.sandbox.network-enabled` | `false` | sandbox 命令是否允许网络 |
+| `haifa.ai.deerflow.run-script-enabled` | `false` | 是否启用 run_script 脚本执行工具 |
+| `haifa.ai.deerflow.sandbox.allowed-script-languages` | `python,powershell,bash` | 允许在 sandbox 执行的脚本语言 |
+| `haifa.ai.deerflow.graph.mode` | `STANDARD` | Graph 运行模式（`STANDARD`/`SHADOW`/`ACTIVE_CHAT`/`ACTIVE_RESEARCH`） |
 
 Spring Boot relaxed binding 支持用环境变量覆盖配置，例如：
 
@@ -376,6 +405,6 @@ JVM process
 ## 当前边界
 
 - 这是 Java DeerFlow runtime 原型，不是完整 Python `deer-flow` 的等价实现。
-- 部分 provider enum 已预留，但当前实际注册 bean 以 `application.yml` 注释和 provider registry 为准。
+- 部分 provider enum 已预留，但当前实际注册 bean 以 `application.yml` 注释 and provider registry 为准。
 - local sandbox 不是强隔离；强隔离应使用 Docker 或未来 remote sandbox provider。
 - Skills、subagent、memory、research 等能力仍在持续演进，接口和 metadata 可能继续调整。
