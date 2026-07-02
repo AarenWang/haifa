@@ -59,7 +59,7 @@ public class DeferredToolCatalog {
         }
         return switch (toolName) {
             case "present_files", "ask_clarification", "view_image" -> "builtin";
-            case "web_search", "web_fetch", "image_search", "ls", "read_file", "glob", "grep", "write_file", "str_replace", "bash", "list_workspace_files", "read_workspace_file", "list_uploaded_files", "read_uploaded_file" -> "configured";
+            case "web_search", "web_fetch", "image_search", "ls", "read_file", "glob", "grep", "write_file", "str_replace", "bash", "list_workspace_files", "read_workspace_file", "list_uploaded_files", "read_uploaded_file", "run_script" -> "configured";
             case "task" -> "delegation";
             case "current_time", "tool_search" -> "builtin";
             default -> "configured";
@@ -75,7 +75,7 @@ public class DeferredToolCatalog {
             case "web_search", "web_fetch", "image_search" -> "Web/检索";
             case "ls", "read_file", "glob", "grep", "read_uploaded_file", "list_uploaded_files", "list_workspace_files", "read_workspace_file" -> "文件读取";
             case "write_file", "str_replace" -> "文件写入/编辑";
-            case "bash" -> "Shell 执行";
+            case "bash", "run_script" -> "Shell 执行";
             case "task" -> "子 Agent 委派";
             default -> "展示/人机交互";
         };
@@ -129,6 +129,7 @@ public class DeferredToolCatalog {
                 new ToolDescriptor("write_file", "Write content to a file in the workspace.", "configured", "文件写入/编辑", false),
                 new ToolDescriptor("str_replace", "Find and replace a string in a workspace file.", "configured", "文件写入/编辑", false),
                 new ToolDescriptor("bash", "Run a shell command inside the workspace sandbox.", "configured", "Shell 执行", false),
+                new ToolDescriptor("run_script", "Generate and execute short scripts (python, powershell, node, bash) for local observation and lightweight tasks.", "configured", "Shell 执行", false),
                 
                 new ToolDescriptor("task", "Delegate a sub-task to a subagent.", "delegation", "子 Agent 委派", false),
                 

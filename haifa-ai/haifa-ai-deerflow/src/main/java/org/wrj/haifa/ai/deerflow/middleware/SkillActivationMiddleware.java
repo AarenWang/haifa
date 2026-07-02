@@ -28,7 +28,13 @@ public class SkillActivationMiddleware implements AgentMiddleware {
         if (!enabled) {
             return next.next(context);
         }
-        List<Skill> activeSkills = slashSkillResolver.resolve(context.request().message());
+        List<Skill> activeSkills = new java.util.ArrayList<>(slashSkillResolver.resolve(context.request().message()));
+        if (activeSkills.stream().noneMatch(s -> "local-script-execution".equals(s.name()))) {
+            String message = context.request().message();
+            if (shouldActivateLocalScriptExecution(message)) {
+                skillStorage.findAny("local-script-execution").ifPresent(activeSkills::add);
+            }
+        }
         List<Skill> availableSkills = skillStorage.listAll();
         AgentRuntimeContext enriched = context.withActiveSkills(activeSkills);
         return next.next(enriched).map(prompt -> {
@@ -40,5 +46,21 @@ public class SkillActivationMiddleware implements AgentMiddleware {
             String updatedSystem = SkillPromptRenderer.injectIntoSystemPrompt(prompt.systemPrompt(), skillsSection);
             return new ModelPrompt(updatedSystem, prompt.userPrompt(), prompt.modelName());
         });
+    }
+
+    private boolean shouldActivateLocalScriptExecution(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        String[] keywords = {
+            "CPU", "内存", "memory", "cpu", "使用率", "当前电脑", "本机", "系统资源",
+            "运行脚本", "执行脚本", "跑一下", "检查环境", "查看当前"
+        };
+        for (String kw : keywords) {
+            if (message.contains(kw)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

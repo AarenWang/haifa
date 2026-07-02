@@ -25,6 +25,7 @@ public class DeerFlowProperties {
     private boolean writeFileEnabled = true;
     private boolean strReplaceEnabled = true;
     private boolean bashEnabled = false;
+    private boolean runScriptEnabled = false;
     private Sandbox sandbox = new Sandbox();
     private Graph graph = new Graph();
     private long maxUploadBytes = 10_485_760;
@@ -120,6 +121,9 @@ public class DeerFlowProperties {
         private String workdirSubdir = "sandbox";
         private String allowedCommands = "mvn,npm,node,python,python3,java,javac,ls,pwd,cat,rg,grep";
         private String deniedPatterns = "rm -rf,format,shutdown,reboot,del /s,Remove-Item -Recurse";
+        private String allowedScriptLanguages = "python,powershell";
+        private String scriptWorkdirSubdir = "scripts";
+        private boolean runScriptLocalUnsafeAllowed = false;
 
         public boolean isEnabled() {
             return enabled;
@@ -191,6 +195,30 @@ public class DeerFlowProperties {
 
         public void setDeniedPatterns(String deniedPatterns) {
             this.deniedPatterns = deniedPatterns;
+        }
+
+        public String getAllowedScriptLanguages() {
+            return allowedScriptLanguages;
+        }
+
+        public void setAllowedScriptLanguages(String allowedScriptLanguages) {
+            this.allowedScriptLanguages = allowedScriptLanguages;
+        }
+
+        public String getScriptWorkdirSubdir() {
+            return scriptWorkdirSubdir;
+        }
+
+        public void setScriptWorkdirSubdir(String scriptWorkdirSubdir) {
+            this.scriptWorkdirSubdir = scriptWorkdirSubdir;
+        }
+
+        public boolean isRunScriptLocalUnsafeAllowed() {
+            return runScriptLocalUnsafeAllowed;
+        }
+
+        public void setRunScriptLocalUnsafeAllowed(boolean runScriptLocalUnsafeAllowed) {
+            this.runScriptLocalUnsafeAllowed = runScriptLocalUnsafeAllowed;
         }
     }
 
@@ -580,6 +608,14 @@ public class DeerFlowProperties {
 
     public void setBashEnabled(boolean bashEnabled) {
         this.bashEnabled = bashEnabled;
+    }
+
+    public boolean isRunScriptEnabled() {
+        return runScriptEnabled;
+    }
+
+    public void setRunScriptEnabled(boolean runScriptEnabled) {
+        this.runScriptEnabled = runScriptEnabled;
     }
 
     public Sandbox getSandbox() {

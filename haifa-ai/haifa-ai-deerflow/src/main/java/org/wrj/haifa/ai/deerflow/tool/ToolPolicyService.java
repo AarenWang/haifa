@@ -25,7 +25,7 @@ public class ToolPolicyService {
         return switch (name) {
             case "web_search", "web_fetch", "image_search", "ls", "read_file", "glob", "grep",
                  "write_file", "str_replace", "bash", "list_workspace_files", "read_workspace_file",
-                 "list_uploaded_files", "read_uploaded_file", "task" -> true;
+                 "list_uploaded_files", "read_uploaded_file", "task", "run_script" -> true;
             default -> false;
         };
     }
@@ -43,8 +43,8 @@ public class ToolPolicyService {
             return true;
         }
 
-        // In CHAT mode, modifying/unsafe tools (write_file, str_replace, bash) always require skill activation
-        if (mode == org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT && isModifyingTool(toolName)) {
+        // High-risk tools (bash, run_script) always require skill activation. Other modifying tools require it only in CHAT mode.
+        if (isHighRiskTool(toolName) || (mode == org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT && isModifyingTool(toolName))) {
             if (activeSkills == null || activeSkills.isEmpty()) {
                 return false;
             }
@@ -75,8 +75,12 @@ public class ToolPolicyService {
         return false;
     }
 
+    private static boolean isHighRiskTool(String name) {
+        return "bash".equals(name) || "run_script".equals(name);
+    }
+
     private static boolean isModifyingTool(String name) {
-        return "write_file".equals(name) || "str_replace".equals(name) || "bash".equals(name);
+        return "write_file".equals(name) || "str_replace".equals(name) || "bash".equals(name) || "run_script".equals(name);
     }
 
     public Set<String> allowedToolsForSkills(List<Skill> activeSkills) {

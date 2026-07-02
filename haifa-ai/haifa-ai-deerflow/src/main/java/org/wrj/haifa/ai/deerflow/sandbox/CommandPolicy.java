@@ -53,12 +53,46 @@ public class CommandPolicy {
         if (executable.isBlank()) {
             return Decision.deny("command executable is required");
         }
-        Set<String> allowed = splitCsv(sandbox.getAllowedCommands());
+        Set<String> allowed = new java.util.HashSet<>(splitCsv(sandbox.getAllowedCommands()));
+        if (properties.isRunScriptEnabled()) {
+            allowed.addAll(splitCsv(sandbox.getAllowedScriptLanguages()));
+        }
         if (!allowed.isEmpty() && !allowed.contains(normalizeExecutable(executable))) {
             return Decision.deny("command is not in allowed command list: " + executable);
         }
         return Decision.allow();
     }
+
+    public Decision evaluateScriptBody(String code) {
+        if (code == null || code.isBlank()) {
+            return Decision.allow();
+        }
+        String lower = code.toLowerCase(Locale.ROOT);
+        DeerFlowProperties.Sandbox sandbox = properties.getSandbox();
+
+        for (String pattern : splitCsv(sandbox.getDeniedPatterns())) {
+            if (!pattern.isBlank() && lower.contains(pattern.toLowerCase(Locale.ROOT))) {
+                return Decision.deny("script code contains denied pattern: " + pattern);
+            }
+        }
+
+        String[] sensitiveSubstrings = {
+            ".git", "/etc/", "/var/", "/etc", "/var", "c:/windows", "c:\\windows",
+            "%userprofile%", "$home", "~/ ", "~/"
+        };
+        for (String sub : sensitiveSubstrings) {
+            if (lower.contains(sub)) {
+                return Decision.deny("script code references a sensitive path: " + sub);
+            }
+        }
+
+        if (lower.contains("..") && (lower.contains("../") || lower.contains("..\\") || lower.contains("/../") || lower.contains("\\..\\"))) {
+            return Decision.deny("script code references a parent directory path");
+        }
+
+        return Decision.allow();
+    }
+
 
     private static Set<String> splitCsv(String value) {
         if (value == null || value.isBlank()) {

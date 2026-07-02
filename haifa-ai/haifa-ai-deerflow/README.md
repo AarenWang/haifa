@@ -177,7 +177,45 @@ $env:HAIFA_AI_DEERFLOW_SANDBOX_DOCKER_IMAGE = "ubuntu:24.04"
 mvn -pl haifa-ai/haifa-ai-deerflow -am spring-boot:run
 ```
 
-Docker backend 会把 workspace 只读挂载到 `/workspace`，把每次执行的唯一可写目录挂载到 `/sandbox`，并设置内存、CPU、进程数、只读根文件系统和网络策略。
+Docker backend 会把 workspace 只读挂载到 `/workspace`，把每次执行 the 唯一可写目录挂载到 `/sandbox`，并设置内存、CPU、进程数、只读根文件系统和网络策略。
+
+### 启用脚本执行与本地观测 (run_script)
+
+`run_script` 工具允许 Agent 在受控沙箱（Sandbox）内生成并执行脚本（支持 Python, PowerShell, Node.js, Bash），用于完成本地系统观测（例如 CPU 和内存使用率）、轻量计算、文件格式化及环境诊断等任务。
+
+启用 `run_script` 所需的环境变量：
+
+```powershell
+$env:HAIFA_AI_DEERFLOW_RUN_SCRIPT_ENABLED = "true"
+$env:HAIFA_AI_DEERFLOW_SANDBOX_ENABLED = "true"
+$env:HAIFA_AI_DEERFLOW_SANDBOX_BACKEND = "local" # 或 "docker"
+mvn -pl haifa-ai/haifa-ai-deerflow -am spring-boot:run
+```
+
+#### 安全与隔离说明
+
+- **默认关闭**：`run_script` 默认处于关闭状态（`run-script-enabled=false`），必须显式配置才能开启。
+- **允许的脚本语言**：可在配置项 `haifa.ai.deerflow.sandbox.allowed-script-languages`（默认值为 `python,powershell`）中精细化管控允许的解释器。
+- **沙箱隔离等级**：
+  - `local` backend 在宿主机执行子进程，元数据将标记 `strongIsolation=false`，属于受限隔离。
+  - `docker` backend 在独立容器中运行（将只读挂载 `/workspace` 并挂载可写的 `/sandbox` 工作区目录），具备强隔离性。
+- **路径及越界保护**：脚本文件会自动生成于临时工作区 `outputs/sandbox/{runId}/scripts/{randomId}/` 下，执行过程中的工作目录被锁定为该工作区，禁止访问工作区外部的绝对路径。
+- **命令审计**：所有生成的脚本命令都会流经 `CommandPolicy` 策略服务进行合法性与安全性校验，执行过程审计保存在 `tool_executions` 审计日志中。
+
+#### CPU/内存观测示例
+
+通过发送包含本地观测关键字（如 `CPU`、`内存` 等）的请求，系统将自动激活 `local-script-execution` 技能并执行相关脚本：
+
+```bash
+curl -N -X POST http://localhost:8095/api/deerflow/runs/stream \
+  -H "Content-Type: application/json" \
+  -d '{"message":"查看下当前电脑 CPU 和内存使用率","mode":"CHAT"}'
+```
+
+常见问题排查：
+- **工具关闭/沙箱未启用**：请确保 `run-script-enabled` 与 `sandbox.enabled` 均为 `true`。
+- **Python 缺失第三方依赖**：如果在 Windows 的 local backend 下执行 Python 脚本，由于未安装 `psutil` 导致失败，Agent 会自动捕获 stderr 并在第二次尝试中自动切换为原生 PowerShell 脚本执行。
+- **Docker 容器视角**：使用 docker backend 时，读取的指标为容器视角的 CPU/内存配额，而非宿主机真实的硬件使用率。
 
 ## API 使用示例
 

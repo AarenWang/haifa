@@ -3,6 +3,7 @@ package org.wrj.haifa.ai.deerflow.middleware;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
@@ -66,6 +67,36 @@ class SkillActivationMiddlewareTest {
                 .assertNext(prompt -> {
                     assertThat(prompt.systemPrompt()).contains("base prompt");
                     assertThat(prompt.userPrompt()).contains("User request:");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void autoActivatesLocalScriptExecutionSkillOnKeywords(@TempDir Path tmp) throws Exception {
+        Path publicDir = tmp.resolve("skills-public");
+        java.nio.file.Files.createDirectories(publicDir.resolve("local-script-execution"));
+        java.nio.file.Files.writeString(
+                publicDir.resolve("local-script-execution").resolve("SKILL.md"),
+                "---\nname: local-script-execution\ndescription: Use when a task requires local observation.\nallowed-tools: [run_script]\n---\n# Local script execution"
+        );
+
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setSystemPrompt("You are helpful.");
+        properties.setWorkspaceRoot(".");
+
+        FileSystemSkillStorage storage = new FileSystemSkillStorage(publicDir, null);
+        SlashSkillResolver resolver = new SlashSkillResolver(storage);
+        SkillActivationMiddleware middleware = new SkillActivationMiddleware(resolver, storage, properties);
+
+        AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
+        AgentRequest request = new AgentRequest("t", "Please check CPU usage", null);
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, List.of(), properties);
+
+        MiddlewareChain chain = new MiddlewareChain(List.of(middleware));
+        StepVerifier.create(chain.next(context))
+                .assertNext(prompt -> {
+                    assertThat(prompt.systemPrompt()).contains("local-script-execution");
+                    assertThat(prompt.systemPrompt()).contains("<skill_system>");
                 })
                 .verifyComplete();
     }

@@ -112,10 +112,12 @@ public class AgentLoop {
                 toolDescriptions.append("- ").append(toolName).append(": ").append(tool.description()).append("\n");
             }
 
+            String promptReinforcement = "\nIf a user asks for information that can be measured from the local runtime or workspace, and a sandbox execution tool is available, do not claim you lack access. Use the smallest appropriate script, inspect the tool result, then answer from observed output. If the tool is disabled or denied, explain the configuration limitation.";
             String fullSystemPrompt = systemPrompt + "\n\nAvailable tools:\n" + toolDescriptions
                     + "\nWhen you need to use a tool, emit: <tool_call name=\"tool_name\">{\"arg\":\"value\"}</tool_call>\n"
                     + "Do not write tool calls as prose such as `Tool call: name({...})`; use only the XML tag format above.\n"
-                    + "When you have enough information, provide your final answer starting with <final_answer>.";
+                    + "When you have enough information, provide your final answer starting with <final_answer>."
+                    + promptReinforcement;
 
             List<AgentEvent> events = new ArrayList<>();
             EventEmitter emitter = new EventEmitter(events, sink);
@@ -368,7 +370,7 @@ public class AgentLoop {
                     String targetToolName = targetTool != null ? targetTool.name() : toolCall.toolName();
 
                     // Policy check
-                    if (toolPolicy != null && activeSkills != null && !toolPolicy.isToolAllowed(targetToolName, activeSkills, runConfig.mode())) {
+                    if (toolPolicy != null && !toolPolicy.isToolAllowed(targetToolName, activeSkills, runConfig.mode())) {
                         emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
                                 "Policy denied " + targetToolName,
                                 Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));

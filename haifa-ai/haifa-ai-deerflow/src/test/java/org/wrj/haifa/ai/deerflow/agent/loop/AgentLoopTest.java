@@ -8,6 +8,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.sandbox.CommandPolicy;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxRequest;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxResult;
+import org.wrj.haifa.ai.deerflow.tool.RunScriptTool;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
@@ -19,6 +25,7 @@ import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.MockFetchTool;
 import org.wrj.haifa.ai.deerflow.tool.MockSearchTool;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -346,5 +353,117 @@ class AgentLoopTest {
                 active.decrementAndGet();
             }
         }
+    }
+
+    @Test
+    void runScriptToolExecutionFlow(@TempDir Path tmp) {
+        AgentModelClient mockModel = new AgentModelClient() {
+            private int turns = 0;
+            @Override
+            public Mono<ModelResponse> generate(ModelPrompt prompt) {
+                turns++;
+                if (turns == 1) {
+                    return Mono.just(new ModelResponse("<tool_call name=\"run_script\">{\"language\":\"python\",\"code\":\"import os\\nprint('CPU Usage: 10%')\"}</tool_call>"));
+                } else {
+                    return Mono.just(new ModelResponse("<final_answer>The CPU usage is 10%.</final_answer>"));
+                }
+            }
+        };
+
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setOutputsRoot(tmp.resolve("outputs").toString());
+
+        org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner fakeRunner = new org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner() {
+            @Override
+            public SandboxResult run(SandboxRequest request) {
+                return new SandboxResult("sandbox-test-123", 0, "CPU Usage: 10%\n", "", 50, false, false, Map.of());
+            }
+        };
+
+        RunScriptTool tool = new RunScriptTool(properties, fakeRunner, new CommandPolicy(properties));
+        ToolRegistry registry = new ToolRegistry(List.of(tool));
+        AgentLoop loop = new AgentLoop(mockModel, registry);
+
+        AgentRunConfig config = new AgentRunConfig("thread-3", "run-3", "test-model", false, false,
+                4, tmp.resolve("workspace"), null, null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                LoopConfig.fromDefaults(),
+                config,
+                "You are an assistant.",
+                "Check CPU usage",
+                new java.util.concurrent.atomic.AtomicInteger(),
+                null, List.of(), null
+        ).collectList().block();
+
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.TOOL_CALL_REQUESTED,
+                        AgentEventType.TOOL_STARTED,
+                        AgentEventType.TOOL_COMPLETED,
+                        AgentEventType.MODEL_COMPLETED,
+                        AgentEventType.RUN_COMPLETED);
+
+        assertThat(events).anySatisfy(e -> {
+            if (e.type() == AgentEventType.TOOL_COMPLETED) {
+                assertThat(e.content()).contains("CPU Usage: 10%");
+            }
+        });
+
+        assertThat(events).anySatisfy(e -> {
+            if (e.type() == AgentEventType.MODEL_COMPLETED) {
+                assertThat(e.content()).contains("The CPU usage is 10%.");
+            }
+        });
+    }
+
+    @Test
+    void policyDeniesHighRiskToolWhenActiveSkillsNull(@TempDir Path tmp) {
+        AgentModelClient mockModel = prompt -> Mono.just(new ModelResponse(
+                "<tool_call name=\"run_script\">{\"language\":\"python\",\"code\":\"print('nope')\"}</tool_call>"));
+
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setOutputsRoot(tmp.resolve("outputs").toString());
+
+        class CountingRunner implements org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner {
+            int calls;
+
+            @Override
+            public SandboxResult run(SandboxRequest request) {
+                calls++;
+                return new SandboxResult("sandbox-test", 0, "unexpected", "", 1, false, false, Map.of());
+            }
+        }
+        CountingRunner runner = new CountingRunner();
+
+        RunScriptTool tool = new RunScriptTool(properties, runner, new CommandPolicy(properties));
+        ToolRegistry registry = new ToolRegistry(List.of(tool));
+        AgentLoop loop = new AgentLoop(mockModel, registry);
+        ToolPolicyService policy = new ToolPolicyService(List.of(tool));
+
+        AgentRunConfig config = new AgentRunConfig("thread-policy", "run-policy", "test-model", false, false,
+                2, tmp.resolve("workspace"), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT, null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                LoopConfig.fromDefaults(),
+                config,
+                "You are an assistant.",
+                "Run a script",
+                new java.util.concurrent.atomic.AtomicInteger(),
+                policy, null, List.of()
+        ).collectList().block();
+
+        assertThat(runner.calls).isEqualTo(0);
+        assertThat(events).anySatisfy(e -> {
+            if (e.type() == AgentEventType.TOOL_COMPLETED) {
+                assertThat(e.metadata()).containsEntry("denied", true);
+                assertThat(e.content()).contains("Tool denied by policy");
+            }
+        });
     }
 }

@@ -237,6 +237,7 @@ function App() {
         threadId: req.threadId || state.threadId || undefined,
         uploadedFileIds: state.selectedUploadIds.length > 0 ? state.selectedUploadIds : undefined,
       };
+      let streamThreadId = fullReq.threadId;
 
       dispatch({ type: 'START_RUN', payload: fullReq });
 
@@ -244,6 +245,9 @@ function App() {
         fullReq,
         {
           onEvent: (evt) => {
+            if (evt.threadId) {
+              streamThreadId = evt.threadId;
+            }
             dispatch({ type: 'ADD_EVENT', payload: evt });
             const isResearchRun = fullReq.mode === 'research';
             const isResearchEvent =
@@ -286,6 +290,9 @@ function App() {
           },
           onDone: () => {
             abortRef.current = null;
+            if (streamThreadId) {
+              void refreshMessages(streamThreadId);
+            }
           },
         },
         controller.signal

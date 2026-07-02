@@ -100,6 +100,25 @@ class ToolPolicyServiceTest {
         assertThat(localPolicy.isToolAllowed("image_search", List.of(deepResearch))).isTrue();
     }
 
+    @Test
+    void runScriptRequiresSkillInAllModes() {
+        AgentTool runScript = new DummyTool("run_script", "run script");
+        ToolPolicyService localPolicy = new ToolPolicyService(List.of(runScript));
+
+        // CHAT mode, no active skills => disallowed
+        assertThat(localPolicy.isToolAllowed("run_script", List.of(), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT)).isFalse();
+
+        // CHAT mode, with local-script-execution skill => allowed
+        Skill skill = new Skill("local-script-execution", "Execute script", "public", "md", Map.of(), Set.of("run_script"));
+        assertThat(localPolicy.isToolAllowed("run_script", List.of(skill), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT)).isTrue();
+
+        // RESEARCH mode, no active skills => disallowed
+        assertThat(localPolicy.isToolAllowed("run_script", List.of(), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH)).isFalse();
+
+        // RESEARCH mode, with skill => allowed
+        assertThat(localPolicy.isToolAllowed("run_script", List.of(skill), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH)).isTrue();
+    }
+
     private static final class DummyTool implements AgentTool {
         private final String name;
         private final String description;

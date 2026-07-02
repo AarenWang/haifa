@@ -27,11 +27,30 @@ public class LocalRestrictedSandboxRunner implements SandboxRunner {
     public SandboxResult run(SandboxRequest request) {
         String sandboxId = UUID.randomUUID().toString();
         long start = System.currentTimeMillis();
-        Path workdir = prepareWorkdir(request, sandboxId);
+        Path workdir;
+        if (request.runWorkingDirectory() != null) {
+            workdir = request.runWorkingDirectory().toAbsolutePath().normalize();
+            Path allowedRoot = Path.of(properties.getOutputsRoot(), properties.getSandbox().getWorkdirSubdir()).toAbsolutePath().normalize();
+            if (!workdir.startsWith(allowedRoot)) {
+                throw new SecurityException("Access denied: runWorkingDirectory '" + workdir + "' is outside of allowed sandbox root '" + allowedRoot + "'");
+            }
+            try {
+                Files.createDirectories(workdir);
+            } catch (IOException ex) {
+                throw new IllegalStateException("Failed to create runWorkingDirectory: " + workdir, ex);
+            }
+        } else {
+            workdir = prepareWorkdir(request, sandboxId);
+        }
         Process process = null;
         try {
-            List<String> shellCommand = shellCommand(request.command());
-            ProcessBuilder processBuilder = new ProcessBuilder(shellCommand);
+            List<String> processCmd;
+            if (request.cmdArgs() != null && !request.cmdArgs().isEmpty()) {
+                processCmd = request.cmdArgs();
+            } else {
+                processCmd = shellCommand(request.command());
+            }
+            ProcessBuilder processBuilder = new ProcessBuilder(processCmd);
             processBuilder.directory(workdir.toFile());
             processBuilder.environment().clear();
             processBuilder.environment().put("PATH", System.getenv().getOrDefault("PATH", ""));

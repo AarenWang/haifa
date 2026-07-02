@@ -38,21 +38,13 @@ class LocalRestrictedSandboxRunnerTest {
     }
 
     @Test
-    void ignoresCallerProvidedWorkdirAndCreatesUniqueSandboxWorkdir(@TempDir Path tmp) {
+    void usesCallerProvidedWorkdirWhenValid(@TempDir Path tmp) {
         DeerFlowProperties properties = properties(tmp);
         LocalRestrictedSandboxRunner runner = new LocalRestrictedSandboxRunner(properties);
-        Path requested = tmp.resolve("caller-workdir");
+        Path sandboxRoot = tmp.resolve("outputs").resolve("sandbox");
+        Path requested = sandboxRoot.resolve("caller-workdir-1");
 
-        SandboxResult first = runner.run(new SandboxRequest(
-                currentDirectoryCommand(),
-                tmp.resolve("workspace"),
-                requested,
-                Duration.ofSeconds(5),
-                Map.of(),
-                false,
-                "run-unique"
-        ));
-        SandboxResult second = runner.run(new SandboxRequest(
+        SandboxResult result = runner.run(new SandboxRequest(
                 currentDirectoryCommand(),
                 tmp.resolve("workspace"),
                 requested,
@@ -62,11 +54,28 @@ class LocalRestrictedSandboxRunnerTest {
                 "run-unique"
         ));
 
-        Path firstWorkdir = Path.of((String) first.metadata().get("sandboxWorkdir"));
-        Path secondWorkdir = Path.of((String) second.metadata().get("sandboxWorkdir"));
-        assertThat(firstWorkdir).isNotEqualTo(requested.toAbsolutePath().normalize());
-        assertThat(secondWorkdir).isNotEqualTo(requested.toAbsolutePath().normalize());
-        assertThat(firstWorkdir).isNotEqualTo(secondWorkdir);
+        Path actualWorkdir = Path.of((String) result.metadata().get("sandboxWorkdir"));
+        assertThat(actualWorkdir).isEqualTo(requested.toAbsolutePath().normalize());
+        assertThat(Files.isDirectory(actualWorkdir)).isTrue();
+    }
+
+    @Test
+    void rejectsOutOfBoundsCallerProvidedWorkdir(@TempDir Path tmp) {
+        DeerFlowProperties properties = properties(tmp);
+        LocalRestrictedSandboxRunner runner = new LocalRestrictedSandboxRunner(properties);
+        Path outOfBounds = tmp.resolve("out-of-bounds");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> {
+            runner.run(new SandboxRequest(
+                    currentDirectoryCommand(),
+                    tmp.resolve("workspace"),
+                    outOfBounds,
+                    Duration.ofSeconds(5),
+                    Map.of(),
+                    false,
+                    "run-unique"
+            ));
+        }).isInstanceOf(SecurityException.class).hasMessageContaining("outside of allowed sandbox root");
     }
 
     @Test

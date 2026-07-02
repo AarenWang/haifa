@@ -26,7 +26,21 @@ public class DockerSandboxRunner implements SandboxRunner {
     public SandboxResult run(SandboxRequest request) {
         String sandboxId = UUID.randomUUID().toString();
         long start = System.currentTimeMillis();
-        Path workdir = prepareWorkdir(request, sandboxId);
+        Path workdir;
+        if (request.runWorkingDirectory() != null) {
+            workdir = request.runWorkingDirectory().toAbsolutePath().normalize();
+            Path allowedRoot = Path.of(properties.getOutputsRoot(), properties.getSandbox().getWorkdirSubdir()).toAbsolutePath().normalize();
+            if (!workdir.startsWith(allowedRoot)) {
+                throw new SecurityException("Access denied: runWorkingDirectory '" + workdir + "' is outside of allowed sandbox root '" + allowedRoot + "'");
+            }
+            try {
+                Files.createDirectories(workdir);
+            } catch (IOException ex) {
+                throw new IllegalStateException("Failed to create runWorkingDirectory: " + workdir, ex);
+            }
+        } else {
+            workdir = prepareWorkdir(request, sandboxId);
+        }
         Process process = null;
         try {
             List<String> command = dockerCommand(request, workdir);
@@ -101,13 +115,17 @@ public class DockerSandboxRunner implements SandboxRunner {
         command.add("--mount");
         command.add("type=bind,source=" + DockerPathMapper.bindSource(workdir) + ",target=/sandbox");
         command.add("-w");
-        command.add(workspaceMountAvailable(request) ? "/workspace" : "/sandbox");
+        command.add(request.runWorkingDirectory() != null ? "/sandbox" : (workspaceMountAvailable(request) ? "/workspace" : "/sandbox"));
         command.add("-e");
         command.add("SANDBOX_WORKDIR=/sandbox");
         command.add(properties.getSandbox().getDockerImage());
-        command.add("/bin/bash");
-        command.add("-lc");
-        command.add(request.command());
+        if (request.cmdArgs() != null && !request.cmdArgs().isEmpty()) {
+            command.addAll(request.cmdArgs());
+        } else {
+            command.add("/bin/bash");
+            command.add("-lc");
+            command.add(request.command());
+        }
         return command;
     }
 
