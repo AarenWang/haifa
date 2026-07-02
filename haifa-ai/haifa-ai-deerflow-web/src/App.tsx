@@ -28,6 +28,7 @@ import ResearchInspector from './components/ResearchInspector';
 import ResearchPlanView from './components/ResearchPlanView';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
 import MemorySettingsModal from './components/MemorySettingsModal';
+import { Activity, Menu } from 'lucide-react';
 
 function App() {
   const [state, dispatch] = useReducer(deerflowReducer, initialState);
@@ -37,6 +38,16 @@ function App() {
   const [isMemoryOpen, setIsMemoryOpen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isTraceOpen, setIsTraceOpen] = useState<boolean>(false);
+
+  const toggleSidebar = useCallback(() => {
+    setIsSidebarOpen((open) => !open);
+    setIsTraceOpen(false);
+  }, []);
+
+  const toggleTrace = useCallback(() => {
+    setIsTraceOpen((open) => !open);
+    setIsSidebarOpen(false);
+  }, []);
 
   const pendingClarification = getPendingClarification(
     state.messages,
@@ -536,9 +547,31 @@ function App() {
         hasPendingClarification={!!pendingClarification}
         isSidebarOpen={isSidebarOpen}
         isTraceOpen={isTraceOpen}
-        onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-        onToggleTrace={() => setIsTraceOpen(!isTraceOpen)}
+        onToggleSidebar={toggleSidebar}
+        onToggleTrace={toggleTrace}
       />
+      {state.threadId && (
+        <div className="mobile-drawer-bar" aria-label="Mobile panels">
+          <button
+            type="button"
+            className={`mobile-drawer-btn ${isSidebarOpen ? 'active' : ''}`}
+            onClick={toggleSidebar}
+          >
+            <Menu size={16} />
+            <span>Threads</span>
+            <span className="mobile-drawer-count">{state.threads.length}</span>
+          </button>
+          <button
+            type="button"
+            className={`mobile-drawer-btn ${isTraceOpen ? 'active' : ''}`}
+            onClick={toggleTrace}
+          >
+            <Activity size={16} />
+            <span>Activity</span>
+            <span className="mobile-drawer-count">{state.events.length}</span>
+          </button>
+        </div>
+      )}
       <div className={`main ${state.threadId ? 'thread-selected' : 'thread-empty'}`}>
         <WorkspaceSidebar
           backendStatus={backendStatus}
