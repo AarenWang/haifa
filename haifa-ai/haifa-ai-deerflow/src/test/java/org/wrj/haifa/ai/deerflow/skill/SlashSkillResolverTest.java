@@ -62,4 +62,18 @@ class SlashSkillResolverTest {
         assertThat(resolver.resolve("")).isEmpty();
         assertThat(resolver.resolve(null)).isEmpty();
     }
+
+    @Test
+    void resolvesSkillFromActivationHints(@TempDir Path tmp) throws IOException {
+        Path publicDir = tmp.resolve("public");
+        Files.createDirectories(publicDir.resolve("local-script-execution"));
+        Files.writeString(publicDir.resolve("local-script-execution").resolve("SKILL.md"),
+                "---\nname: local-script-execution\ndescription: Execute scripts.\nactivation-hints: [CPU, 内存]\nallowed-tools: [run_script]\n---\n# Local Script");
+
+        FileSystemSkillStorage storage = new FileSystemSkillStorage(publicDir, null);
+        SlashSkillResolver resolver = new SlashSkillResolver(storage);
+
+        List<Skill> skills = resolver.resolve("查看当前电脑CPU和内存使用率");
+        assertThat(skills).extracting(Skill::name).containsExactly("local-script-execution");
+    }
 }

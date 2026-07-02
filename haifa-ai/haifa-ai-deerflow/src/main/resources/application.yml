@@ -47,10 +47,12 @@ haifa:
       skills-enabled: true
       mcp-enabled: false
       tool-search-enabled: true
-      run-script-enabled: false
+      run-script-enabled: true
       sandbox:
+        enabled: true
+        backend: local
         allowed-script-languages: python,powershell
-        run-script-local-unsafe-allowed: false
+        run-script-local-unsafe-allowed: true
         script-workdir-subdir: scripts
       uploads-root: ${HAIFA_DEERFLOW_UPLOADS:${user.dir}/uploads}
       max-upload-bytes: 10485760

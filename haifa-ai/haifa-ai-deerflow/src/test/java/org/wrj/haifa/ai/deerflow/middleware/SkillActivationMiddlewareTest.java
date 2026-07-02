@@ -72,12 +72,12 @@ class SkillActivationMiddlewareTest {
     }
 
     @Test
-    void autoActivatesLocalScriptExecutionSkillOnKeywords(@TempDir Path tmp) throws Exception {
+    void autoActivatesSkillFromActivationHints(@TempDir Path tmp) throws Exception {
         Path publicDir = tmp.resolve("skills-public");
         java.nio.file.Files.createDirectories(publicDir.resolve("local-script-execution"));
         java.nio.file.Files.writeString(
                 publicDir.resolve("local-script-execution").resolve("SKILL.md"),
-                "---\nname: local-script-execution\ndescription: Use when a task requires local observation.\nallowed-tools: [run_script]\n---\n# Local script execution"
+                "---\nname: local-script-execution\ndescription: Use when a task requires local observation.\nallowed-tools: [run_script]\nactivation-hints: [CPU, 内存]\n---\n# Local script execution"
         );
 
         DeerFlowProperties properties = new DeerFlowProperties();
@@ -96,6 +96,38 @@ class SkillActivationMiddlewareTest {
         StepVerifier.create(chain.next(context))
                 .assertNext(prompt -> {
                     assertThat(prompt.systemPrompt()).contains("local-script-execution");
+                    assertThat(prompt.systemPrompt()).contains("<skill_system>");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void preservesContextActiveSkillsWhenAddingResolvedSkills(@TempDir Path tmp) throws Exception {
+        Path publicDir = tmp.resolve("skills-public");
+        java.nio.file.Files.createDirectories(publicDir.resolve("research"));
+        java.nio.file.Files.writeString(
+                publicDir.resolve("research").resolve("SKILL.md"),
+                "---\nname: research\ndescription: Do research.\nallowed-tools: [web_search]\n---\n# Research"
+        );
+
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setSystemPrompt("You are helpful.");
+        properties.setWorkspaceRoot(".");
+
+        FileSystemSkillStorage storage = new FileSystemSkillStorage(publicDir, null);
+        SlashSkillResolver resolver = new SlashSkillResolver(storage);
+        SkillActivationMiddleware middleware = new SkillActivationMiddleware(resolver, storage, properties);
+
+        AgentRunConfig config = new AgentRunConfig("t", "r", "m", false, false, 4, Path.of("."), java.util.Map.of());
+        AgentRequest request = new AgentRequest("t", "hello", null);
+        org.wrj.haifa.ai.deerflow.skill.Skill existing =
+                new org.wrj.haifa.ai.deerflow.skill.Skill("deep-research", "Deep research", "public", "content", java.util.Map.of(), java.util.Set.of("web_search"));
+        AgentRuntimeContext context = AgentRuntimeContext.of(config, request, List.of(), properties, List.of(existing));
+
+        MiddlewareChain chain = new MiddlewareChain(List.of(middleware));
+        StepVerifier.create(chain.next(context))
+                .assertNext(prompt -> {
+                    assertThat(prompt.systemPrompt()).contains("deep-research");
                     assertThat(prompt.systemPrompt()).contains("<skill_system>");
                 })
                 .verifyComplete();
