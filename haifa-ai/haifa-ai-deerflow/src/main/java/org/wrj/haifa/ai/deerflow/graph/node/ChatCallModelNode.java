@@ -1,0 +1,149 @@
+package org.wrj.haifa.ai.deerflow.graph.node;
+
+import com.alibaba.cloud.ai.graph.OverAllState;
+import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
+import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
+import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
+import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
+import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
+import org.wrj.haifa.ai.deerflow.model.ModelMessage;
+import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.agent.loop.PromptAssembler;
+import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
+import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+
+@Component
+public class ChatCallModelNode implements AsyncNodeAction {
+
+    private final AgentModelClient modelClient;
+    private final ToolRegistry toolRegistry;
+    private final DeerFlowProperties properties;
+    private final PromptAssembler promptAssembler;
+
+    @Autowired(required = false)
+    private ToolPolicyService toolPolicyService;
+
+    public ChatCallModelNode(AgentModelClient modelClient,
+                             ToolRegistry toolRegistry,
+                             DeerFlowProperties properties) {
+        this.modelClient = modelClient;
+        this.toolRegistry = toolRegistry;
+        this.properties = properties;
+        this.promptAssembler = new PromptAssembler();
+    }
+
+    @Override
+    public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
+        return CompletableFuture.supplyAsync(() -> {
+            String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
+            String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
+            String modelName = state.<String>value(AgentGraphStateKeys.MODEL_NAME).orElse(null);
+
+            // Fetch state messages using view
+            AgentGraphStateView view = AgentGraphStateView.of(state);
+            List<Map<String, Object>> windowMaps = view.messageWindow();
+
+            List<ModelMessage> typedHistory = windowMaps.stream()
+                    .map(map -> {
+                        String roleStr = (String) map.get("role");
+                        ModelMessage.Role role = ModelMessage.Role.USER;
+                        try {
+                            role = ModelMessage.Role.valueOf(roleStr);
+                        } catch (Exception ex) {
+                            // ignore
+                        }
+                        String content = (String) map.get("content");
+                        return new ModelMessage(role, content);
+                    })
+                    .toList();
+
+            // Construct full system prompt with tools
+            String systemPromptBase = properties.getSystemPrompt();
+            if (systemPromptBase == null || systemPromptBase.isBlank()) {
+                systemPromptBase = "You are a helpful assistant.";
+            }
+
+            StringBuilder toolDescriptions = new StringBuilder();
+            for (AgentTool tool : toolRegistry.tools()) {
+                String toolName = tool.name();
+                if (toolPolicyService != null && !toolPolicyService.isToolAllowed(toolName, List.of(), view.mode())) {
+                    continue;
+                }
+                toolDescriptions.append("- ").append(toolName).append(": ").append(tool.description()).append("\n");
+            }
+
+            String promptReinforcement = "\nIf a user asks for information that can be measured from the local runtime or workspace, and a sandbox execution tool is available, do not claim you lack access. Use the smallest appropriate script, inspect the tool result, then answer from observed output. If the tool is disabled or denied, explain the configuration limitation.";
+            String fullSystemPrompt = systemPromptBase + "\n\nAvailable tools:\n" + toolDescriptions
+                    + "\nWhen you need to use a tool, emit: <tool_call name=\"tool_name\">{\"arg\":\"value\"}</tool_call>\n"
+                    + "Do not write tool calls as prose such as `Tool call: name({...})`; use only the XML tag format above.\n"
+                    + "When you have enough information, provide your final answer starting with <final_answer>."
+                    + promptReinforcement;
+
+            // Emit MODEL_STARTED
+            int stepNum = state.<Integer>value("chat_steps").orElse(0) + 1;
+            int maxSteps = properties.getMaxIterations();
+            GraphEventRegistry.publish(runId, AgentEvent.of(
+                    UUID.randomUUID().toString(),
+                    runId,
+                    threadId,
+                    AgentEventType.MODEL_STARTED,
+                    "Model step " + stepNum + "/" + maxSteps,
+                    Map.of("step", stepNum, "maxSteps", maxSteps)
+            ));
+
+            PromptAssembler.Result assembly = promptAssembler.assemble(fullSystemPrompt, modelName, typedHistory);
+            ModelPrompt prompt = assembly.prompt();
+
+            long startTime = System.currentTimeMillis();
+            ModelResponse response = modelClient.generate(prompt).block();
+            long duration = System.currentTimeMillis() - startTime;
+
+            String responseContent = response != null && response.content() != null ? response.content() : "";
+
+            // Emit MODEL_DELTA with full content
+            GraphEventRegistry.publish(runId, AgentEvent.of(
+                    UUID.randomUUID().toString(),
+                    runId,
+                    threadId,
+                    AgentEventType.MODEL_DELTA,
+                    responseContent,
+                    Map.of("step", stepNum, "modelDurationMs", duration)
+            ));
+
+            // Append assistant message to window
+            Map<String, Object> assistantMsg = new LinkedHashMap<>();
+            assistantMsg.put("messageId", UUID.randomUUID().toString());
+            assistantMsg.put("threadId", threadId);
+            assistantMsg.put("runId", runId);
+            assistantMsg.put("role", ModelMessage.Role.ASSISTANT.name());
+            assistantMsg.put("content", responseContent);
+            assistantMsg.put("metadata", Map.of("step", stepNum, "modelDurationMs", duration));
+            assistantMsg.put("createdAt", java.time.Instant.now().toString());
+
+            List<Map<String, Object>> newWindow = new ArrayList<>(windowMaps);
+            newWindow.add(assistantMsg);
+
+            Map<String, Object> update = new HashMap<>();
+            update.put(AgentGraphStateKeys.MESSAGE_WINDOW, newWindow);
+            update.put("chat_steps", stepNum);
+            update.put("last_assistant_content", responseContent);
+            update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "call_model", "status", "completed")));
+            return update;
+        });
+    }
+}
