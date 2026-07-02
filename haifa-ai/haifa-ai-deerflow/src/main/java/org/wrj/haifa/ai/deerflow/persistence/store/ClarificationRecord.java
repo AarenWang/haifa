@@ -14,5 +14,7 @@ public record ClarificationRecord(
         String answer,
         Instant createdAt,
         Instant answeredAt,
-        List<String> options
+        List<String> options,
+        List<ClarificationQuestion> questions,
+        List<ClarificationAnswer> answers
 ) {}

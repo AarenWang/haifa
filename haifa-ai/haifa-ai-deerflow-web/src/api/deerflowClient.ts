@@ -11,6 +11,7 @@ import type {
   RunResponse,
   ThreadListResponse,
   ThreadRecord,
+  ClarificationAnswer,
 } from '../types';
 
 
@@ -292,6 +293,7 @@ export async function answerClarification(params: {
   clarificationId?: string;
   threadId?: string;
   answer: string;
+  answers?: ClarificationAnswer[];
 }): Promise<ClarificationRecord> {
   let clarificationId = params.clarificationId;
   if (!clarificationId && params.threadId) {
@@ -314,7 +316,7 @@ export async function answerClarification(params: {
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ answer: params.answer }),
+    body: JSON.stringify({ answer: params.answer, answers: params.answers }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => 'Unknown error');

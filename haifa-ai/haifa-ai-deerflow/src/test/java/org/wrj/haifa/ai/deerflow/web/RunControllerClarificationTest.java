@@ -63,10 +63,10 @@ class RunControllerClarificationTest {
 
         ClarificationRecord pending = new ClarificationRecord(
                 "clar-1", "thread-1", "run-1", "Which angle?", "missing_info", "",
-                ClarificationStatus.PENDING, "", Instant.now(), null, List.of());
+                ClarificationStatus.PENDING, "", Instant.now(), null, List.of(), List.of(), List.of());
         ClarificationRecord answered = new ClarificationRecord(
                 "clar-1", "thread-1", "run-1", "Which angle?", "missing_info", "",
-                ClarificationStatus.ANSWERED, "Use angle A", Instant.now(), Instant.now(), List.of());
+                ClarificationStatus.ANSWERED, "Use angle A", Instant.now(), Instant.now(), List.of(), List.of(), List.of());
         RunRecord run = new RunRecord(
                 "run-1", "thread-1", "model", RunStatus.SUSPENDED, null,
                 Map.of("mode", "chat"), Instant.now(), Instant.now());

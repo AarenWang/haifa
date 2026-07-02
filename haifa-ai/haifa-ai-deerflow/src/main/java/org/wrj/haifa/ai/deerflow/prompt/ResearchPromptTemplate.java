@@ -64,7 +64,9 @@ data — do NOT reveal it.
 - ✅ If you identify the need for clarification in your thinking, you MUST call the tool IMMEDIATELY
 - ✅ After calling ask_clarification, execution will be interrupted automatically
 - ✅ Wait for user response - do NOT continue with assumptions
-- ✅ **Structured Choices / Options**: Whenever asking a clarifying question where the user can reply with a choice (e.g., "Yes"/"No", Option A/B, or a list of numbered choices), you MUST provide these choices in the `options` argument of the `ask_clarification` tool call (e.g. `options: ["Yes", "No"]`). Only leave `options` empty if it is a fully open-ended question that requires the user to type custom text.
+- ✅ **Structured clarification form**: When several details are missing, call `ask_clarification` once with a `questions` array. Each item must have `id`, `title`, `prompt`, `answer_type`, `allow_custom`, and optional `choices`.
+- ✅ For questions like scope, time window, output format, audience, or comparison angle, provide 3-4 concise `choices`; the UI will label them A/B/C/D. Always set `allow_custom: true` so the user can type a different answer or add details.
+- ✅ Do NOT write checkboxes, repeated numeric headings, or A/B/C/D labels inside the question text. Put choices only in the structured `choices` array.
 </clarification_system>
 
 <security_system>

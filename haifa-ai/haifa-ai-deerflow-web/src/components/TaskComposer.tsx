@@ -1,10 +1,10 @@
 import { ArrowUp, Square, RotateCcw, ChevronDown, Copy, Check, Search, MessageCircle, SlidersHorizontal } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import type { AppStatus, RunRequest } from '../types';
+import type { AppStatus, RunRequest, ClarificationQuestion, ClarificationAnswer } from '../types';
 
 interface TaskComposerProps {
   onRun: (req: RunRequest) => void;
-  onAnswerClarification?: (answer: string, clarification: PendingClarification) => void;
+  onAnswerClarification?: (answer: string, clarification: PendingClarification, answers?: ClarificationAnswer[]) => void;
   onStop: () => void;
   isRunning: boolean;
   status: AppStatus;
@@ -21,6 +21,7 @@ export interface PendingClarification {
   runId: string;
   threadId?: string;
   question?: string;
+  questions?: ClarificationQuestion[];
 }
 
 export default function TaskComposer({
@@ -118,7 +119,8 @@ export default function TaskComposer({
     }
   };
 
-  const canRun = !!message.trim() && !isRunning;
+  const hasStructuredClarification = !!pendingClarification?.questions?.length;
+  const canRun = !!message.trim() && !isRunning && !hasStructuredClarification;
   const submitTitle = pendingClarification
     ? '提交澄清回答'
     : mode === 'research'
@@ -132,14 +134,14 @@ export default function TaskComposer({
           ref={textareaRef}
           className="composer-textarea"
           placeholder={pendingClarification
-            ? "回答上方澄清问题..."
+            ? (hasStructuredClarification ? "请填写上方澄清表单..." : "回答上方澄清问题...")
             : mode === 'research'
               ? "Research a topic deeply..."
               : "Message DeerFlow..."}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={isRunning}
+          disabled={isRunning || hasStructuredClarification}
           rows={1}
         />
         <div className="composer-inline-actions">

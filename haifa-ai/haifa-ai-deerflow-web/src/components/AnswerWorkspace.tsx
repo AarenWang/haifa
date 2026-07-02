@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw, RefreshCw } from 'lucide-react';
-import type { AppPhase, AppStatus, MessageRecord } from '../types';
+import type { AppPhase, AppStatus, ClarificationAnswer, MessageRecord } from '../types';
 import { renderMarkdown } from '../utils/markdownRenderer';
 import ApprovalCard from './ApprovalCard';
 import ClarificationCard from './ClarificationCard';
@@ -16,7 +16,7 @@ interface AnswerWorkspaceProps {
   onRefreshMessage?: (messageId: string) => void;
   onResumeRun?: (runId: string) => void;
   pendingClarification?: PendingClarification;
-  onAnswerClarification?: (answer: string, clarification: PendingClarification) => void;
+  onAnswerClarification?: (answer: string, clarification: PendingClarification, answers?: ClarificationAnswer[]) => void;
 }
 
 const phaseLabels: Record<AppPhase, string> = {
@@ -158,9 +158,9 @@ export default function AnswerWorkspace({
                     <ClarificationCard
                       message={message}
                       isPending={pendingClarificationMsgId === message.messageId}
-                      onAnswer={(answer) => {
+                      onAnswer={(answer, answers) => {
                         if (pendingClarification && onAnswerClarification) {
-                          onAnswerClarification(answer, pendingClarification);
+                          onAnswerClarification(answer, pendingClarification, answers);
                         }
                       }}
                     />

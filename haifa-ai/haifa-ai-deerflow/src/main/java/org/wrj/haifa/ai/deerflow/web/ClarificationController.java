@@ -3,6 +3,7 @@ package org.wrj.haifa.ai.deerflow.web;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationAnswer;
 import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationRecord;
 import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStore;
 import reactor.core.publisher.Mono;
@@ -29,11 +30,11 @@ public class ClarificationController {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Answer is required"));
         }
         try {
-            return Mono.just(clarificationStore.answer(clarificationId, request.answer()));
+            return Mono.just(clarificationStore.answer(clarificationId, request.answer(), request.answers()));
         } catch (IllegalArgumentException ex) {
             return Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage()));
         }
     }
 
-    public record AnswerRequest(String answer) {}
+    public record AnswerRequest(String answer, java.util.List<ClarificationAnswer> answers) {}
 }

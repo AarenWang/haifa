@@ -1,5 +1,5 @@
 import { useReducer, useRef, useCallback, useEffect, useState } from 'react';
-import type { RunRequest, UploadRecord, AppStatus } from './types';
+import type { RunRequest, UploadRecord, AppStatus, ClarificationQuestion, ClarificationAnswer } from './types';
 import { deerflowReducer, initialState } from './state/deerflowReducer';
 import {
   answerClarification,
@@ -414,11 +414,12 @@ function App() {
     });
   }, [refreshArtifactData, refreshMessages, refreshResearchData, refreshThreads, state.lastRequest, state.threadId]);
 
-  const handleAnswerClarification = useCallback((answer: string, clarification: PendingClarification) => {
+  const handleAnswerClarification = useCallback((answer: string, clarification: PendingClarification, answers?: ClarificationAnswer[]) => {
     answerClarification({
       clarificationId: clarification.clarificationId,
       threadId: clarification.threadId || state.threadId,
       answer,
+      answers,
     }).then((record) => {
       handleResumeRun(record.runId || clarification.runId);
     }).catch((err) => {
@@ -622,9 +623,57 @@ function getPendingClarification(
       runId: typeof metadata.resumeRunId === 'string' ? metadata.resumeRunId : message.runId,
       threadId: typeof metadata.resumeThreadId === 'string' ? metadata.resumeThreadId : threadId,
       question: typeof metadata.question === 'string' ? metadata.question : undefined,
+      questions: parseClarificationQuestions(metadata.questions),
     };
   }
   return undefined;
+}
+
+function parseClarificationQuestions(value: unknown): ClarificationQuestion[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const questions = value
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') {
+        return undefined;
+      }
+      const record = item as Record<string, unknown>;
+      const choices = Array.isArray(record.choices)
+        ? record.choices
+          .map((choice, choiceIndex) => {
+            if (!choice || typeof choice !== 'object') return undefined;
+            const choiceRecord = choice as Record<string, unknown>;
+            const text = stringValue(choiceRecord.text) || stringValue(choiceRecord.label);
+            if (!text) return undefined;
+            return {
+              id: stringValue(choiceRecord.id) || String.fromCharCode(97 + choiceIndex),
+              label: stringValue(choiceRecord.label) || String.fromCharCode(65 + choiceIndex),
+              text,
+            };
+          })
+          .filter((choice): choice is { id: string; label: string; text: string } => !!choice)
+        : [];
+      return {
+        id: stringValue(record.id) || `q${index + 1}`,
+        title: stringValue(record.title) || stringValue(record.prompt) || `问题 ${index + 1}`,
+        prompt: stringValue(record.prompt) || stringValue(record.title) || '',
+        answerType: stringValue(record.answerType) || stringValue(record.answer_type) || (choices.length ? 'SINGLE_CHOICE_WITH_CUSTOM' : 'TEXT'),
+        choices,
+        allowCustom: booleanValue(record.allowCustom, booleanValue(record.allow_custom, true)),
+        required: booleanValue(record.required, true),
+      };
+    })
+    .filter((question): question is ClarificationQuestion => !!question);
+  return questions.length ? questions : undefined;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function booleanValue(value: unknown, fallback: boolean) {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 function getThreadIdFromUrl() {

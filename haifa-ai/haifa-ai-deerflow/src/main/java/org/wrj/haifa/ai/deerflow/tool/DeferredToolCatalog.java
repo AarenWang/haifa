@@ -106,7 +106,7 @@ public class DeferredToolCatalog {
     private List<ToolDescriptor> standardDescriptors() {
         return List.of(
                 new ToolDescriptor("present_files", "Present final output files to the user.", "builtin", "展示/人机交互", false),
-                new ToolDescriptor("ask_clarification", "Ask the user for clarification about ambiguous requirements.", "builtin", "展示/人机交互", false),
+                new ToolDescriptor("ask_clarification", "Ask the user for structured clarification about ambiguous requirements.", "builtin", "展示/人机交互", false),
                 new ToolDescriptor("view_image", "View an image file from the workspace.", "builtin", "展示/人机交互", false),
                 new ToolDescriptor("current_time", "Get the current date and time.", "builtin", "展示/人机交互", false),
                 new ToolDescriptor("tool_search", "Search available tools and skills.", "builtin", "展示/人机交互", false),

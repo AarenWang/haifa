@@ -653,23 +653,23 @@ public class AgentLoop {
                         String clarificationId = (String) rawToolResult.metadata().get("clarificationId");
                         String type = (String) rawToolResult.metadata().getOrDefault("clarificationType", "missing_info");
                         Object options = rawToolResult.metadata().getOrDefault("options", java.util.List.of());
+                        Object questions = rawToolResult.metadata().getOrDefault("questions", java.util.List.of());
+
+                        Map<String, Object> clarificationMetadata = new HashMap<>();
+                        clarificationMetadata.put("question", question);
+                        clarificationMetadata.put("clarificationType", type);
+                        clarificationMetadata.put("clarificationId", clarificationId);
+                        clarificationMetadata.put("resumeThreadId", runConfig.threadId());
+                        clarificationMetadata.put("resumeRunId", runConfig.runId());
+                        clarificationMetadata.put("options", options);
+                        clarificationMetadata.put("questions", questions);
 
                         emitter.emit(event(seq, runConfig, AgentEventType.CLARIFICATION_REQUIRED,
                                 "Clarification required: " + question,
-                                Map.of("question", question,
-                                        "clarificationType", type,
-                                        "clarificationId", clarificationId,
-                                        "resumeThreadId", runConfig.threadId(),
-                                        "resumeRunId", runConfig.runId(),
-                                        "options", options)));
+                                clarificationMetadata));
                         emitter.emit(event(seq, runConfig, AgentEventType.RUN_SUSPENDED,
                                 "Run suspended waiting for user clarification.",
-                                Map.of("question", question,
-                                        "clarificationType", type,
-                                        "clarificationId", clarificationId,
-                                        "resumeThreadId", runConfig.threadId(),
-                                        "resumeRunId", runConfig.runId(),
-                                        "options", options)));
+                                clarificationMetadata));
                         if (agentLoopRunStore != null) {
                             agentLoopRunStore.markSuspended(runConfig.runId(), "CLARIFICATION_REQUIRED");
                         }

@@ -1,6 +1,7 @@
 package org.wrj.haifa.ai.deerflow.persistence.store;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -13,10 +14,13 @@ public class AgentClarificationStore implements ClarificationStore {
     private final Map<String, ClarificationRecord> store = new ConcurrentHashMap<>();
 
     @Override
-    public ClarificationRecord create(String threadId, String runId, String question, String type, String context, java.util.List<String> options) {
+    public ClarificationRecord create(String threadId, String runId, String question, String type, String context,
+                                      List<String> options, List<ClarificationQuestion> questions) {
         findPending(threadId).ifPresent(c -> cancel(c.clarificationId()));
 
         String clarificationId = UUID.randomUUID().toString();
+        List<ClarificationQuestion> normalizedQuestions = questions == null ? List.of() : List.copyOf(questions);
+        List<String> normalizedOptions = options == null ? List.of() : List.copyOf(options);
         ClarificationRecord record = new ClarificationRecord(
                 clarificationId,
                 threadId,
@@ -28,7 +32,9 @@ public class AgentClarificationStore implements ClarificationStore {
                 null,
                 Instant.now(),
                 null,
-                options
+                normalizedOptions,
+                normalizedQuestions,
+                List.of()
         );
         store.put(clarificationId, record);
         return record;
@@ -73,7 +79,7 @@ public class AgentClarificationStore implements ClarificationStore {
     }
 
     @Override
-    public ClarificationRecord answer(String clarificationId, String answer) {
+    public ClarificationRecord answer(String clarificationId, String answer, List<ClarificationAnswer> answers) {
         ClarificationRecord old = store.get(clarificationId);
         if (old == null) {
             throw new IllegalArgumentException("Clarification not found: " + clarificationId);
@@ -92,7 +98,9 @@ public class AgentClarificationStore implements ClarificationStore {
                 answer,
                 old.createdAt(),
                 Instant.now(),
-                old.options()
+                old.options(),
+                old.questions(),
+                answers == null ? List.of() : List.copyOf(answers)
         );
         store.put(clarificationId, updated);
         return updated;
@@ -113,7 +121,9 @@ public class AgentClarificationStore implements ClarificationStore {
                     old.answer(),
                     old.createdAt(),
                     Instant.now(),
-                    old.options()
+                    old.options(),
+                    old.questions(),
+                    old.answers()
             );
             store.put(clarificationId, updated);
         }

@@ -185,6 +185,29 @@ export interface MessageRecord {
   createdAt: string;
 }
 
+export interface ClarificationChoice {
+  id: string;
+  label: string;
+  text: string;
+}
+
+export interface ClarificationQuestion {
+  id: string;
+  title: string;
+  prompt: string;
+  answerType: 'TEXT' | 'LONG_TEXT' | 'SINGLE_CHOICE_WITH_CUSTOM' | 'MULTI_CHOICE_WITH_CUSTOM' | string;
+  choices: ClarificationChoice[];
+  allowCustom: boolean;
+  required: boolean;
+}
+
+export interface ClarificationAnswer {
+  questionId: string;
+  answer: string;
+  selectedChoiceIds: string[];
+  customAnswer: string;
+}
+
 export interface MessageListResponse {
   messages: MessageRecord[];
 }

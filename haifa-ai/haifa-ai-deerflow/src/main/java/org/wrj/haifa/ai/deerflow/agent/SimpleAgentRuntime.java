@@ -369,6 +369,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 String question = (String) evt.metadata().get("question");
                                 String clarificationId = (String) evt.metadata().get("clarificationId");
                                 Object options = evt.metadata().get("options");
+                                Object questions = evt.metadata().get("questions");
                                 java.util.Map<String, Object> meta = new java.util.HashMap<>();
                                 meta.put("clarificationPending", true);
                                 meta.put("question", question);
@@ -377,6 +378,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 meta.put("resumeRunId", run.runId());
                                 if (options != null) {
                                     meta.put("options", options);
+                                }
+                                if (questions != null) {
+                                    meta.put("questions", questions);
                                 }
                                 this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM,
                                         "Clarification needed: " + question,
