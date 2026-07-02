@@ -855,7 +855,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 } else {
                     long duration = ((Number) event.metadata().getOrDefault("durationMs", 0L)).longValue();
                     String status = (String) event.metadata().getOrDefault("status", "COMPLETED");
-                    if ("FAILED".equals(status) || (event.content() != null && event.content().startsWith("Tool failed:"))) {
+                    if ("FAILED".equals(status) || "NOT_FOUND".equals(status)
+                            || (event.content() != null && event.content().startsWith("Tool failed:"))) {
                         this.toolExecutionStore.saveFailed(event.runId(), event.threadId(), toolName, event.content(), duration, event.metadata());
                     } else {
                         this.toolExecutionStore.saveCompleted(event.runId(), event.threadId(), toolName, event.content(), duration, event.metadata());
