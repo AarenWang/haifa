@@ -209,7 +209,12 @@ public class RunScriptTool implements AgentTool {
             case "python" -> cmd.add("python");
             case "python3" -> cmd.add("python3");
             case "powershell" -> {
-                cmd.add("powershell");
+                String os = System.getProperty("os.name").toLowerCase();
+                if (os.contains("win")) {
+                    cmd.add("powershell");
+                } else {
+                    cmd.add("pwsh");
+                }
                 cmd.add("-NoProfile");
                 cmd.add("-ExecutionPolicy");
                 cmd.add("Bypass");

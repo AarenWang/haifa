@@ -51,7 +51,7 @@ haifa:
       sandbox:
         enabled: true
         backend: local
-        allowed-script-languages: python,powershell
+        allowed-script-languages: python,powershell,bash
         run-script-local-unsafe-allowed: true
         script-workdir-subdir: scripts
       uploads-root: ${HAIFA_DEERFLOW_UPLOADS:${user.dir}/uploads}

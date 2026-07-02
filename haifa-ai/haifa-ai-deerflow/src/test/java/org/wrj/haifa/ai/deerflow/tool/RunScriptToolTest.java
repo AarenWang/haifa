@@ -178,6 +178,55 @@ class RunScriptToolTest {
         assertThat(result.metadata()).containsEntry("scriptPath", "sandbox/run-456/scripts/" + scriptFolder.getFileName().toString() + "/script.py");
     }
 
+    @Test
+    void generatesCorrectCommandArgsForPowershell(@TempDir Path tmp) {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setAllowedScriptLanguages("powershell");
+        properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setOutputsRoot(tmp.resolve("outputs").toString());
+
+        FakeSandboxRunner runner = new FakeSandboxRunner();
+        RunScriptTool tool = new RunScriptTool(properties, runner, new CommandPolicy(properties));
+
+        ToolRequest request = new ToolRequest(
+                "{\"language\":\"powershell\",\"code\":\"echo 1\",\"args\":[],\"purpose\":\"test\"}",
+                tmp, java.util.List.of(), "thread-123", "run-456"
+        );
+        tool.execute(request);
+
+        boolean isWin = System.getProperty("os.name").toLowerCase().contains("win");
+        String expectedShell = isWin ? "powershell" : "pwsh";
+
+        assertThat(runner.lastRequest.cmdArgs()).containsExactly(
+                expectedShell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "script.ps1"
+        );
+    }
+
+    @Test
+    void generatesCorrectCommandArgsForBash(@TempDir Path tmp) {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setAllowedScriptLanguages("bash");
+        properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setOutputsRoot(tmp.resolve("outputs").toString());
+
+        FakeSandboxRunner runner = new FakeSandboxRunner();
+        RunScriptTool tool = new RunScriptTool(properties, runner, new CommandPolicy(properties));
+
+        ToolRequest request = new ToolRequest(
+                "{\"language\":\"bash\",\"code\":\"echo 1\",\"args\":[],\"purpose\":\"test\"}",
+                tmp, java.util.List.of(), "thread-123", "run-456"
+        );
+        tool.execute(request);
+
+        assertThat(runner.lastRequest.cmdArgs()).containsExactly(
+                "bash", "script.sh"
+        );
+    }
+
     private static class FakeSandboxRunner implements SandboxRunner {
         private int calls;
         private SandboxRequest lastRequest;
