@@ -28,6 +28,7 @@ public class DeerFlowProperties {
     private boolean runScriptEnabled = false;
     private Sandbox sandbox = new Sandbox();
     private Graph graph = new Graph();
+    private Approval approval = new Approval();
     private long maxUploadBytes = 10_485_760;
     private int maxConvertedChars = 60_000;
     private String allowedUploadExtensions = "txt,md,json,csv,log,xml,yml,yaml,properties";
@@ -652,5 +653,52 @@ public class DeerFlowProperties {
 
     public void setSubagentMaxConcurrent(int subagentMaxConcurrent) {
         this.subagentMaxConcurrent = Math.max(1, subagentMaxConcurrent);
+    }
+
+    public Approval getApproval() {
+        return approval;
+    }
+
+    public void setApproval(Approval approval) {
+        this.approval = approval;
+    }
+
+    public static class Approval {
+        private boolean enabled = true;
+        private int defaultTimeoutSeconds = 120;
+        private boolean allowSessionApproval = true;
+        private boolean allowAlwaysApproval = false;
+        private boolean denyOnTimeout = true;
+        private boolean requireForLocalScript = true;
+        private boolean requireForNetwork = true;
+        private boolean requireForFileWrite = true;
+        private boolean hardlinePatternsEnabled = true;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+
+        public int getDefaultTimeoutSeconds() { return defaultTimeoutSeconds; }
+        public void setDefaultTimeoutSeconds(int defaultTimeoutSeconds) { this.defaultTimeoutSeconds = defaultTimeoutSeconds; }
+
+        public boolean isAllowSessionApproval() { return allowSessionApproval; }
+        public void setAllowSessionApproval(boolean allowSessionApproval) { this.allowSessionApproval = allowSessionApproval; }
+
+        public boolean isAllowAlwaysApproval() { return allowAlwaysApproval; }
+        public void setAllowAlwaysApproval(boolean allowAlwaysApproval) { this.allowAlwaysApproval = allowAlwaysApproval; }
+
+        public boolean isDenyOnTimeout() { return denyOnTimeout; }
+        public void setDenyOnTimeout(boolean denyOnTimeout) { this.denyOnTimeout = denyOnTimeout; }
+
+        public boolean isRequireForLocalScript() { return requireForLocalScript; }
+        public void setRequireForLocalScript(boolean requireForLocalScript) { this.requireForLocalScript = requireForLocalScript; }
+
+        public boolean isRequireForNetwork() { return requireForNetwork; }
+        public void setRequireForNetwork(boolean requireForNetwork) { this.requireForNetwork = requireForNetwork; }
+
+        public boolean isRequireForFileWrite() { return requireForFileWrite; }
+        public void setRequireForFileWrite(boolean requireForFileWrite) { this.requireForFileWrite = requireForFileWrite; }
+
+        public boolean isHardlinePatternsEnabled() { return hardlinePatternsEnabled; }
+        public void setHardlinePatternsEnabled(boolean hardlinePatternsEnabled) { this.hardlinePatternsEnabled = hardlinePatternsEnabled; }
     }
 }

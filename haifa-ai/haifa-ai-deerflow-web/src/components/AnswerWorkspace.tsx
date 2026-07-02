@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw, RefreshCw } from 'lucide-react';
 import type { AppPhase, AppStatus, MessageRecord } from '../types';
 import { renderMarkdown } from '../utils/markdownRenderer';
+import ApprovalCard from './ApprovalCard';
 
 interface AnswerWorkspaceProps {
   phase: AppPhase;
@@ -11,6 +12,7 @@ interface AnswerWorkspaceProps {
   error?: string;
   onReRun?: () => void;
   onRefreshMessage?: (messageId: string) => void;
+  onResumeRun?: (runId: string) => void;
 }
 
 const phaseLabels: Record<AppPhase, string> = {
@@ -20,6 +22,7 @@ const phaseLabels: Record<AppPhase, string> = {
   thinking: 'Thinking',
   answering: 'Writing answer',
   done: 'Done',
+  suspended: 'Waiting for approval',
 };
 
 export default function AnswerWorkspace({
@@ -30,6 +33,7 @@ export default function AnswerWorkspace({
   error,
   onReRun,
   onRefreshMessage,
+  onResumeRun,
 }: AnswerWorkspaceProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
@@ -38,7 +42,7 @@ export default function AnswerWorkspace({
   const visibleMessages = messages.filter((message) =>
     message.role === 'USER'
     || message.role === 'ASSISTANT'
-    || (message.role === 'SYSTEM' && Boolean(message.metadata?.clarificationPending))
+    || (message.role === 'SYSTEM' && (Boolean(message.metadata?.clarificationPending) || Boolean(message.metadata?.approvalPending)))
   );
   const hasAssistantContent = visibleMessages.some((message) => message.role === 'ASSISTANT');
 
@@ -123,13 +127,21 @@ export default function AnswerWorkspace({
                     {message.role === 'USER'
                       ? 'You'
                       : message.role === 'SYSTEM'
-                        ? 'Clarification'
+                        ? (message.metadata?.approvalPending ? 'Approval Request' : 'Clarification')
                         : 'DeerFlow'}
                   </div>
-                  <div
-                    className="conversation-message-content"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
-                  />
+                  {message.metadata?.approvalPending ? (
+                    <ApprovalCard
+                      approvalId={message.metadata.approvalId as string}
+                      runId={message.runId}
+                      onResumeRun={onResumeRun}
+                    />
+                  ) : (
+                    <div
+                      className="conversation-message-content"
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+                    />
+                  )}
                   {message.role === 'ASSISTANT' && (
                     <div className="message-actions">
                       <button

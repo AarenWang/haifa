@@ -3,10 +3,14 @@ package org.wrj.haifa.ai.deerflow.run;
 import java.time.Instant;
 import java.util.Map;
 
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+
 public record RunRecord(
         String runId,
         String threadId,
         String modelName,
+        @Enumerated(EnumType.STRING)
         RunStatus status,
         String error,
         Map<String, Object> metadata,

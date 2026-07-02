@@ -40,6 +40,7 @@ export default function Header({ backendStatus, runStatus, onOpenMemorySettings 
       completed: 'Completed',
       failed: 'Failed',
       stopped: 'Stopped',
+      suspended: 'Waiting for approval',
     };
     return (
       <span className={`status-pill ${runStatus}`}>
@@ -82,4 +83,3 @@ export default function Header({ backendStatus, runStatus, onOpenMemorySettings 
     </header>
   );
 }
-

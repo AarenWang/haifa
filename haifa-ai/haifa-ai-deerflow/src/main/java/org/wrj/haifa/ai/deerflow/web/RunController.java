@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.wrj.haifa.ai.deerflow.research.EvidenceItem;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
 import org.wrj.haifa.ai.deerflow.research.ResearchSource;
@@ -36,6 +37,10 @@ import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationRecord;
 import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStatus;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalStore;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalRequestRecord;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalStatus;
+import java.util.Optional;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
@@ -59,6 +64,7 @@ public class RunController {
     private final ResearchQualityGate researchQualityGate;
     private final ClarificationStore clarificationStore;
     private final MessageStore messageStore;
+    private final ApprovalStore approvalStore;
     private static final java.time.format.DateTimeFormatter ISO = java.time.format.DateTimeFormatter.ISO_INSTANT;
 
     public RunController(AgentRuntime agentRuntime, RunManager runManager,
@@ -70,6 +76,22 @@ public class RunController {
             ResearchQualityGate researchQualityGate,
             ClarificationStore clarificationStore,
             MessageStore messageStore) {
+        this(agentRuntime, runManager, agentEventStore, toolExecutionStore, toolCallStore, modelStepStore,
+             researchRuntimeSupport, researchPlanStore, researchProgressTracker, researchQualityGate,
+             clarificationStore, messageStore, null);
+    }
+
+    @Autowired
+    public RunController(AgentRuntime agentRuntime, RunManager runManager,
+            AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
+            ToolCallStore toolCallStore, ModelStepStore modelStepStore,
+            ResearchRuntimeSupport researchRuntimeSupport,
+            ResearchPlanStore researchPlanStore,
+            ResearchProgressTracker researchProgressTracker,
+            ResearchQualityGate researchQualityGate,
+            ClarificationStore clarificationStore,
+            MessageStore messageStore,
+            @Autowired(required = false) ApprovalStore approvalStore) {
         this.agentRuntime = agentRuntime;
         this.runManager = runManager;
         this.agentEventStore = agentEventStore;
@@ -82,6 +104,7 @@ public class RunController {
         this.researchQualityGate = researchQualityGate;
         this.clarificationStore = clarificationStore;
         this.messageStore = messageStore;
+        this.approvalStore = approvalStore;
     }
 
     @PostMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -110,11 +133,15 @@ public class RunController {
         org.wrj.haifa.ai.deerflow.run.RunRecord originalRun = this.runManager.find(runId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
 
-        ClarificationRecord clarification = this.clarificationStore.findByRunId(runId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No clarification record found for this run"));
+        Optional<ClarificationRecord> clarificationOpt = this.clarificationStore.findByRunId(runId);
+        Optional<ApprovalRequestRecord> approvalOpt = this.approvalStore != null
+                ? this.approvalStore.findByRunId(runId).stream()
+                        .filter(a -> a.status() == ApprovalStatus.APPROVED || a.status() == ApprovalStatus.DENIED || a.status() == ApprovalStatus.EXPIRED)
+                        .findFirst()
+                : Optional.empty();
 
-        if (clarification.status() != ClarificationStatus.ANSWERED) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Clarification has not been answered yet");
+        if (clarificationOpt.isEmpty() && approvalOpt.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "No clarification or approval record found for this run");
         }
 
         List<org.wrj.haifa.ai.deerflow.thread.MessageRecord> runMessages = this.messageStore.listByRun(runId);
@@ -126,7 +153,18 @@ public class RunController {
 
         java.util.Map<String, Object> metadata = new java.util.HashMap<>();
         metadata.put("resumedFromRunId", runId);
-        metadata.put("clarificationId", clarification.clarificationId());
+
+        if (clarificationOpt.isPresent()) {
+            ClarificationRecord clarification = clarificationOpt.get();
+            if (clarification.status() != ClarificationStatus.ANSWERED) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Clarification has not been answered yet");
+            }
+            metadata.put("clarificationId", clarification.clarificationId());
+        } else {
+            ApprovalRequestRecord approval = approvalOpt.get();
+            metadata.put("approvalId", approval.approvalId());
+            metadata.put("approvalDecision", approval.decisionType() != null ? approval.decisionType().name() : approval.status().name());
+        }
 
         org.wrj.haifa.ai.deerflow.agent.ResearchOptions options = originalRun.metadata() != null ?
                 reconstructResearchOptions(originalRun.metadata()) :
@@ -190,6 +228,14 @@ public class RunController {
     @GetMapping("/{runId}/events")
     public Mono<List<AgentEvent>> events(@PathVariable String runId) {
         return Mono.just(this.agentEventStore.findByRunId(runId));
+    }
+
+    @GetMapping("/{runId}/approvals")
+    public Mono<List<ApprovalRequestRecord>> approvals(@PathVariable String runId) {
+        if (this.approvalStore == null) {
+            return Mono.just(List.of());
+        }
+        return Mono.just(this.approvalStore.findByRunId(runId));
     }
 
     @GetMapping("/{runId}/tool-executions")

@@ -14,7 +14,7 @@ import type {
 } from '../types';
 
 
-function getUserId(): string {
+export function getUserId(): string {
   if (typeof window !== 'undefined') {
     const params = new URLSearchParams(window.location.search);
     const userId = params.get('userId') || localStorage.getItem('userId');
@@ -149,6 +149,121 @@ export async function readDeerFlowStream(
     }
 
     // Final dispatch if there's a pending event without trailing newline
+    if (currentData || currentEvent || currentId) {
+      dispatchEvent();
+    }
+  } catch (err) {
+    if (signal.aborted) {
+      return;
+    }
+    handlers.onError(`Stream error: ${(err as Error).message}`);
+  } finally {
+    reader.releaseLock();
+  }
+
+  handlers.onDone();
+}
+
+export async function readDeerFlowResumeStream(
+  runId: string,
+  handlers: StreamHandlers,
+  signal: AbortSignal
+): Promise<void> {
+  const response = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/resume`, {
+    method: 'POST',
+    headers: {
+      Accept: 'text/event-stream',
+    },
+    signal,
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => 'Unknown error');
+    handlers.onError(`HTTP ${response.status}: ${text}`);
+    return;
+  }
+
+  if (!response.body) {
+    handlers.onError('No response body');
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let currentData = '';
+  let currentEvent = '';
+  let currentId = '';
+
+  function dispatchEvent() {
+    if (currentData) {
+      try {
+        const parsed: DeerFlowEvent = JSON.parse(currentData);
+        handlers.onEvent(parsed);
+      } catch (e) {
+        handlers.onError(
+          `JSON parse error: ${(e as Error).message}. Raw: ${currentData}`
+        );
+      }
+    }
+    currentData = '';
+    currentEvent = '';
+    currentId = '';
+  }
+
+  try {
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      let normalized = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      const lines = normalized.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line === '') {
+          dispatchEvent();
+        } else if (line.startsWith('data:')) {
+          const value = line.slice(5).startsWith(' ') ? line.slice(6) : line.slice(5);
+          currentData += (currentData ? '\n' : '') + value;
+        } else if (line.startsWith('event:')) {
+          const value = line.slice(6).startsWith(' ') ? line.slice(7) : line.slice(6);
+          currentEvent = value;
+        } else if (line.startsWith('id:')) {
+          const value = line.slice(3).startsWith(' ') ? line.slice(4) : line.slice(3);
+          currentId = value;
+        } else {
+          if (currentData) {
+            currentData += '\n' + line;
+          }
+        }
+      }
+    }
+
+    if (buffer) {
+      const line = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      if (line === '') {
+        dispatchEvent();
+      } else if (line.startsWith('data:')) {
+        const value = line.slice(5).startsWith(' ') ? line.slice(6) : line.slice(5);
+        currentData += (currentData ? '\n' : '') + value;
+        dispatchEvent();
+      } else if (line.startsWith('event:')) {
+        const value = line.slice(6).startsWith(' ') ? line.slice(7) : line.slice(6);
+        currentEvent = value;
+        dispatchEvent();
+      } else if (line.startsWith('id:')) {
+        const value = line.slice(3).startsWith(' ') ? line.slice(4) : line.slice(3);
+        currentId = value;
+        dispatchEvent();
+      } else if (currentData) {
+        currentData += '\n' + line;
+        dispatchEvent();
+      }
+    }
+
     if (currentData || currentEvent || currentId) {
       dispatchEvent();
     }

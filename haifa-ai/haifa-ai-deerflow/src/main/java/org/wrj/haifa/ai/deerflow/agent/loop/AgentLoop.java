@@ -4,8 +4,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
@@ -27,6 +31,15 @@ import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStore;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalStore;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalPolicyService;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalPolicyDecision;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalPolicyDecisionType;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalRequestRecord;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalCreateRequest;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalStatus;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalDecisionType;
+import org.wrj.haifa.ai.deerflow.approval.RiskLevel;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 import reactor.core.scheduler.Schedulers;
@@ -37,6 +50,7 @@ import reactor.core.scheduler.Schedulers;
 public class AgentLoop {
 
     private static final Logger log = LoggerFactory.getLogger(AgentLoop.class);
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final AgentModelClient modelClient;
     private final ToolRegistry toolRegistry;
@@ -47,32 +61,42 @@ public class AgentLoop {
     private final AgentLoopObserver observer;
     private final ToolOutputBudgetMiddleware toolOutputBudgetMiddleware;
     private final ClarificationStore clarificationStore;
+    private final ApprovalPolicyService approvalPolicyService;
+    private final ApprovalStore approvalStore;
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry) {
-        this(modelClient, toolRegistry, null, null, null, new NoopAgentLoopObserver(), null, null);
+        this(modelClient, toolRegistry, null, null, null, new NoopAgentLoopObserver(), null, null, null, null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore) {
-        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, new NoopAgentLoopObserver(), null, null);
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, new NoopAgentLoopObserver(), null, null, null, null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             AgentLoopObserver observer) {
-        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer, null, null);
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer, null, null, null, null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             AgentLoopObserver observer, ToolOutputBudgetMiddleware toolOutputBudgetMiddleware) {
-        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer, toolOutputBudgetMiddleware, null);
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer, toolOutputBudgetMiddleware, null, null, null);
     }
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             AgentLoopObserver observer, ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
             ClarificationStore clarificationStore) {
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer, toolOutputBudgetMiddleware, clarificationStore, null, null);
+    }
+
+    public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            AgentLoopObserver observer, ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
+            ClarificationStore clarificationStore, ApprovalPolicyService approvalPolicyService,
+            ApprovalStore approvalStore) {
         this.modelClient = modelClient;
         this.toolRegistry = toolRegistry;
         this.toolCallParser = new ToolCallParser();
@@ -82,6 +106,8 @@ public class AgentLoop {
         this.observer = observer != null ? observer : new NoopAgentLoopObserver();
         this.toolOutputBudgetMiddleware = toolOutputBudgetMiddleware;
         this.clarificationStore = clarificationStore;
+        this.approvalPolicyService = approvalPolicyService;
+        this.approvalStore = approvalStore;
     }
 
     public Flux<AgentEvent> run(
@@ -103,6 +129,129 @@ public class AgentLoop {
                 agentLoopRunStore.create(runConfig.runId(), runConfig.threadId(), config);
             }
 
+            List<AgentEvent> events = new ArrayList<>();
+            EventEmitter emitter = new EventEmitter(events, sink);
+            int totalToolCalls = 0;
+
+            // Check if resumed from approval
+            if (runConfig.metadata() != null && runConfig.metadata().containsKey("approvalId") && approvalStore != null && approvalPolicyService != null) {
+                String approvalId = (String) runConfig.metadata().get("approvalId");
+                Optional<ApprovalRequestRecord> appOpt = approvalStore.find(approvalId);
+                if (appOpt.isPresent()) {
+                    ApprovalRequestRecord appRecord = appOpt.get();
+                    
+                    // Reconstruct assistant message that requested tool call
+                    String assistantMsg = "Assistant: <tool_call name=\"" + appRecord.toolName() + "\">" + appRecord.argsJson() + "</tool_call>";
+                    history.add(assistantMsg);
+                    
+                    // Auto-expire pending approvals that have passed their expiration time
+                    if (appRecord.status() == ApprovalStatus.PENDING && appRecord.expiresAt() != null && Instant.now().isAfter(appRecord.expiresAt())) {
+                        appRecord = approvalStore.markExpired(approvalId);
+                    }
+                    
+                    // Verify the status
+                    if (appRecord.status() == ApprovalStatus.APPROVED) {
+                        // Re-verify hash!
+                        String calculatedHash = approvalPolicyService.hashArgs(appRecord.toolName(), appRecord.argsJson());
+                        if (appRecord.argsHash().equals(calculatedHash)) {
+                            // Mark as EXECUTED
+                            approvalStore.markExecuted(approvalId);
+
+                            // Execute the tool call
+                            long toolStartTime = System.currentTimeMillis();
+                            ToolCall toolCall = ToolCall.of(appRecord.toolCallId(), appRecord.toolName(), appRecord.argsJson());
+                            
+                            // Emit start event
+                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                                    "Executing " + appRecord.toolName() + " (Approved)",
+                                    Map.of("toolCallId", appRecord.toolCallId(), "toolName", appRecord.toolName())));
+                            
+                            ToolCallResult rawToolResult;
+                            try {
+                                rawToolResult = executeTool(toolCall, runConfig, uploadedFileIds, activeSkills);
+                            } catch (Exception ex) {
+                                long duration = System.currentTimeMillis() - toolStartTime;
+                                rawToolResult = ToolCallResult.fromError(toolCall, "Tool failed: " + ex.getMessage(), duration);
+                            }
+                            
+                            long toolDuration = rawToolResult.durationMs();
+                            
+                            // Persist result
+                            if (toolCallStore != null) {
+                                try {
+                                    toolCallStore.saveResult(toolCall.id(), rawToolResult);
+                                } catch (Exception e) {
+                                    log.warn("Failed to persist tool call result: {}", e.getMessage());
+                                }
+                            }
+                            
+                            // Compress output
+                            String compressedResult = rawToolResult.result();
+                            if (toolOutputBudgetMiddleware != null && rawToolResult.status() == ToolCallResult.Status.SUCCESS) {
+                                String processed = toolOutputBudgetMiddleware.processToolOutput(
+                                        toolCall.toolName(), rawToolResult.result(), runConfig.threadId(), runConfig.runId(), null, null, null);
+                                if (processed != null && processed.length() < rawToolResult.result().length()) {
+                                    compressedResult = processed;
+                                    emitter.emit(event(seq, runConfig, AgentEventType.TOOL_OUTPUT_BUDGET_EXCEEDED,
+                                            "Tool output budget exceeded for: " + toolCall.toolName() + ". Compressed.",
+                                            Map.of("toolName", toolCall.toolName(), "compressed", true)));
+                                }
+                            }
+                            
+                            String eventContent = compressedResult;
+                            if (rawToolResult.status() == ToolCallResult.Status.FAILED && rawToolResult.error() != null) {
+                                eventContent = rawToolResult.error();
+                            }
+                            
+                            Map<String, Object> completionMetadata = new HashMap<>(rawToolResult.metadata());
+                            completionMetadata.put("toolCallId", toolCall.id());
+                            completionMetadata.put("toolName", toolCall.toolName());
+                            completionMetadata.put("status", rawToolResult.status().name());
+                            completionMetadata.put("durationMs", toolDuration);
+                            completionMetadata.put("error", rawToolResult.error() != null ? rawToolResult.error() : "");
+                            
+                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                                    eventContent,
+                                    completionMetadata));
+                            
+                            // Append tool result to history
+                            history.add("Tool result (" + appRecord.toolName() + "): " + compressedResult);
+                            totalToolCalls++;
+                            
+                            emitter.flush();
+                        } else {
+                            // INVALIDATED due to args hash mismatch!
+                            approvalStore.markInvalidated(approvalId, "Args hash mismatch: expected " + appRecord.argsHash() + " but got " + calculatedHash);
+                            history.add("Tool result (" + appRecord.toolName() + "): Error: args hash mismatch. Tool call parameter modification detected.");
+                        }
+                    } else {
+                        // DENIED, EXPIRED, CANCELLED etc.
+                        String denMsg = "APPROVAL_DENIED: This action was not executed. Do not retry this action, rephrase it, switch tools, or bypass the user's decision.";
+                        if (appRecord.status() == ApprovalStatus.EXPIRED) {
+                            denMsg = "APPROVAL_EXPIRED: This action was not executed. Do not retry this action, rephrase it, switch tools, or bypass the user's decision.";
+                            emitter.emit(event(seq, runConfig, AgentEventType.APPROVAL_EXPIRED,
+                                    "Approval expired for " + appRecord.toolName(),
+                                    Map.of(
+                                            "approvalId", appRecord.approvalId(),
+                                            "toolCallId", appRecord.toolCallId(),
+                                            "toolName", appRecord.toolName(),
+                                            "reason", "Approval timeout"
+                                    )));
+                        }
+                        
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                                "Policy denied " + appRecord.toolName() + " (" + appRecord.status() + ")",
+                                Map.of("toolCallId", appRecord.toolCallId(), "toolName", appRecord.toolName(), "denied", true)));
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                                denMsg,
+                                Map.of("toolCallId", appRecord.toolCallId(), "toolName", appRecord.toolName(), "denied", true)));
+                        
+                        history.add("Tool result (" + appRecord.toolName() + "): " + denMsg);
+                        emitter.flush();
+                    }
+                }
+            }
+
             StringBuilder toolDescriptions = new StringBuilder();
             for (AgentTool tool : toolRegistry.tools()) {
                 String toolName = tool.name();
@@ -119,9 +268,6 @@ public class AgentLoop {
                     + "When you have enough information, provide your final answer starting with <final_answer>."
                     + promptReinforcement;
 
-            List<AgentEvent> events = new ArrayList<>();
-            EventEmitter emitter = new EventEmitter(events, sink);
-            int totalToolCalls = 0;
             boolean stopped = false;
             String stopReason = null;
             String lastModelContent = "";
@@ -379,6 +525,97 @@ public class AgentLoop {
                                 Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
                         history.add("Tool result (" + targetToolName + "): Tool denied by policy");
                         continue;
+                    }
+
+                    // Approval Policy check
+                    if (approvalPolicyService != null && approvalStore != null) {
+                        ModelToolCall modelToolCall = new ModelToolCall(toolCall.id(), targetToolName, toolCall.arguments());
+                        ApprovalPolicyDecision approvalDecision = approvalPolicyService.evaluate(modelToolCall, targetTool, runConfig);
+                        
+                        if (approvalDecision.type() == ApprovalPolicyDecisionType.DENY) {
+                            String denMsg = "POLICY_BLOCKED: " + approvalDecision.reason() + ". This action was not executed. Do not retry this action, rephrase it, switch tools, or bypass the user's decision.";
+                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                                    "Policy denied " + targetToolName + ": " + approvalDecision.reason(),
+                                    Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
+                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                                    denMsg,
+                                    Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
+                            history.add("Tool result (" + targetToolName + "): " + denMsg);
+                            continue;
+                        }
+                        
+                        if (approvalDecision.type() == ApprovalPolicyDecisionType.REQUIRE_APPROVAL) {
+                            String calculatedHash = approvalPolicyService.hashArgs(targetToolName, toolCall.arguments());
+                            ApprovalCreateRequest createReq = new ApprovalCreateRequest(
+                                    runConfig.runId(),
+                                    runConfig.threadId(),
+                                    toolCall.id(),
+                                    targetToolName,
+                                    toolCall.arguments(),
+                                    calculatedHash,
+                                    approvalDecision.riskKey(),
+                                    approvalDecision.riskLevel(),
+                                    approvalDecision.reason(),
+                                    "",
+                                    approvalDecision.preview(),
+                                    approvalDecision.metadata()
+                            );
+                            
+                            // Try to extract purpose from arguments
+                            try {
+                                JsonNode node = objectMapper.readTree(toolCall.arguments());
+                                if (node.has("purpose")) {
+                                    createReq = new ApprovalCreateRequest(
+                                            runConfig.runId(),
+                                            runConfig.threadId(),
+                                            toolCall.id(),
+                                            targetToolName,
+                                            toolCall.arguments(),
+                                            calculatedHash,
+                                            approvalDecision.riskKey(),
+                                            approvalDecision.riskLevel(),
+                                            approvalDecision.reason(),
+                                            node.get("purpose").asText(),
+                                            approvalDecision.preview(),
+                                            approvalDecision.metadata()
+                                    );
+                                }
+                            } catch (Exception e) {}
+                            
+                            ApprovalRequestRecord record = approvalStore.create(createReq);
+                            
+                            // Emit APPROVAL_REQUIRED event
+                            emitter.emit(event(seq, runConfig, AgentEventType.APPROVAL_REQUIRED,
+                                    "Approval required: " + record.reason(),
+                                    Map.of(
+                                            "approvalId", record.approvalId(),
+                                            "toolCallId", record.toolCallId(),
+                                            "toolName", record.toolName(),
+                                            "riskLevel", record.riskLevel().name(),
+                                            "reason", record.reason(),
+                                            "purpose", record.purpose(),
+                                            "preview", record.preview(),
+                                            "argsHash", record.argsHash(),
+                                            "expiresAt", record.expiresAt().toString()
+                                    )));
+                            
+                            // Emit RUN_SUSPENDED event
+                            emitter.emit(event(seq, runConfig, AgentEventType.RUN_SUSPENDED,
+                                    "Run suspended waiting for human approval.",
+                                    Map.of(
+                                            "suspendReason", "APPROVAL_REQUIRED",
+                                            "approvalId", record.approvalId(),
+                                            "resumeThreadId", runConfig.threadId(),
+                                            "resumeRunId", runConfig.runId()
+                                    )));
+                            
+                            if (agentLoopRunStore != null) {
+                                agentLoopRunStore.markSuspended(runConfig.runId(), "APPROVAL_REQUIRED");
+                            }
+                            
+                            stopped = true;
+                            break;
+                        }
                     }
 
                     long toolStartTime = System.currentTimeMillis();

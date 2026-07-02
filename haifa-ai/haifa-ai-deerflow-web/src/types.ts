@@ -25,7 +25,11 @@ export type DeerFlowEventType =
   | 'TOOL_CALL_REQUESTED'
   | 'RESEARCH_STEP_COMPLETED'
   | 'CONTEXT_COMPRESSED'
-  | 'TOOL_OUTPUT_BUDGET_EXCEEDED';
+  | 'TOOL_OUTPUT_BUDGET_EXCEEDED'
+  | 'APPROVAL_REQUIRED'
+  | 'APPROVAL_RESOLVED'
+  | 'APPROVAL_EXPIRED'
+  | 'RUN_SUSPENDED';
 
 export interface ResearchPlan {
   planId: string;
@@ -185,7 +189,7 @@ export interface MessageListResponse {
   messages: MessageRecord[];
 }
 
-export type AppStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped';
+export type AppStatus = 'idle' | 'running' | 'completed' | 'failed' | 'stopped' | 'suspended';
 
 export type AppPhase =
   | 'idle'
@@ -193,7 +197,8 @@ export type AppPhase =
   | 'gathering_context'
   | 'thinking'
   | 'answering'
-  | 'done';
+  | 'done'
+  | 'suspended';
 
 export type ConversionStatus = 'pending' | 'processing' | 'completed' | 'failed';
 

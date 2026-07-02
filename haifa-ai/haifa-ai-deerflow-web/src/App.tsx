@@ -16,6 +16,7 @@ import {
   fetchRunProgress,
   fetchRunQualityGate,
   fetchRunSources,
+  readDeerFlowResumeStream,
 } from './api/deerflowClient';
 import Header from './components/Header';
 import TaskComposer from './components/TaskComposer';
@@ -306,6 +307,83 @@ function App() {
     [refreshArtifactData, refreshMessages, refreshResearchData, refreshThreads, state.selectedUploadIds, state.threadId]
   );
 
+  const handleResumeRun = useCallback((runId: string) => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    dispatch({
+      type: 'START_RUN',
+      payload: state.lastRequest || { message: '' }
+    });
+
+    let streamThreadId = state.threadId;
+
+    readDeerFlowResumeStream(
+      runId,
+      {
+        onEvent: (evt) => {
+          if (evt.threadId) {
+            streamThreadId = evt.threadId;
+          }
+          dispatch({ type: 'ADD_EVENT', payload: evt });
+          const isResearchRun = state.lastRequest?.mode === 'research';
+          const isResearchEvent =
+            evt.type === 'RESEARCH_PLAN_CREATED' ||
+            evt.type === 'RESEARCH_DIMENSION_STARTED' ||
+            evt.type === 'RESEARCH_DIMENSION_COMPLETED' ||
+            evt.type === 'SOURCE_FOUND' ||
+            evt.type === 'SOURCE_FETCHED' ||
+            evt.type === 'EVIDENCE_EXTRACTED' ||
+            evt.type === 'QUALITY_GATE_STARTED' ||
+            evt.type === 'QUALITY_GATE_PASSED' ||
+            evt.type === 'QUALITY_GATE_FAILED' ||
+            evt.type === 'REPORT_STARTED' ||
+            evt.type === 'REPORT_COMPLETED' ||
+            evt.type === 'ARTIFACT_CREATED' ||
+            evt.type === 'MODEL_COMPLETED' ||
+            evt.type === 'RUN_COMPLETED';
+          if (
+            evt.type === 'RUN_STARTED' ||
+            evt.type === 'MODEL_COMPLETED' ||
+            evt.type === 'RUN_COMPLETED' ||
+            evt.type === 'RUN_FAILED'
+          ) {
+            refreshThreads();
+            refreshMessages(evt.threadId);
+          }
+          if (isResearchRun && isResearchEvent) {
+            refreshResearchData(evt.runId);
+          }
+          if (
+            evt.type === 'ARTIFACT_CREATED' ||
+            evt.type === 'REPORT_COMPLETED' ||
+            evt.type === 'RUN_COMPLETED'
+          ) {
+            refreshArtifactData(evt.threadId, evt.runId);
+          }
+        },
+        onError: (err) => {
+          dispatch({ type: 'SET_ERROR', payload: err });
+        },
+        onDone: () => {
+          abortRef.current = null;
+          if (streamThreadId) {
+            void refreshMessages(streamThreadId);
+          }
+        },
+      },
+      controller.signal
+    ).catch((err) => {
+      if (!controller.signal.aborted) {
+        dispatch({ type: 'SET_ERROR', payload: (err as Error).message });
+      }
+      abortRef.current = null;
+    });
+  }, [refreshArtifactData, refreshMessages, refreshResearchData, refreshThreads, state.lastRequest, state.threadId]);
+
   const handleStop = useCallback(() => {
     if (abortRef.current) {
       abortRef.current.abort();
@@ -431,6 +509,7 @@ function App() {
             error={state.error}
             onReRun={state.status === 'failed' ? handleReRun : undefined}
             onRefreshMessage={handleRefreshMessage}
+            onResumeRun={handleResumeRun}
           />
           {state.lastRequest?.mode === 'research' && (
             <ResearchPlanView

@@ -43,6 +43,8 @@ import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStore;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalStore;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalPolicyService;
 import org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchDimension;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan;
@@ -92,6 +94,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final ClarificationStore clarificationStore;
     private final ReportWriterService reportWriterService;
     private final TodoStore todoStore;
+    private final ApprovalPolicyService approvalPolicyService;
+    private final ApprovalStore approvalStore;
 
     @Autowired(required = false)
     private ToolPolicyService toolPolicyService;
@@ -118,7 +122,24 @@ public class SimpleAgentRuntime implements AgentRuntime {
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage) {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
                 agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null);
+    }
+
+    public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
+            RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
+            AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage,
+            TodoStore todoStore,
+            ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
+            ResearchRuntimeSupport researchRuntimeSupport,
+            ClarificationStore clarificationStore,
+            ReportWriterService reportWriterService,
+            SubagentLimitMiddleware subagentLimitMiddleware) {
+        this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
+                agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
+                todoStore, toolOutputBudgetMiddleware, researchRuntimeSupport, clarificationStore, reportWriterService,
+                subagentLimitMiddleware, null, null);
     }
 
     @Autowired
@@ -132,7 +153,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
             @Autowired(required = false) ResearchRuntimeSupport researchRuntimeSupport,
             @Autowired(required = false) ClarificationStore clarificationStore,
             @Autowired(required = false) ReportWriterService reportWriterService,
-            @Autowired(required = false) SubagentLimitMiddleware subagentLimitMiddleware) {
+            @Autowired(required = false) SubagentLimitMiddleware subagentLimitMiddleware,
+            @Autowired(required = false) ApprovalPolicyService approvalPolicyService,
+            @Autowired(required = false) ApprovalStore approvalStore) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
@@ -155,7 +178,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
                 new CompositeAgentLoopObserver(observers),
                 toolOutputBudgetMiddleware,
-                clarificationStore);
+                clarificationStore,
+                approvalPolicyService,
+                approvalStore);
         this.agentEventStore = agentEventStore;
         this.toolExecutionStore = toolExecutionStore;
         this.modelStepStore = modelStepStore;
@@ -166,6 +191,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this.clarificationStore = clarificationStore;
         this.reportWriterService = reportWriterService;
         this.todoStore = todoStore;
+        this.approvalPolicyService = approvalPolicyService;
+        this.approvalStore = approvalStore;
     }
 
     @Override
@@ -347,6 +374,16 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 this.runManager.markSuspended(run.runId());
                                 this.threadManager.touch(threadId);
                             }
+                            if (evt.type() == AgentEventType.APPROVAL_REQUIRED) {
+                                String reason = (String) evt.metadata().get("reason");
+                                String approvalId = (String) evt.metadata().get("approvalId");
+                                this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM,
+                                        "Approval needed: " + reason,
+                                        Map.of("approvalPending", true, "approvalId", approvalId,
+                                                "resumeThreadId", threadId, "resumeRunId", run.runId()));
+                                this.runManager.markSuspended(run.runId());
+                                this.threadManager.touch(threadId);
+                            }
                         });
 
                 if (request.isResearchMode()) {
@@ -384,7 +421,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                     this.threadManager.touch(threadId);
                                 } else if ("RUN_CANCELLED".equals(lastType)) {
                                     this.threadManager.touch(threadId);
-                                } else if ("CLARIFICATION_REQUIRED".equals(lastType) || "RUN_SUSPENDED".equals(lastType)) {
+                                } else if ("CLARIFICATION_REQUIRED".equals(lastType) || "APPROVAL_REQUIRED".equals(lastType) || "RUN_SUSPENDED".equals(lastType)) {
                                     // already handled in doOnNext
                                 } else {
                                     this.runManager.markCompleted(run.runId());
@@ -419,7 +456,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 this.threadManager.touch(threadId);
                             } else if ("RUN_CANCELLED".equals(lastType)) {
                                 this.threadManager.touch(threadId);
-                            } else if ("CLARIFICATION_REQUIRED".equals(lastType) || "RUN_SUSPENDED".equals(lastType)) {
+                            } else if ("CLARIFICATION_REQUIRED".equals(lastType) || "APPROVAL_REQUIRED".equals(lastType) || "RUN_SUSPENDED".equals(lastType)) {
                                 // already handled in doOnNext
                             } else {
                                 this.runManager.markCompleted(run.runId());

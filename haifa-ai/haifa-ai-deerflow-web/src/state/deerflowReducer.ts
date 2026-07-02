@@ -29,6 +29,8 @@ function getPhaseFromEvent(type: string): AppPhase {
     case 'REPORT_COMPLETED':
     case 'ARTIFACT_CREATED':
       return 'answering';
+    case 'RUN_SUSPENDED':
+      return 'suspended';
     default:
       return 'idle';
   }
@@ -92,6 +94,8 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         nextError = event.content || 'Run failed';
       } else if (event.type === 'RUN_CANCELLED') {
         nextStatus = 'stopped';
+      } else if (event.type === 'RUN_SUSPENDED') {
+        nextStatus = 'suspended';
       }
 
       if (event.type === 'MODEL_COMPLETED') {
@@ -118,6 +122,8 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
           } else if (event.type === 'RUN_CANCELLED') {
             updated.status = 'stopped';
             updated.completedAt = new Date().toISOString();
+          } else if (event.type === 'RUN_SUSPENDED') {
+            updated.status = 'suspended';
           }
           if (event.runId) updated.runId = event.runId;
           return updated;
