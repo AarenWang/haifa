@@ -1,6 +1,7 @@
 package org.wrj.haifa.ai.deerflow.agent.loop;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -19,6 +20,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
+import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
@@ -297,6 +299,159 @@ class AgentLoopTest {
         releaseModel.countDown();
         assertThat(done.await(3, TimeUnit.SECONDS)).isTrue();
         assertThat(error.get()).isNull();
+    }
+
+    @Test
+    void assemblesTypedMessagesBeforeEachModelStep() {
+        List<ModelPrompt> prompts = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelClient model = prompt -> {
+            prompts.add(prompt);
+            if (calls.incrementAndGet() == 1) {
+                return Mono.just(new ModelResponse("", List.of(
+                        new ModelToolCall("call-typed-1", "mock_search", "{\"query\":\"typed\"}")
+                )));
+            }
+            return Mono.just(new ModelResponse("<final_answer>Typed context observed.</final_answer>"));
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(new MockSearchTool())));
+        AgentRunConfig config = new AgentRunConfig("thread-typed", "run-typed", "test-model",
+                false, false, 4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT,
+                null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                new LoopConfig(4, 4, 300_000, ResearchOptions.defaults()),
+                config,
+                "You are a helpful assistant.",
+                "Search using typed context",
+                new AtomicInteger(),
+                null, List.of(), List.of()
+        ).collectList().block();
+
+        assertThat(prompts).hasSizeGreaterThanOrEqualTo(2);
+        assertThat(prompts.get(0).hasMessages()).isTrue();
+        assertThat(prompts.get(0).messages()).extracting(ModelMessage::role)
+                .containsExactly(ModelMessage.Role.USER);
+
+        ModelPrompt secondPrompt = prompts.get(1);
+        assertThat(secondPrompt.hasMessages()).isTrue();
+        assertThat(secondPrompt.messages()).anySatisfy(message -> {
+            assertThat(message.role()).isEqualTo(ModelMessage.Role.ASSISTANT);
+            assertThat(message.toolCalls()).hasSize(1);
+            assertThat(message.toolCalls().getFirst().id()).isEqualTo("call-typed-1");
+        });
+        assertThat(secondPrompt.messages()).anySatisfy(message -> {
+            assertThat(message.role()).isEqualTo(ModelMessage.Role.TOOL);
+            assertThat(message.toolCallId()).isEqualTo("call-typed-1");
+            assertThat(message.name()).isEqualTo("mock_search");
+        });
+        assertThat(secondPrompt.userPrompt()).contains("<tool_call name=\"mock_search\">");
+        assertThat(secondPrompt.userPrompt()).contains("Tool result (mock_search) [call-typed-1]");
+
+        assertThat(events).anySatisfy(event -> {
+            if (event.type() == AgentEventType.MODEL_DELTA
+                    && Boolean.TRUE.equals(event.metadata().get("persistAssistantToolCalls"))) {
+                assertThat((List<?>) event.metadata().get("tool_calls")).hasSize(1);
+            }
+        });
+    }
+
+    @Test
+    void observerObservationIsIncludedInNextTypedPrompt() {
+        List<ModelPrompt> prompts = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelClient model = prompt -> {
+            prompts.add(prompt);
+            if (calls.incrementAndGet() == 1) {
+                return Mono.just(new ModelResponse("", List.of(
+                        new ModelToolCall("call-observe-1", "mock_search", "{\"query\":\"observe\"}")
+                )));
+            }
+            return Mono.just(new ModelResponse("<final_answer>Observation used.</final_answer>"));
+        };
+        AgentLoopObserver observer = new NoopAgentLoopObserver() {
+            @Override
+            public String onToolCompleted(AgentRunConfig runConfig, ToolCall toolCall, ToolCallResult toolResult,
+                    List<AgentEvent> events, AtomicInteger seq, List<String> history) {
+                return "SOURCE_OBSERVATION: sourceId=src-1 evidenceId=ev-1";
+            }
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(new MockSearchTool())),
+                null, null, null, observer);
+        AgentRunConfig config = new AgentRunConfig("thread-observe", "run-observe", "test-model",
+                false, false, 4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH,
+                null, Map.of());
+
+        loop.run(
+                new LoopConfig(4, 4, 300_000, ResearchOptions.defaults()),
+                config,
+                "You are a research assistant.",
+                "Search and use source observation",
+                new AtomicInteger(),
+                null, List.of(), List.of()
+        ).collectList().block();
+
+        assertThat(prompts).hasSizeGreaterThanOrEqualTo(2);
+        ModelPrompt secondPrompt = prompts.get(1);
+        assertThat(secondPrompt.userPrompt()).contains("SOURCE_OBSERVATION: sourceId=src-1 evidenceId=ev-1");
+        assertThat(secondPrompt.messages()).anySatisfy(message -> {
+            assertThat(message.role()).isEqualTo(ModelMessage.Role.SYSTEM);
+            assertThat(message.content()).contains("SOURCE_OBSERVATION");
+            assertThat(message.metadata()).containsEntry("observer", "onToolCompleted");
+        });
+    }
+
+    @Test
+    void observerContinuationInstructionIsIncludedInNextTypedPrompt() {
+        List<ModelPrompt> prompts = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelClient model = prompt -> {
+            prompts.add(prompt);
+            if (calls.incrementAndGet() == 1) {
+                return Mono.just(new ModelResponse("Preliminary answer without enough coverage."));
+            }
+            return Mono.just(new ModelResponse("<final_answer>Continued after gate.</final_answer>"));
+        };
+        AgentLoopObserver observer = new NoopAgentLoopObserver() {
+            private boolean continued;
+
+            @Override
+            public boolean shouldContinue(AgentRunConfig runConfig, String responseContent, List<AgentEvent> events,
+                    AtomicInteger seq, int step, int totalToolCalls, List<String> history) {
+                if (continued) {
+                    return false;
+                }
+                continued = true;
+                history.add("System: QUALITY_GATE: fetch more authoritative evidence before answering.");
+                return true;
+            }
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of()),
+                null, null, null, observer);
+        AgentRunConfig config = new AgentRunConfig("thread-gate", "run-gate", "test-model",
+                false, false, 4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH,
+                null, Map.of());
+
+        loop.run(
+                new LoopConfig(4, 4, 300_000, ResearchOptions.defaults()),
+                config,
+                "You are a research assistant.",
+                "Draft only when coverage is enough",
+                new AtomicInteger(),
+                null, List.of(), List.of()
+        ).collectList().block();
+
+        assertThat(prompts).hasSizeGreaterThanOrEqualTo(2);
+        ModelPrompt secondPrompt = prompts.get(1);
+        assertThat(secondPrompt.userPrompt()).contains("QUALITY_GATE: fetch more authoritative evidence");
+        assertThat(secondPrompt.messages()).anySatisfy(message -> {
+            assertThat(message.role()).isEqualTo(ModelMessage.Role.SYSTEM);
+            assertThat(message.content()).contains("QUALITY_GATE");
+            assertThat(message.metadata()).containsEntry("observer", "shouldContinue");
+        });
     }
 
     /**

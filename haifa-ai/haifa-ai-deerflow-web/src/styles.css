@@ -1717,6 +1717,66 @@ body {
   border-top-color: #ffec99;
 }
 
+.clarification-collapsed-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.clarification-collapsed-summary:hover {
+  border-color: var(--accent-green);
+  background: var(--accent-green-light);
+}
+
+.clarification-collapsed-summary span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.clarification-collapsed-summary strong {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clarification-collapsed-summary svg {
+  color: var(--text-muted);
+}
+
+.clarification-collapse-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.clarification-collapse-toggle svg {
+  transform: rotate(180deg);
+}
+
 /* Clarification Form */
 .clarification-form {
   display: flex;

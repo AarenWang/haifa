@@ -358,6 +358,18 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, evt.content(),
                                         Map.of("status", "FAILED", "errorType", "ModelException"));
                             }
+                            if (evt.type() == AgentEventType.MODEL_DELTA
+                                    && Boolean.TRUE.equals(evt.metadata().get("persistAssistantToolCalls"))) {
+                                Object toolCalls = evt.metadata().get("tool_calls");
+                                java.util.Map<String, Object> assistantMetadata = new java.util.HashMap<>();
+                                assistantMetadata.put("tool_calls", toolCalls == null ? List.of() : toolCalls);
+                                assistantMetadata.put("step", evt.metadata().getOrDefault("step", 0));
+                                assistantMetadata.put("modelDurationMs", evt.metadata().getOrDefault("modelDurationMs", 0));
+                                assistantMetadata.put("intermediate", true);
+                                this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
+                                        evt.content() == null ? "" : evt.content(),
+                                        assistantMetadata);
+                            }
                             if (evt.type() == AgentEventType.TOOL_COMPLETED) {
                                 String toolName = (String) evt.metadata().get("toolName");
                                 if (toolName == null) toolName = (String) evt.metadata().get("tool");

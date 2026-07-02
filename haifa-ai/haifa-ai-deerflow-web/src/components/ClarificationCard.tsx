@@ -1,4 +1,4 @@
-import { CheckCircle2, HelpCircle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, HelpCircle } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { renderMarkdown } from '../utils/markdownRenderer';
 import type { ClarificationAnswer, ClarificationQuestion, MessageRecord } from '../types';
@@ -18,9 +18,14 @@ export default function ClarificationCard({ message, isPending, onAnswer }: Clar
   const questions = useMemo(() => parseQuestions(message.metadata?.questions), [message.metadata]);
   const [drafts, setDrafts] = useState<Record<string, AnswerDraft>>({});
   const [submitted, setSubmitted] = useState(false);
+  const [expandedAfterSubmit, setExpandedAfterSubmit] = useState(false);
 
   const hasStructuredQuestions = questions.length > 0;
   const isSubmittable = isPending && hasStructuredQuestions && !submitted;
+  const canToggleCollapsed = hasStructuredQuestions && (submitted || !isPending);
+  const isCollapsed = canToggleCollapsed && !expandedAfterSubmit;
+  const isVisuallyPending = isPending && !submitted;
+  const collapsedTitle = getCollapsedTitle(message, questions);
 
   const updateDraft = (questionId: string, patch: Partial<AnswerDraft>) => {
     setDrafts((current) => {
@@ -64,11 +69,11 @@ export default function ClarificationCard({ message, isPending, onAnswer }: Clar
   };
 
   return (
-    <div className={`clarification-card ${isPending ? 'pending' : 'resolved'}`}>
+    <div className={`clarification-card ${isVisuallyPending ? 'pending' : 'resolved'}`}>
       <div className="clarification-card-header">
         <div className="clarification-card-title-group">
           <div className="clarification-card-icon">
-            {isPending ? (
+            {isVisuallyPending ? (
               <HelpCircle size={18} className="icon-pending" />
             ) : (
               <CheckCircle2 size={18} className="icon-resolved" />
@@ -76,17 +81,39 @@ export default function ClarificationCard({ message, isPending, onAnswer }: Clar
           </div>
           <div className="clarification-card-meta">
             <div className="clarification-card-eyebrow">
-              {isPending ? 'Action Required' : 'Completed'}
+              {isVisuallyPending ? 'Action Required' : 'Completed'}
             </div>
             <div className="clarification-card-title">
-              {isPending ? '需要补充信息' : '请确认后继续'}
+              {isVisuallyPending ? '需要补充信息' : '澄清已提交'}
             </div>
           </div>
         </div>
       </div>
 
-      {hasStructuredQuestions ? (
+      {isCollapsed ? (
+        <button
+          type="button"
+          className="clarification-collapsed-summary"
+          onClick={() => setExpandedAfterSubmit(true)}
+          aria-expanded="false"
+        >
+          <span>澄清问题</span>
+          <strong>{collapsedTitle}</strong>
+          <ChevronDown size={16} />
+        </button>
+      ) : hasStructuredQuestions ? (
         <div className="clarification-form">
+          {canToggleCollapsed && (
+            <button
+              type="button"
+              className="clarification-collapse-toggle"
+              onClick={() => setExpandedAfterSubmit(false)}
+              aria-expanded="true"
+            >
+              收起澄清问题
+              <ChevronDown size={16} />
+            </button>
+          )}
           {questions.map((question, index) => {
             const draft = drafts[question.id] || { selectedChoiceIds: [], customAnswer: '' };
             return (
@@ -135,7 +162,7 @@ export default function ClarificationCard({ message, isPending, onAnswer }: Clar
             );
           })}
 
-          {isPending && (
+          {isSubmittable && (
             <div className="clarification-card-footer">
               <span>一次性完成这些澄清项，DeerFlow 会继续执行原任务。</span>
               <button
@@ -221,6 +248,17 @@ function buildAnswer(question: ClarificationQuestion, draft?: AnswerDraft): Clar
     customAnswer,
     answer: parts.join('；'),
   };
+}
+
+function getCollapsedTitle(message: MessageRecord, questions: ClarificationQuestion[]) {
+  const metadataTitle = stringValue(message.metadata?.question);
+  if (metadataTitle) {
+    return metadataTitle.split('\n')[0].trim();
+  }
+  if (questions.length === 1) {
+    return questions[0].title;
+  }
+  return questions.map((question, index) => `${index + 1}. ${question.title}`).join(' / ');
 }
 
 function canSubmit(questions: ClarificationQuestion[], drafts: Record<string, AnswerDraft>) {

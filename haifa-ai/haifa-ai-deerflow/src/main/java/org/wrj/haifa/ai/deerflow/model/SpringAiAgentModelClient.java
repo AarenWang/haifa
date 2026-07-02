@@ -53,8 +53,9 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         }
         long startTime = System.currentTimeMillis();
         long timeoutMs = Math.max(1_000, this.properties.getModelTimeout());
-        log.info("Spring AI model call starting. model={}, timeoutMs={}, systemPromptChars={}, userPromptChars={}",
-                safe(prompt.modelName()), timeoutMs, length(prompt.systemPrompt()), length(prompt.userPrompt()));
+        log.info("Spring AI model call starting. model={}, timeoutMs={}, systemPromptChars={}, userPromptChars={}, messageCount={}",
+                safe(prompt.modelName()), timeoutMs, length(prompt.systemPrompt()), length(prompt.effectiveUserPrompt()),
+                prompt.messages().size());
         return Mono.fromCallable(() -> this.modelCaller.apply(builder, prompt))
                 .subscribeOn(Schedulers.boundedElastic())
                 .timeout(Duration.ofMillis(timeoutMs))
@@ -72,10 +73,11 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                 })
                 .doOnError(ex -> {
                     long duration = System.currentTimeMillis() - startTime;
-                    log.error("Spring AI chat call failed. model={}, systemPromptChars={}, userPromptChars={}, durationMs={}",
+                    log.error("Spring AI chat call failed. model={}, systemPromptChars={}, userPromptChars={}, messageCount={}, durationMs={}",
                             safe(prompt.modelName()),
                             length(prompt.systemPrompt()),
-                            length(prompt.userPrompt()),
+                            length(prompt.effectiveUserPrompt()),
+                            prompt.messages().size(),
                             duration,
                             ex);
                 })
@@ -84,10 +86,11 @@ public class SpringAiAgentModelClient implements AgentModelClient {
     }
 
     private static ModelResponse callSpringAi(ChatClient.Builder builder, ModelPrompt prompt) {
+        String effectiveUserPrompt = prompt.effectiveUserPrompt();
         ChatClient.ChatClientRequestSpec request = builder.build()
                 .prompt()
                 .system(prompt.systemPrompt())
-                .user(prompt.userPrompt());
+                .user(effectiveUserPrompt);
 
         if (StringUtils.hasText(prompt.modelName())) {
             request = request.options(ChatOptions.builder().model(prompt.modelName()).build());
@@ -160,7 +163,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
 
                 Prompt sent to the model adapter:
                 %s
-                """.formatted(prompt.userPrompt());
+                """.formatted(prompt.effectiveUserPrompt());
         return new ModelResponse(content);
     }
 

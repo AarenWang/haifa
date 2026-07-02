@@ -17,6 +17,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
+import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
@@ -63,6 +64,7 @@ public class AgentLoop {
     private final ClarificationStore clarificationStore;
     private final ApprovalPolicyService approvalPolicyService;
     private final ApprovalStore approvalStore;
+    private final PromptAssembler promptAssembler;
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry) {
         this(modelClient, toolRegistry, null, null, null, new NoopAgentLoopObserver(), null, null, null, null);
@@ -108,6 +110,7 @@ public class AgentLoop {
         this.clarificationStore = clarificationStore;
         this.approvalPolicyService = approvalPolicyService;
         this.approvalStore = approvalStore;
+        this.promptAssembler = new PromptAssembler();
     }
 
     public Flux<AgentEvent> run(
@@ -124,6 +127,8 @@ public class AgentLoop {
             long loopStartTime = System.currentTimeMillis();
             List<String> history = new ArrayList<>();
             history.add("User: " + userMessage);
+            List<ModelMessage> typedHistory = new ArrayList<>();
+            typedHistory.add(new ModelMessage(ModelMessage.Role.USER, userMessage));
 
             if (agentLoopRunStore != null) {
                 agentLoopRunStore.create(runConfig.runId(), runConfig.threadId(), config);
@@ -143,6 +148,13 @@ public class AgentLoop {
                     // Reconstruct assistant message that requested tool call
                     String assistantMsg = "Assistant: <tool_call name=\"" + appRecord.toolName() + "\">" + appRecord.argsJson() + "</tool_call>";
                     history.add(assistantMsg);
+                    typedHistory.add(new ModelMessage(
+                            ModelMessage.Role.ASSISTANT,
+                            "",
+                            List.of(new ModelToolCall(appRecord.toolCallId(), appRecord.toolName(), appRecord.argsJson())),
+                            null,
+                            null,
+                            Map.of("resumedApproval", true)));
                     
                     // Auto-expire pending approvals that have passed their expiration time
                     if (appRecord.status() == ApprovalStatus.PENDING && appRecord.expiresAt() != null && Instant.now().isAfter(appRecord.expiresAt())) {
@@ -216,6 +228,8 @@ public class AgentLoop {
                             
                             // Append tool result to history
                             history.add("Tool result (" + appRecord.toolName() + "): " + compressedResult);
+                            typedHistory.add(toolMessage(toolCall.id(), appRecord.toolName(), compressedResult,
+                                    rawToolResult.status().name(), rawToolResult.metadata()));
                             totalToolCalls++;
                             
                             emitter.flush();
@@ -223,6 +237,9 @@ public class AgentLoop {
                             // INVALIDATED due to args hash mismatch!
                             approvalStore.markInvalidated(approvalId, "Args hash mismatch: expected " + appRecord.argsHash() + " but got " + calculatedHash);
                             history.add("Tool result (" + appRecord.toolName() + "): Error: args hash mismatch. Tool call parameter modification detected.");
+                            typedHistory.add(toolMessage(appRecord.toolCallId(), appRecord.toolName(),
+                                    "Error: args hash mismatch. Tool call parameter modification detected.",
+                                    "FAILED", Map.of("approvalInvalidated", true)));
                         }
                     } else {
                         // DENIED, EXPIRED, CANCELLED etc.
@@ -247,6 +264,8 @@ public class AgentLoop {
                                 Map.of("toolCallId", appRecord.toolCallId(), "toolName", appRecord.toolName(), "denied", true)));
                         
                         history.add("Tool result (" + appRecord.toolName() + "): " + denMsg);
+                        typedHistory.add(toolMessage(appRecord.toolCallId(), appRecord.toolName(), denMsg,
+                                appRecord.status().name(), Map.of("denied", true)));
                         emitter.flush();
                     }
                 }
@@ -303,19 +322,19 @@ public class AgentLoop {
                     break;
                 }
 
-                // Build prompt from history
-                StringBuilder userPromptBuilder = new StringBuilder();
-                for (String msg : history) {
-                    userPromptBuilder.append(msg).append("\n\n");
-                }
-                String userPrompt = userPromptBuilder.toString().trim();
-
                 long modelStartTime = System.currentTimeMillis();
                 emitter.emit(event(seq, runConfig, AgentEventType.MODEL_STARTED,
                         "Model step " + (step + 1) + "/" + config.maxSteps(),
                         Map.of("step", step + 1, "maxSteps", config.maxSteps())));
 
-                ModelPrompt prompt = new ModelPrompt(fullSystemPrompt, userPrompt, runConfig.modelName());
+                PromptAssembler.Result assembly = this.promptAssembler.assemble(
+                        fullSystemPrompt, runConfig.modelName(), typedHistory);
+                ModelPrompt prompt = assembly.prompt();
+                String userPrompt = prompt.userPrompt();
+                if (log.isDebugEnabled()) {
+                    log.debug("Prompt assembled. runId={}, step={}, trace={}",
+                            runConfig.runId(), step + 1, assembly.trace());
+                }
                 ModelResponse modelResponse;
                 try {
                     modelResponse = modelClient.generate(prompt).block();
@@ -337,31 +356,36 @@ public class AgentLoop {
                     modelResponse = new ModelResponse("");
                 }
 
-                lastModelContent = modelResponse.content();
+                String responseContent = modelResponse.content() == null ? "" : modelResponse.content();
 
                 // Persist model step
                 if (modelStepStore != null) {
                     try {
-                        ModelStep modelStep = new ModelStep(step + 1, userPrompt, modelResponse.content(), List.of(), modelStartTime, modelDuration);
+                        ModelStep modelStep = new ModelStep(step + 1, userPrompt, responseContent, List.of(), modelStartTime, modelDuration);
                         modelStepStore.save(modelStep, runConfig.runId(), runConfig.threadId());
                     } catch (Exception e) {
                         log.warn("Failed to persist model step: {}", e.getMessage());
                     }
                 }
 
-                history.add("Assistant: " + modelResponse.content());
-                emitter.emit(event(seq, runConfig, AgentEventType.MODEL_DELTA,
-                        modelResponse.content(),
-                        Map.of("step", step + 1, "modelDurationMs", modelDuration)));
-
                 // Check for final answer
-                if (toolCallParser.hasFinalAnswer(modelResponse.content())) {
-                    String rawAnswer = toolCallParser.extractFinalAnswer(modelResponse.content());
+                if (toolCallParser.hasFinalAnswer(responseContent)) {
+                    lastModelContent = responseContent;
+                    history.add("Assistant: " + responseContent);
+                    typedHistory.add(new ModelMessage(ModelMessage.Role.ASSISTANT, responseContent,
+                            Map.of("step", step + 1, "modelDurationMs", modelDuration)));
+                    emitter.emit(event(seq, runConfig, AgentEventType.MODEL_DELTA,
+                            responseContent,
+                            Map.of("step", step + 1, "modelDurationMs", modelDuration)));
+
+                    String rawAnswer = toolCallParser.extractFinalAnswer(responseContent);
                     FinalAnswerDecision decision = observer.onFinalAnswerProposed(
                             runConfig, rawAnswer, events, seq, step + 1, totalToolCalls);
                     emitter.flush();
                     if (!decision.accepted()) {
                         emitFinalAnswerRejected(seq, runConfig, emitter, history, decision, step + 1, totalToolCalls);
+                        typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM, retryInstruction(decision),
+                                Map.of("todoGateBlocked", true)));
                         continue;
                     }
                     FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
@@ -396,8 +420,8 @@ public class AgentLoop {
                     for (ModelToolCall mtc : modelResponse.toolCalls()) {
                         loopToolCalls.add(ToolCall.of(mtc.id(), mtc.name(), mtc.arguments()));
                     }
-                } else if (modelResponse.content() != null && !modelResponse.content().isBlank()) {
-                    List<ToolCallParser.ParsedToolCall> parsed = toolCallParser.parse(modelResponse.content());
+                } else if (!responseContent.isBlank()) {
+                    List<ToolCallParser.ParsedToolCall> parsed = toolCallParser.parse(responseContent);
                     for (ToolCallParser.ParsedToolCall ptc : parsed) {
                         loopToolCalls.add(ToolCall.of(ptc.toolName(), ptc.arguments()));
                     }
@@ -405,6 +429,25 @@ public class AgentLoop {
 
                 // --- Apply observer tool-call filtering (e.g. SubagentLimitMiddleware) ---
                 List<AgentLoopObserver.FilteredToolCall> filteredToolCalls = observer.afterToolCallsParsed(runConfig, loopToolCalls);
+                List<ToolCall> assistantToolCalls = filteredToolCalls.stream()
+                        .map(AgentLoopObserver.FilteredToolCall::toolCall)
+                        .toList();
+                String assistantContent = assistantToolCalls.isEmpty()
+                        ? responseContent
+                        : toolCallParser.cleanResponseText(responseContent);
+                lastModelContent = assistantContent;
+                history.add("Assistant: " + assistantContent);
+                List<ModelToolCall> assistantModelToolCalls = toModelToolCalls(assistantToolCalls);
+                typedHistory.add(new ModelMessage(
+                        ModelMessage.Role.ASSISTANT,
+                        assistantContent,
+                        assistantModelToolCalls,
+                        null,
+                        null,
+                        Map.of("step", step + 1, "modelDurationMs", modelDuration)));
+                emitter.emit(event(seq, runConfig, AgentEventType.MODEL_DELTA,
+                        assistantContent,
+                        modelDeltaMetadata(step + 1, modelDuration, assistantModelToolCalls)));
                 // Emit events for rejected tool calls
                 for (AgentLoopObserver.FilteredToolCall ftc : filteredToolCalls) {
                     if (!ftc.allowed()) {
@@ -417,6 +460,9 @@ public class AgentLoop {
                                 Map.of("toolCallId", ftc.toolCall().id(), "toolName", ftc.toolCall().toolName(),
                                         "status", "REJECTED", "denied", true)));
                         history.add("Tool result (" + ftc.toolCall().toolName() + "): " + (ftc.reason() != null ? ftc.reason() : "Rejected by middleware"));
+                        typedHistory.add(toolMessage(ftc.toolCall().id(), ftc.toolCall().toolName(),
+                                ftc.reason() != null ? ftc.reason() : "Rejected by middleware",
+                                "REJECTED", Map.of("denied", true)));
                     }
                 }
                 // Keep only allowed calls for execution
@@ -436,11 +482,14 @@ public class AgentLoop {
                                 "Error: Invalid tool call arguments",
                                 Map.of("toolCallId", invalidCallId, "status", "FAILED", "error", "Invalid tool call arguments")));
                         history.add("Tool result (error): Invalid tool call arguments for " + invalidCall);
+                        typedHistory.add(toolMessage(invalidCallId, "error",
+                                "Invalid tool call arguments for " + invalidCall,
+                                "FAILED", Map.of("error", "Invalid tool call arguments")));
                     }
                 }
 
                 if (loopToolCalls.isEmpty()) {
-                    if (toolCallParser.hasToolCallIntent(modelResponse.content())) {
+                    if (toolCallParser.hasToolCallIntent(responseContent)) {
                         emitter.emit(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
                                 "Unparsed tool call format detected. Asking model to re-emit tool calls.",
                                 Map.of("step", step + 1, "unparsedToolCall", true)));
@@ -448,20 +497,31 @@ public class AgentLoop {
                                 + "Re-emit each tool call exactly as "
                                 + "<tool_call name=\"tool_name\">{\"arg\":\"value\"}</tool_call>. "
                                 + "Do not describe the tool call in prose and do not answer yet.");
+                        typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM,
+                                "Your previous response looked like a tool call but could not be parsed. "
+                                        + "Re-emit each tool call exactly as "
+                                        + "<tool_call name=\"tool_name\">{\"arg\":\"value\"}</tool_call>. "
+                                        + "Do not describe the tool call in prose and do not answer yet.",
+                                Map.of("toolCallFormatRetry", true)));
                         continue;
                     }
+                    int historySizeBeforeContinueCheck = history.size();
                     boolean continueAfterNoTools = observer.shouldContinue(
-                            runConfig, modelResponse.content(), events, seq, step + 1, totalToolCalls, history);
+                            runConfig, responseContent, events, seq, step + 1, totalToolCalls, history);
+                    appendNewHistoryEntriesToTypedHistory(history, historySizeBeforeContinueCheck, typedHistory,
+                            Map.of("observer", "shouldContinue"));
                     emitter.flush();
                     if (continueAfterNoTools) {
                         continue;
                     }
                     stopReason = runConfig.mode() == RunMode.CHAT ? "ASSISTANT_COMPLETED" : "NO_TOOL_CALLS";
                     FinalAnswerDecision decision = observer.onFinalAnswerProposed(
-                            runConfig, modelResponse.content(), events, seq, step + 1, totalToolCalls);
+                            runConfig, responseContent, events, seq, step + 1, totalToolCalls);
                     emitter.flush();
                     if (!decision.accepted()) {
                         emitFinalAnswerRejected(seq, runConfig, emitter, history, decision, step + 1, totalToolCalls);
+                        typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM, retryInstruction(decision),
+                                Map.of("todoGateBlocked", true)));
                         continue;
                     }
                     FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
@@ -524,6 +584,8 @@ public class AgentLoop {
                                 "Tool denied by policy",
                                 Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
                         history.add("Tool result (" + targetToolName + "): Tool denied by policy");
+                        typedHistory.add(toolMessage(toolCall.id(), targetToolName, "Tool denied by policy",
+                                "DENIED", Map.of("denied", true)));
                         continue;
                     }
 
@@ -541,6 +603,11 @@ public class AgentLoop {
                                     denMsg,
                                     Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
                             history.add("Tool result (" + targetToolName + "): " + denMsg);
+                            Map<String, Object> deniedMetadata = new HashMap<>();
+                            deniedMetadata.put("denied", true);
+                            deniedMetadata.put("reason", approvalDecision.reason() == null ? "" : approvalDecision.reason());
+                            typedHistory.add(toolMessage(toolCall.id(), targetToolName, denMsg,
+                                    "DENIED", deniedMetadata));
                             continue;
                         }
                         
@@ -693,11 +760,14 @@ public class AgentLoop {
                     history.add("Tool result (" + toolCall.toolName() + "): " + rawToolResult.result());
 
                     // Observer processes source/evidence (uses raw toolResult, does NOT compress)
+                    int historySizeBeforeObserver = history.size();
                     String observation = observer.onToolCompleted(runConfig, toolCall, rawToolResult, events, seq, history);
                     emitter.flush();
                     if (observation != null && !observation.isBlank()) {
                         history.add(observation);
                     }
+                    appendNewHistoryEntriesToTypedHistory(history, historySizeBeforeObserver, typedHistory,
+                            Map.of("observer", "onToolCompleted", "tool", pending.targetToolName()));
 
                     // Compress tool output BEFORE emitting TOOL_COMPLETED event and MessageStore persistence
                     String compressedResult = rawToolResult.result();
@@ -741,6 +811,8 @@ public class AgentLoop {
                     emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
                             eventContent,
                             completionMetadata));
+                    typedHistory.add(toolMessage(toolCall.id(), pending.targetToolName(), eventContent,
+                            rawToolResult.status().name(), completionMetadata));
                 }
 
                 if (stopped) {
@@ -856,6 +928,91 @@ public class AgentLoop {
         return null;
     }
 
+    private static List<ModelToolCall> toModelToolCalls(List<ToolCall> toolCalls) {
+        if (toolCalls == null || toolCalls.isEmpty()) {
+            return List.of();
+        }
+        return toolCalls.stream()
+                .map(tc -> new ModelToolCall(tc.id(), tc.toolName(), tc.arguments()))
+                .toList();
+    }
+
+    private static Map<String, Object> modelDeltaMetadata(int step, long modelDuration, List<ModelToolCall> toolCalls) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("step", step);
+        metadata.put("modelDurationMs", modelDuration);
+        if (toolCalls != null && !toolCalls.isEmpty()) {
+            metadata.put("tool_calls", serializeToolCalls(toolCalls));
+            metadata.put("persistAssistantToolCalls", true);
+        }
+        return metadata;
+    }
+
+    private static List<Map<String, Object>> serializeToolCalls(List<ModelToolCall> toolCalls) {
+        if (toolCalls == null || toolCalls.isEmpty()) {
+            return List.of();
+        }
+        return toolCalls.stream()
+                .map(tc -> {
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("id", tc.id() == null ? "" : tc.id());
+                    item.put("name", tc.name() == null ? "" : tc.name());
+                    item.put("arguments", tc.arguments() == null ? "{}" : tc.arguments());
+                    item.put("type", tc.type() == null ? "tool_call" : tc.type());
+                    return item;
+                })
+                .toList();
+    }
+
+    private static ModelMessage toolMessage(String toolCallId, String toolName, String content,
+            String status, Map<String, Object> sourceMetadata) {
+        Map<String, Object> metadata = new HashMap<>();
+        if (sourceMetadata != null) {
+            metadata.putAll(sourceMetadata);
+        }
+        metadata.put("tool_call_id", toolCallId == null ? "" : toolCallId);
+        metadata.put("tool", toolName == null ? "unknown" : toolName);
+        metadata.put("status", status == null ? "" : status);
+        return new ModelMessage(ModelMessage.Role.TOOL, content, List.of(), toolCallId, toolName, metadata);
+    }
+
+    private static void appendNewHistoryEntriesToTypedHistory(List<String> history, int previousSize,
+            List<ModelMessage> typedHistory, Map<String, Object> metadata) {
+        if (history == null || typedHistory == null || previousSize >= history.size()) {
+            return;
+        }
+        for (int i = Math.max(0, previousSize); i < history.size(); i++) {
+            String entry = history.get(i);
+            if (entry == null || entry.isBlank()) {
+                continue;
+            }
+            typedHistory.add(toTypedHistoryEntry(entry, metadata));
+        }
+    }
+
+    private static ModelMessage toTypedHistoryEntry(String entry, Map<String, Object> metadata) {
+        Map<String, Object> safeMetadata = metadata == null ? Map.of() : metadata;
+        if (entry.startsWith("System: ")) {
+            return new ModelMessage(ModelMessage.Role.SYSTEM, entry.substring("System: ".length()), safeMetadata);
+        }
+        if (entry.startsWith("User: ")) {
+            return new ModelMessage(ModelMessage.Role.USER, entry.substring("User: ".length()), safeMetadata);
+        }
+        if (entry.startsWith("Assistant: ")) {
+            return new ModelMessage(ModelMessage.Role.ASSISTANT, entry.substring("Assistant: ".length()), safeMetadata);
+        }
+        if (entry.startsWith("Tool result ")) {
+            return new ModelMessage(ModelMessage.Role.TOOL, entry, List.of(), null, null, safeMetadata);
+        }
+        return new ModelMessage(ModelMessage.Role.SYSTEM, entry, safeMetadata);
+    }
+
+    private static String retryInstruction(FinalAnswerDecision decision) {
+        return decision.retryInstruction() == null || decision.retryInstruction().isBlank()
+                ? "Do not finish yet. Continue the pending todo work."
+                : decision.retryInstruction();
+    }
+
     private static AgentEvent event(AtomicInteger seq, AgentRunConfig config, AgentEventType type, String content,
             Map<String, Object> metadata) {
         return AgentEvent.of(Integer.toString(seq.incrementAndGet()), config.runId(), config.threadId(), type, content,
@@ -864,9 +1021,7 @@ public class AgentLoop {
 
     private static void emitFinalAnswerRejected(AtomicInteger seq, AgentRunConfig runConfig, EventEmitter emitter,
             List<String> history, FinalAnswerDecision decision, int step, int totalToolCalls) {
-        String retryInstruction = decision.retryInstruction() == null || decision.retryInstruction().isBlank()
-                ? "Do not finish yet. Continue the pending todo work."
-                : decision.retryInstruction();
+        String retryInstruction = retryInstruction(decision);
         history.add("System: " + retryInstruction);
         Map<String, Object> metadata = new HashMap<>(decision.metadata());
         metadata.put("step", step);
