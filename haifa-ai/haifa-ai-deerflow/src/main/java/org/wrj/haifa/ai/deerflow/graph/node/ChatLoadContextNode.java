@@ -31,10 +31,16 @@ public class ChatLoadContextNode implements AsyncNodeAction {
         return CompletableFuture.supplyAsync(() -> {
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
             List<MessageRecord> messages = messageStore.listByThread(threadId);
+            List<String> existingMessageIds = state.<List<Map<String, Object>>>value(AgentGraphStateKeys.MESSAGE_WINDOW)
+                    .orElse(List.of())
+                    .stream()
+                    .map(message -> String.valueOf(message.getOrDefault("messageId", "")))
+                    .toList();
 
             int from = Math.max(0, messages.size() - MESSAGE_WINDOW_LIMIT);
             List<Map<String, Object>> messageRefs = messages.subList(from, messages.size()).stream()
                     .map(this::messageRef)
+                    .filter(message -> !existingMessageIds.contains(String.valueOf(message.getOrDefault("messageId", ""))))
                     .toList();
 
             Map<String, Object> update = new HashMap<>();

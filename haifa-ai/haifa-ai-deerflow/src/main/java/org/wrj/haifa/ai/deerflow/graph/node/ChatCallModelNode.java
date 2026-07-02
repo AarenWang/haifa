@@ -19,7 +19,6 @@ import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -125,7 +124,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
                     Map.of("step", stepNum, "modelDurationMs", duration)
             ));
 
-            // Append assistant message to window
+            // APPEND strategy expects only newly produced messages.
             Map<String, Object> assistantMsg = new LinkedHashMap<>();
             assistantMsg.put("messageId", UUID.randomUUID().toString());
             assistantMsg.put("threadId", threadId);
@@ -135,11 +134,8 @@ public class ChatCallModelNode implements AsyncNodeAction {
             assistantMsg.put("metadata", Map.of("step", stepNum, "modelDurationMs", duration));
             assistantMsg.put("createdAt", java.time.Instant.now().toString());
 
-            List<Map<String, Object>> newWindow = new ArrayList<>(windowMaps);
-            newWindow.add(assistantMsg);
-
             Map<String, Object> update = new HashMap<>();
-            update.put(AgentGraphStateKeys.MESSAGE_WINDOW, newWindow);
+            update.put(AgentGraphStateKeys.MESSAGE_WINDOW, List.of(assistantMsg));
             update.put("chat_steps", stepNum);
             update.put("last_assistant_content", responseContent);
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "call_model", "status", "completed")));

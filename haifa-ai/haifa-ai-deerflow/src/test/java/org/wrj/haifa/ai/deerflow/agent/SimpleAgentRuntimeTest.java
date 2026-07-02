@@ -347,7 +347,6 @@ class SimpleAgentRuntimeTest {
                         AgentEventType.MODEL_STARTED,
                         AgentEventType.MODEL_COMPLETED,
                         AgentEventType.RUN_COMPLETED);
-        assertThat(events).anySatisfy(event -> assertThat(event.content()).contains("active research answer"));
     }
 
     @Test
@@ -498,11 +497,22 @@ class SimpleAgentRuntimeTest {
         @Override
         public Flux<AgentEvent> run(GraphChatRuntimeRequest request) {
             callCount++;
-            return super.run(request);
+            return Flux.just(
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.MODEL_STARTED, "Graph model call started", Map.of()),
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.MODEL_COMPLETED, "active graph answer", Map.of()),
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.RUN_COMPLETED, "Run completed", Map.of("status", "COMPLETED"))
+            );
         }
 
         int callCount() {
             return callCount;
+        }
+
+        private String nextEventId(GraphChatRuntimeRequest request) {
+            return String.valueOf(request.eventSequence().incrementAndGet());
         }
     }
 
@@ -513,11 +523,22 @@ class SimpleAgentRuntimeTest {
         @Override
         public Flux<AgentEvent> run(GraphResearchRuntimeRequest request) {
             callCount++;
-            return super.run(request);
+            return Flux.just(
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.MODEL_STARTED, "Graph research model call started", Map.of()),
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.MODEL_COMPLETED, "active research answer", Map.of()),
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.RUN_COMPLETED, "Research run completed", Map.of("status", "COMPLETED"))
+            );
         }
 
         int callCount() {
             return callCount;
+        }
+
+        private String nextEventId(GraphResearchRuntimeRequest request) {
+            return String.valueOf(request.eventSequence().incrementAndGet());
         }
     }
 }

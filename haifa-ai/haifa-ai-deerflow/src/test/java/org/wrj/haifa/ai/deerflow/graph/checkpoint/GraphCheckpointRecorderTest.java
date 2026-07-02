@@ -3,6 +3,7 @@ package org.wrj.haifa.ai.deerflow.graph.checkpoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
@@ -12,6 +13,7 @@ import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntime;
 import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntimeRequest;
+import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentGraphCheckpointStore;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
@@ -23,6 +25,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -32,13 +36,19 @@ class GraphCheckpointRecorderTest {
     private AgentGraphCheckpointStore checkpointStore;
 
     @Autowired
-    private GraphCheckpointRecorder checkpointRecorder;
+    private DeerFlowProperties properties;
+
+    @Autowired
+    private GraphChatRuntime runtime;
+
+    @MockitoBean
+    private AgentModelClient modelClient;
 
     @Test
-    void activeChatPreflightRecordsOfficialMemorySaverCheckpointsWhenEnabled() {
-        DeerFlowProperties properties = new DeerFlowProperties();
+    void activeChatRecordsSQLiteCheckpointsWhenEnabled() {
         properties.getGraph().getCheckpoint().setEnabled(true);
-        GraphChatRuntime runtime = new GraphChatRuntime(properties, checkpointRecorder);
+        when(modelClient.generate(any()))
+                .thenReturn(Mono.just(new ModelResponse("<final_answer>done</final_answer>")));
 
         String runId = "run-checkpoint-" + System.nanoTime();
         String threadId = "thread-checkpoint-" + System.nanoTime();
@@ -68,10 +78,13 @@ class GraphCheckpointRecorderTest {
         assertThat(byRun).isNotEmpty();
         assertThat(byRun).allSatisfy(record -> {
             assertThat(record.threadId()).isEqualTo(threadId);
-            assertThat(record.graphName()).isEqualTo("haifa-active-chat-preflight");
+            assertThat(record.graphName()).isEqualTo("haifa-active-chat");
             assertThat(record.stateSummary()).containsEntry("runId", runId);
             assertThat(record.stateSummary()).containsEntry("threadId", threadId);
             assertThat(record.stateSummary()).containsEntry("mode", "CHAT");
+            assertThat(record.fullState()).containsEntry("runId", runId);
+            assertThat(record.fullState()).containsEntry("threadId", threadId);
+            assertThat(record.fullState()).containsEntry("mode", "CHAT");
         });
         assertThat(checkpointStore.findByThreadId(threadId)).hasSameSizeAs(byRun);
     }

@@ -4,13 +4,14 @@ import com.alibaba.cloud.ai.graph.CompileConfig;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.StateGraph;
+import com.alibaba.cloud.ai.graph.checkpoint.BaseCheckpointSaver;
 import com.alibaba.cloud.ai.graph.checkpoint.config.SaverConfig;
-import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.checkpoint.GraphCheckpointRecorder;
+import org.wrj.haifa.ai.deerflow.graph.checkpoint.SQLiteCheckpointSaver;
 import org.wrj.haifa.ai.deerflow.graph.node.*;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateFactory;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
@@ -40,6 +41,7 @@ public class GraphChatRuntime {
     private final DeerFlowProperties properties;
     private final GraphCheckpointRecorder checkpointRecorder;
     private final AgentGraphStateFactory stateFactory;
+    private final SQLiteCheckpointSaver sqliteCheckpointSaver;
 
     private final ChatLoadContextNode loadContextNode;
     private final ChatApplyMiddlewaresNode applyMiddlewaresNode;
@@ -49,15 +51,18 @@ public class GraphChatRuntime {
     private final ChatFinalizeNode finalizeNode;
 
     public GraphChatRuntime() {
-        this(new DeerFlowProperties(), null, new AgentGraphStateFactory(), null, null, null, null, null, null);
-    }    public GraphChatRuntime(DeerFlowProperties properties, GraphCheckpointRecorder checkpointRecorder) {
-        this(properties, checkpointRecorder, new AgentGraphStateFactory(), null, null, null, null, null, null);
+        this(new DeerFlowProperties(), null, new AgentGraphStateFactory(), null, null, null, null, null, null, null);
+    }
+
+    public GraphChatRuntime(DeerFlowProperties properties, GraphCheckpointRecorder checkpointRecorder) {
+        this(properties, checkpointRecorder, new AgentGraphStateFactory(), null, null, null, null, null, null, null);
     }
 
     @Autowired
     public GraphChatRuntime(DeerFlowProperties properties,
                             GraphCheckpointRecorder checkpointRecorder,
                             AgentGraphStateFactory stateFactory,
+                            SQLiteCheckpointSaver sqliteCheckpointSaver,
                             ChatLoadContextNode loadContextNode,
                             ChatApplyMiddlewaresNode applyMiddlewaresNode,
                             ChatCallModelNode callModelNode,
@@ -67,6 +72,7 @@ public class GraphChatRuntime {
         this.properties = properties == null ? new DeerFlowProperties() : properties;
         this.checkpointRecorder = checkpointRecorder;
         this.stateFactory = stateFactory == null ? new AgentGraphStateFactory() : stateFactory;
+        this.sqliteCheckpointSaver = sqliteCheckpointSaver;
         this.loadContextNode = loadContextNode;
         this.applyMiddlewaresNode = applyMiddlewaresNode;
         this.callModelNode = callModelNode;
@@ -91,25 +97,34 @@ public class GraphChatRuntime {
                 initialState.put("chat_steps", 0);
                 initialState.put("last_assistant_content", "");
 
-                MemorySaver saver = checkpointEnabled() ? new MemorySaver() : null;
+                BaseCheckpointSaver saver = checkpointEnabled() ? sqliteCheckpointSaver : null;
                 int maxIterations = request.loopConfig().maxSteps();
                 CompiledGraph graph = saver == null ? chatGraph(maxIterations).compile() : chatGraph(maxIterations).compile(
                         CompileConfig.builder()
                                 .recursionLimit(maxIterations * 5 + 5)
                                 .saverConfig(SaverConfig.builder().register(saver).build())
+                                .interruptBefore(EXECUTE_TOOLS)
                                 .build());
 
                 RunnableConfig runnableConfig = RunnableConfig.builder()
                         .threadId(request.runConfig().threadId())
                         .build();
 
-                graph.stream(initialState, runnableConfig)
-                        .collectList()
+                boolean isResume = false;
+                if (saver != null) {
+                    var latestCp = saver.get(runnableConfig);
+                    if (latestCp.isPresent() && latestCp.get().getNextNodeId() != null && !latestCp.get().getNextNodeId().isBlank()) {
+                        isResume = true;
+                    }
+                }
+
+                var streamResult = isResume
+                        ? graph.stream(Map.of(AgentGraphStateKeys.RUN_ID, runId), runnableConfig)
+                        : graph.stream(initialState, runnableConfig);
+
+                streamResult.collectList()
                         .block(Duration.ofMillis(request.loopConfig().timeoutMs()));
 
-                if (saver != null && checkpointRecorder != null) {
-                    checkpointRecorder.record(GRAPH_NAME, request.runConfig(), runnableConfig, saver);
-                }
                 eventSink.tryEmitComplete();
             }
             catch (Exception ex) {
@@ -137,7 +152,6 @@ public class GraphChatRuntime {
                 .addEdge(APPLY_PROMPT_MIDDLEWARES, CALL_MODEL)
                 .addEdge(CALL_MODEL, PARSE_MODEL_OUTPUT);
 
-        // Conditional edge from parse_model_output
         graph.addConditionalEdges(PARSE_MODEL_OUTPUT, state -> {
             List<Map<String, Object>> pending = AgentGraphStateView.of(state).listOfMaps(AgentGraphStateKeys.PENDING_TOOL_CALLS);
             Integer steps = (Integer) state.data().getOrDefault("chat_steps", 0);
@@ -157,6 +171,7 @@ public class GraphChatRuntime {
     private boolean checkpointEnabled() {
         return properties.getGraph() != null
                 && properties.getGraph().getCheckpoint() != null
-                && properties.getGraph().getCheckpoint().isEnabled();
+                && properties.getGraph().getCheckpoint().isEnabled()
+                && sqliteCheckpointSaver != null;
     }
 }

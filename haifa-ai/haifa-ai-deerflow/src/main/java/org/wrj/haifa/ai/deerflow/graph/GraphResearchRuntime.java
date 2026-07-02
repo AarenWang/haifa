@@ -4,13 +4,14 @@ import com.alibaba.cloud.ai.graph.CompileConfig;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.StateGraph;
+import com.alibaba.cloud.ai.graph.checkpoint.BaseCheckpointSaver;
 import com.alibaba.cloud.ai.graph.checkpoint.config.SaverConfig;
-import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.checkpoint.GraphCheckpointRecorder;
+import org.wrj.haifa.ai.deerflow.graph.checkpoint.SQLiteCheckpointSaver;
 import org.wrj.haifa.ai.deerflow.graph.node.*;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateFactory;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
@@ -39,6 +40,7 @@ public class GraphResearchRuntime {
     private final DeerFlowProperties properties;
     private final GraphCheckpointRecorder checkpointRecorder;
     private final AgentGraphStateFactory stateFactory;
+    private final SQLiteCheckpointSaver sqliteCheckpointSaver;
 
     private final ResearchPlanningNode planningNode;
     private final ResearchSearchNode searchNode;
@@ -48,13 +50,14 @@ public class GraphResearchRuntime {
     private final ResearchReportNode reportNode;
 
     public GraphResearchRuntime() {
-        this(new DeerFlowProperties(), null, new AgentGraphStateFactory(), null, null, null, null, null, null);
+        this(new DeerFlowProperties(), null, new AgentGraphStateFactory(), null, null, null, null, null, null, null);
     }
 
     @Autowired
     public GraphResearchRuntime(DeerFlowProperties properties,
                                 GraphCheckpointRecorder checkpointRecorder,
                                 AgentGraphStateFactory stateFactory,
+                                SQLiteCheckpointSaver sqliteCheckpointSaver,
                                 ResearchPlanningNode planningNode,
                                 ResearchSearchNode searchNode,
                                 ResearchFetchNode fetchNode,
@@ -64,6 +67,7 @@ public class GraphResearchRuntime {
         this.properties = properties == null ? new DeerFlowProperties() : properties;
         this.checkpointRecorder = checkpointRecorder;
         this.stateFactory = stateFactory == null ? new AgentGraphStateFactory() : stateFactory;
+        this.sqliteCheckpointSaver = sqliteCheckpointSaver;
         this.planningNode = planningNode;
         this.searchNode = searchNode;
         this.fetchNode = fetchNode;
@@ -90,7 +94,7 @@ public class GraphResearchRuntime {
                 initialState.put("quality_gate_passed", false);
                 initialState.put("emittedEvidenceIds", List.of());
 
-                MemorySaver saver = checkpointEnabled() ? new MemorySaver() : null;
+                BaseCheckpointSaver saver = checkpointEnabled() ? sqliteCheckpointSaver : null;
                 int maxIterations = request.loopConfig().maxSteps();
                 CompiledGraph graph = saver == null ? researchGraph(maxIterations).compile() : researchGraph(maxIterations).compile(
                         CompileConfig.builder()
@@ -106,9 +110,6 @@ public class GraphResearchRuntime {
                         .collectList()
                         .block(Duration.ofMillis(request.loopConfig().timeoutMs()));
 
-                if (saver != null && checkpointRecorder != null) {
-                    checkpointRecorder.record(GRAPH_NAME, request.runConfig(), runnableConfig, saver);
-                }
                 eventSink.tryEmitComplete();
             }
             catch (Exception ex) {
@@ -156,6 +157,7 @@ public class GraphResearchRuntime {
     private boolean checkpointEnabled() {
         return properties.getGraph() != null
                 && properties.getGraph().getCheckpoint() != null
-                && properties.getGraph().getCheckpoint().isEnabled();
+                && properties.getGraph().getCheckpoint().isEnabled()
+                && sqliteCheckpointSaver != null;
     }
 }

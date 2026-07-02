@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
@@ -11,6 +12,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
 import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
+import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
 import org.wrj.haifa.ai.deerflow.thread.MessageRole;
@@ -25,6 +27,8 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -35,6 +39,9 @@ class GraphChatRuntimeTest {
 
     @Autowired
     private MessageStore messageStore;
+
+    @MockitoBean
+    private AgentModelClient modelClient;
 
     @Test
     void executesFullChatGraphAndSavesAnswer() {
@@ -67,6 +74,8 @@ class GraphChatRuntimeTest {
                 prompt -> Mono.just(new ModelResponse("<final_answer>hello user from graph</final_answer>")),
                 new ToolRegistry(List.of())
         );
+        when(modelClient.generate(any()))
+                .thenReturn(Mono.just(new ModelResponse("<final_answer>hello user from graph</final_answer>")));
 
         GraphChatRuntimeRequest request = new GraphChatRuntimeRequest(
                 loop,
@@ -95,18 +104,18 @@ class GraphChatRuntimeTest {
 
         assertThat(events).anySatisfy(event -> {
             assertThat(event.type()).isEqualTo(AgentEventType.MODEL_DELTA);
-            assertThat(event.content()).contains("hello deerflow graph");
+            assertThat(event.content()).contains("hello user from graph");
         });
 
         assertThat(events).anySatisfy(event -> {
             assertThat(event.type()).isEqualTo(AgentEventType.RUN_COMPLETED);
-            assertThat(event.content()).contains("hello deerflow graph");
+            assertThat(event.content()).contains("hello user from graph");
         });
 
         // Verify that the assistant's final response was saved to the message store
         List<MessageRecord> history = messageStore.listByThread(threadId);
         assertThat(history).hasSize(2);
         assertThat(history.get(1).role()).isEqualTo(MessageRole.ASSISTANT);
-        assertThat(history.get(1).content()).contains("hello deerflow graph");
+        assertThat(history.get(1).content()).contains("hello user from graph");
     }
 }

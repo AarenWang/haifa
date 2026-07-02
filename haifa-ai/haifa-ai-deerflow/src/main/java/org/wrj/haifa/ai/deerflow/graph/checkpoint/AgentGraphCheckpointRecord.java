@@ -12,6 +12,7 @@ public record AgentGraphCheckpointRecord(
         String nodeId,
         String nextNodeId,
         Map<String, Object> stateSummary,
+        Map<String, Object> fullState,
         Instant createdAt
 ) {
 }

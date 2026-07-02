@@ -52,8 +52,8 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
 
             AgentGraphStateView view = AgentGraphStateView.of(state);
             List<Map<String, Object>> pending = view.listOfMaps(AgentGraphStateKeys.PENDING_TOOL_CALLS);
-            List<Map<String, Object>> window = new ArrayList<>(view.messageWindow());
-            List<Map<String, Object>> toolResultsList = new ArrayList<>(view.toolResults());
+            List<Map<String, Object>> toolMessages = new ArrayList<>();
+            List<Map<String, Object>> toolResultsList = new ArrayList<>();
 
             for (Map<String, Object> call : pending) {
                 String callId = (String) call.get("id");
@@ -116,7 +116,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                 toolMsg.put("toolCallId", callId);
                 toolMsg.put("metadata", Map.of("durationMs", duration));
                 toolMsg.put("createdAt", java.time.Instant.now().toString());
-                window.add(toolMsg);
+                toolMessages.add(toolMsg);
 
                 Map<String, Object> resMap = new LinkedHashMap<>();
                 resMap.put("toolName", name);
@@ -126,7 +126,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             }
 
             Map<String, Object> update = new HashMap<>();
-            update.put(AgentGraphStateKeys.MESSAGE_WINDOW, window);
+            update.put(AgentGraphStateKeys.MESSAGE_WINDOW, toolMessages);
             update.put(AgentGraphStateKeys.TOOL_RESULTS, toolResultsList);
             update.put(AgentGraphStateKeys.PENDING_TOOL_CALLS, List.of());
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "execute_tools", "status", "completed")));

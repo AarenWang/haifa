@@ -41,6 +41,9 @@ public class AgentGraphCheckpointEntity {
     @Column(name = "state_summary_json", length = 4000)
     private String stateSummaryJson;
 
+    @Column(name = "full_state_json", length = 1000000)
+    private String fullStateJson;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -106,6 +109,14 @@ public class AgentGraphCheckpointEntity {
 
     public void setStateSummaryJson(String stateSummaryJson) {
         this.stateSummaryJson = stateSummaryJson;
+    }
+
+    public String getFullStateJson() {
+        return fullStateJson;
+    }
+
+    public void setFullStateJson(String fullStateJson) {
+        this.fullStateJson = fullStateJson;
     }
 
     public Instant getCreatedAt() {

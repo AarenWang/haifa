@@ -45,6 +45,7 @@ public class GraphCheckpointRecorder {
                 safe(checkpoint.getNodeId()),
                 safe(checkpoint.getNextNodeId()),
                 summarize(checkpoint.getState()),
+                checkpoint.getState() == null ? Map.of() : checkpoint.getState(),
                 Instant.now()
         );
     }

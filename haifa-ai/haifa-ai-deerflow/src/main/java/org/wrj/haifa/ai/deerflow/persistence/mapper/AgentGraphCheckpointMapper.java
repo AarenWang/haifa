@@ -23,6 +23,7 @@ public class AgentGraphCheckpointMapper {
         entity.setNodeId(record.nodeId());
         entity.setNextNodeId(record.nextNodeId());
         entity.setStateSummaryJson(jsonMapper.toJson(record.stateSummary()));
+        entity.setFullStateJson(jsonMapper.toJson(record.fullState()));
         entity.setCreatedAt(record.createdAt());
         return entity;
     }
@@ -37,6 +38,7 @@ public class AgentGraphCheckpointMapper {
                 entity.getNodeId(),
                 entity.getNextNodeId(),
                 jsonMapper.fromJson(entity.getStateSummaryJson()),
+                jsonMapper.fromJson(entity.getFullStateJson()),
                 entity.getCreatedAt()
         );
     }
