@@ -43,4 +43,29 @@ class AgentGraphStateStrategiesTest {
                 .containsEntry("outputTokens", 20);
         assertThat(AgentGraphStateView.of(merged).finalAnswer()).isEqualTo("new");
     }
+
+    @Test
+    void inputAcceptsCheckpointScalarStateKeys() {
+        OverAllState state = new OverAllState(Map.of(AgentGraphStateKeys.RUN_ID, "run-1"));
+        state.registerKeyAndStrategy(AgentGraphStateStrategies.keyStrategyFactory().apply());
+
+        state.input(Map.of(
+                AgentGraphStateKeys.THREAD_ID, "thread-1",
+                AgentGraphStateKeys.USER_MESSAGE, "research topic",
+                AgentGraphStateKeys.RESEARCH_OPTIONS, Map.of("depth", "quick"),
+                AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, 3,
+                AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, 5,
+                AgentGraphStateKeys.QUALITY_GATE_PASSED, true
+        ));
+
+        assertThat(state.data())
+                .containsEntry(AgentGraphStateKeys.RUN_ID, "run-1")
+                .containsEntry(AgentGraphStateKeys.THREAD_ID, "thread-1")
+                .containsEntry(AgentGraphStateKeys.USER_MESSAGE, "research topic")
+                .containsEntry(AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, 3)
+                .containsEntry(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, 5)
+                .containsEntry(AgentGraphStateKeys.QUALITY_GATE_PASSED, true);
+        assertThat(AgentGraphStateView.of(state).map(AgentGraphStateKeys.RESEARCH_OPTIONS))
+                .containsEntry("depth", "quick");
+    }
 }

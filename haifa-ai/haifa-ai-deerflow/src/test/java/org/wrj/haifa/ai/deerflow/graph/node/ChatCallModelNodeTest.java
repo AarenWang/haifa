@@ -2,12 +2,17 @@ package org.wrj.haifa.ai.deerflow.graph.node;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
+import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
+import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import reactor.core.publisher.Mono;
 
@@ -98,5 +103,65 @@ class ChatCallModelNodeTest {
         assertThat(metadata)
                 .containsEntry("promptFallback", true)
                 .containsEntry("fallbackReason", ChatCallModelNode.PROMPT_FALLBACK_REASON);
+    }
+
+    @Test
+    void disclosesSkillAllowedHighRiskToolFromGraphState() {
+        AtomicReference<ModelPrompt> capturedPrompt = new AtomicReference<>();
+        AgentTool runScript = tool("run_script");
+        ChatCallModelNode node = new ChatCallModelNode(
+                prompt -> {
+                    capturedPrompt.set(prompt);
+                    return Mono.just(new ModelResponse("<final_answer>ok</final_answer>"));
+                },
+                new ToolRegistry(List.of(runScript)),
+                new DeerFlowProperties()
+        );
+        ReflectionTestUtils.setField(node, "toolPolicyService", new ToolPolicyService(List.of()));
+
+        node.apply(new OverAllState(Map.of(
+                AgentGraphStateKeys.RUN_ID, "run-3",
+                AgentGraphStateKeys.THREAD_ID, "thread-3",
+                AgentGraphStateKeys.MODE, RunMode.CHAT.name(),
+                AgentGraphStateKeys.MODEL_PROMPT, Map.of(
+                        "systemPrompt", "middleware prompt",
+                        "userPrompt", "user prompt"
+                ),
+                AgentGraphStateKeys.ACTIVE_SKILLS, List.of(Map.of(
+                        "name", "script-skill",
+                        "description", "script skill",
+                        "source", "test",
+                        "allowedTools", List.of("run_script"),
+                        "activationHints", List.of()
+                )),
+                AgentGraphStateKeys.MESSAGE_WINDOW, List.of()
+        ))).join();
+
+        assertThat(capturedPrompt.get().systemPrompt())
+                .contains("run_script: run_script description");
+    }
+
+    private static AgentTool tool(String name) {
+        return new AgentTool() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public String description() {
+                return name + " description";
+            }
+
+            @Override
+            public boolean supports(String userMessage) {
+                return true;
+            }
+
+            @Override
+            public ToolResult execute(ToolRequest request) {
+                return ToolResult.of(name, "ok");
+            }
+        };
     }
 }

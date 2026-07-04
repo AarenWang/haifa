@@ -2,10 +2,13 @@ package org.wrj.haifa.ai.deerflow.graph.state;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
+import org.wrj.haifa.ai.deerflow.skill.Skill;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 public final class AgentGraphStateView {
 
@@ -76,6 +79,20 @@ public final class AgentGraphStateView {
         return listOfMaps(AgentGraphStateKeys.ARTIFACTS);
     }
 
+    public List<Skill> activeSkills() {
+        return listOfMaps(AgentGraphStateKeys.ACTIVE_SKILLS).stream()
+                .map(skill -> new Skill(
+                        stringValue(skill.get("name")),
+                        stringValue(skill.get("description")),
+                        stringValue(skill.get("source")),
+                        "",
+                        Map.of(),
+                        stringSet(skill.get("allowedTools")),
+                        stringList(skill.get("activationHints"))
+                ))
+                .toList();
+    }
+
     public String finalAnswer() {
         return string(AgentGraphStateKeys.FINAL_ANSWER).orElse("");
     }
@@ -117,5 +134,35 @@ public final class AgentGraphStateView {
                         Map.Entry::getValue,
                         (left, right) -> right
                 ));
+    }
+
+    private static String stringValue(Object value) {
+        return value instanceof String text ? text : "";
+    }
+
+    private static Set<String> stringSet(Object value) {
+        if (value instanceof Iterable<?> raw) {
+            Set<String> values = new LinkedHashSet<>();
+            for (Object item : raw) {
+                if (item instanceof String text && !text.isBlank()) {
+                    values.add(text);
+                }
+            }
+            return Set.copyOf(values);
+        }
+        return Set.of();
+    }
+
+    private static List<String> stringList(Object value) {
+        if (value instanceof Iterable<?> raw) {
+            java.util.ArrayList<String> values = new java.util.ArrayList<>();
+            for (Object item : raw) {
+                if (item instanceof String text && !text.isBlank()) {
+                    values.add(text);
+                }
+            }
+            return List.copyOf(values);
+        }
+        return List.of();
     }
 }

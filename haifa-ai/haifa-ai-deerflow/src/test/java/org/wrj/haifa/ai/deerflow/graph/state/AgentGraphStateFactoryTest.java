@@ -6,6 +6,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
 import org.wrj.haifa.ai.deerflow.thread.MessageRole;
 
@@ -13,6 +14,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -49,8 +51,30 @@ class AgentGraphStateFactoryTest {
                 .containsExactly("middle", "newer ");
         assertThat(view.map(AgentGraphStateKeys.MODEL_PROMPT).get("systemPrompt")).isEqualTo("system");
         assertThat(view.map(AgentGraphStateKeys.REQUEST_METADATA).get("requestId")).isEqualTo("req-1");
+        assertThat(view.activeSkills()).isEmpty();
         assertThat(view.toolCalls()).isEmpty();
         assertThat(view.finalAnswer()).isEmpty();
+    }
+
+    @Test
+    void storesActiveSkillsAsCheckpointFriendlyState() {
+        AgentGraphStateFactory factory = new AgentGraphStateFactory();
+        AgentRunConfig config = new AgentRunConfig("thread-1", "run-1", "model-a", false, false, 4,
+                Path.of("."), RunMode.CHAT, ResearchOptions.defaults(), Map.of());
+        AgentRequest request = new AgentRequest("thread-1", "hello", "model-a");
+
+        Map<String, Object> state = factory.create(config, request, List.of(),
+                new ModelPrompt("system prompt", "user prompt", "model-a"),
+                List.of(new Skill("script-skill", "Script skill", "test", "", Map.of(),
+                        Set.of("run_script"), List.of("script"))));
+
+        assertThat(AgentGraphStateView.of(state).activeSkills())
+                .hasSize(1)
+                .first()
+                .satisfies(skill -> {
+                    assertThat(skill.name()).isEqualTo("script-skill");
+                    assertThat(skill.allowedTools()).containsExactly("run_script");
+                });
     }
 
     @Test

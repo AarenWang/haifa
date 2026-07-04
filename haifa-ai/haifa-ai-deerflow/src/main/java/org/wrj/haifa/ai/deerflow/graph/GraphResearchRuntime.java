@@ -5,6 +5,7 @@ import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.StateGraph;
 import com.alibaba.cloud.ai.graph.checkpoint.BaseCheckpointSaver;
+import com.alibaba.cloud.ai.graph.checkpoint.Checkpoint;
 import com.alibaba.cloud.ai.graph.checkpoint.config.SaverConfig;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 @Component
@@ -87,12 +89,15 @@ public class GraphResearchRuntime {
                         request.runConfig(),
                         request.agentRequest(),
                         request.threadHistory(),
-                        new ModelPrompt(request.systemPrompt(), request.userPrompt(), request.runConfig().modelName())
+                        new ModelPrompt(request.systemPrompt(), request.userPrompt(), request.runConfig().modelName()),
+                        request.activeSkills()
                 ));
                 // Track research steps inside state
-                initialState.put("research_steps", 0);
-                initialState.put("quality_gate_passed", false);
-                initialState.put("emittedEvidenceIds", List.of());
+                initialState.put(AgentGraphStateKeys.RESEARCH_STEPS, 0);
+                initialState.put(AgentGraphStateKeys.QUALITY_GATE_PASSED, false);
+                initialState.put(AgentGraphStateKeys.EMITTED_EVIDENCE_IDS, List.of());
+                initialState.put(AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, 0);
+                initialState.put(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, 0);
 
                 BaseCheckpointSaver saver = checkpointEnabled() ? sqliteCheckpointSaver : null;
                 int maxIterations = request.loopConfig().maxSteps();
@@ -106,7 +111,27 @@ public class GraphResearchRuntime {
                         .threadId(request.runConfig().threadId())
                         .build();
 
-                graph.stream(initialState, runnableConfig)
+                Optional<Checkpoint> resumeCheckpoint = Optional.empty();
+                if (saver != null) {
+                    resumeCheckpoint = saver.get(runnableConfig)
+                            .filter(checkpoint -> canResumeResearch(checkpoint, runId));
+                }
+
+                RunnableConfig executionConfig = resumeCheckpoint
+                        .map(checkpoint -> RunnableConfig.builder(runnableConfig)
+                                .checkPointId(checkpoint.getId())
+                                .nextNode(checkpoint.getNextNodeId())
+                                .build())
+                        .orElse(runnableConfig);
+
+                var streamResult = resumeCheckpoint.isPresent()
+                        ? graph.stream(Map.of(
+                                AgentGraphStateKeys.RUN_ID, runId,
+                                AgentGraphStateKeys.THREAD_ID, request.runConfig().threadId()
+                        ), executionConfig)
+                        : graph.stream(initialState, runnableConfig);
+
+                streamResult
                         .collectList()
                         .block(Duration.ofMillis(request.loopConfig().timeoutMs()));
 
@@ -140,8 +165,8 @@ public class GraphResearchRuntime {
 
         // Conditional edge from quality_gate
         graph.addConditionalEdges(QUALITY_GATE, state -> {
-            Boolean passed = (Boolean) state.data().getOrDefault("quality_gate_passed", false);
-            Integer steps = (Integer) state.data().getOrDefault("research_steps", 0);
+            Boolean passed = (Boolean) state.data().getOrDefault(AgentGraphStateKeys.QUALITY_GATE_PASSED, false);
+            Integer steps = (Integer) state.data().getOrDefault(AgentGraphStateKeys.RESEARCH_STEPS, 0);
             if (Boolean.TRUE.equals(passed) || steps >= maxSteps) {
                 return CompletableFuture.completedFuture(WRITE_REPORT);
             } else {
@@ -159,5 +184,14 @@ public class GraphResearchRuntime {
                 && properties.getGraph().getCheckpoint() != null
                 && properties.getGraph().getCheckpoint().isEnabled()
                 && sqliteCheckpointSaver != null;
+    }
+
+    private static boolean canResumeResearch(Checkpoint checkpoint, String runId) {
+        String nextNodeId = checkpoint.getNextNodeId();
+        if (nextNodeId == null || nextNodeId.isBlank() || StateGraph.END.equals(nextNodeId)) {
+            return false;
+        }
+        Object checkpointRunId = checkpoint.getState().get(AgentGraphStateKeys.RUN_ID);
+        return checkpointRunId != null && String.valueOf(checkpointRunId).equals(runId);
     }
 }

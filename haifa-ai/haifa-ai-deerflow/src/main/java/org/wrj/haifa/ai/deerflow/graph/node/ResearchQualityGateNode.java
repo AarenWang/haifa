@@ -42,10 +42,8 @@ public class ResearchQualityGateNode implements AsyncNodeAction {
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
-            ResearchOptions options = (ResearchOptions) state.data().get("researchOptions");
-            if (options == null) {
-                options = ResearchOptions.defaults();
-            }
+            ResearchOptions options = ResearchNodeStateSupport.researchOptions(
+                    state.data().get(AgentGraphStateKeys.RESEARCH_OPTIONS));
 
             ResearchPlan plan = planStore.findByRunId(runId).orElse(null);
             List<ResearchSource> sources = researchRuntimeSupport.listSourcesByRun(runId);
@@ -64,7 +62,7 @@ public class ResearchQualityGateNode implements AsyncNodeAction {
 
             QualityGateResult readiness = qualityGate.evaluate(plan, sources, evidenceItems, requireCitations);
             boolean passed = readiness.passed();
-            int currentSteps = state.<Integer>value("research_steps").orElse(0) + 1;
+            int currentSteps = state.<Integer>value(AgentGraphStateKeys.RESEARCH_STEPS).orElse(0) + 1;
 
             AgentEvent gateResultEvent;
             if (passed) {
@@ -89,9 +87,11 @@ public class ResearchQualityGateNode implements AsyncNodeAction {
             GraphEventRegistry.publish(runId, gateResultEvent);
 
             Map<String, Object> update = new HashMap<>();
-            update.put("quality_gate_passed", passed);
-            update.put("research_steps", currentSteps);
+            update.put(AgentGraphStateKeys.QUALITY_GATE_PASSED, passed);
+            update.put(AgentGraphStateKeys.RESEARCH_STEPS, currentSteps);
             update.put(AgentGraphStateKeys.RESEARCH_PHASE, "quality_gate");
+            update.put(AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, sources.size());
+            update.put(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, evidenceItems.size());
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "quality_gate", "status", "completed")));
             return update;
         });

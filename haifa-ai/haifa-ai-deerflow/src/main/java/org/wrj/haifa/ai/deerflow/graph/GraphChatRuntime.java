@@ -92,7 +92,8 @@ public class GraphChatRuntime {
                         request.runConfig(),
                         request.agentRequest(),
                         request.threadHistory(),
-                        new ModelPrompt(request.systemPrompt(), request.userPrompt(), request.runConfig().modelName())
+                        new ModelPrompt(request.systemPrompt(), request.userPrompt(), request.runConfig().modelName()),
+                        request.activeSkills()
                 ));
                 initialState.put("chat_steps", 0);
                 initialState.put("last_assistant_content", "");
@@ -103,7 +104,6 @@ public class GraphChatRuntime {
                         CompileConfig.builder()
                                 .recursionLimit(maxIterations * 5 + 5)
                                 .saverConfig(SaverConfig.builder().register(saver).build())
-                                .interruptBefore(EXECUTE_TOOLS)
                                 .build());
 
                 RunnableConfig runnableConfig = RunnableConfig.builder()

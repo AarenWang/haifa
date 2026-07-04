@@ -1,5 +1,7 @@
 package org.wrj.haifa.ai.deerflow.graph;
 
+import com.alibaba.cloud.ai.graph.RunnableConfig;
+import com.alibaba.cloud.ai.graph.checkpoint.Checkpoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -13,11 +15,16 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.graph.checkpoint.AgentGraphCheckpointRecord;
+import org.wrj.haifa.ai.deerflow.graph.checkpoint.SQLiteCheckpointSaver;
+import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
 import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentGraphCheckpointStore;
 import org.wrj.haifa.ai.deerflow.provider.WebFetchProvider;
 import org.wrj.haifa.ai.deerflow.provider.WebFetchProviderRegistry;
 import org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType;
@@ -25,12 +32,15 @@ import org.wrj.haifa.ai.deerflow.provider.WebSearchProvider;
 import org.wrj.haifa.ai.deerflow.provider.WebSearchProviderRegistry;
 import org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchDimension;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanStore;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchTaskStatus;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import reactor.core.publisher.Mono;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -52,6 +62,15 @@ class GraphResearchRuntimeTest {
 
     @Autowired
     private ResearchRuntimeSupport researchRuntimeSupport;
+
+    @Autowired
+    private DeerFlowProperties properties;
+
+    @Autowired
+    private SQLiteCheckpointSaver checkpointSaver;
+
+    @Autowired
+    private AgentGraphCheckpointStore checkpointStore;
 
     @MockitoBean
     private AgentModelClient modelClient;
@@ -138,6 +157,180 @@ class GraphResearchRuntimeTest {
         assertThat(plan.topic()).isEqualTo("deepseek technology software");
         assertThat(researchRuntimeSupport.listSourcesByRun(runId)).isNotEmpty();
         assertThat(researchRuntimeSupport.listEvidenceByRun(runId)).isNotEmpty();
+    }
+
+    @Test
+    void checkpointEnabledSavesResearchCheckpointsWithDiagnosticSummary() {
+        boolean originalCheckpointEnabled = properties.getGraph().getCheckpoint().isEnabled();
+        properties.getGraph().getCheckpoint().setEnabled(true);
+
+        try {
+            String runId = "run-research-checkpoint-" + UUID.randomUUID();
+            String threadId = "thread-research-checkpoint-" + UUID.randomUUID();
+            GraphResearchRuntimeRequest request = request(runId, threadId, new LoopConfig(1, 2, 30_000, ResearchOptions.quick()));
+
+            when(modelClient.generate(any()))
+                    .thenReturn(
+                            Mono.just(new ModelResponse("not-json-plan")),
+                            Mono.just(new ModelResponse("checkpoint synthesis")));
+
+            List<AgentEvent> events = graphResearchRuntime.run(request)
+                    .collectList()
+                    .block();
+
+            assertThat(events).anySatisfy(event -> assertThat(event.type()).isEqualTo(AgentEventType.REPORT_COMPLETED));
+
+            List<AgentGraphCheckpointRecord> records = checkpointStore.findByRunId(runId);
+            assertThat(records).isNotEmpty();
+            AgentGraphCheckpointRecord last = records.get(records.size() - 1);
+            assertThat(last.nextNodeId()).isBlank();
+            assertThat(last.stateSummary())
+                    .containsEntry("runId", runId)
+                    .containsEntry("threadId", threadId)
+                    .containsEntry("graphName", "haifa-active-research")
+                    .containsEntry("nodeId", "write_report")
+                    .containsEntry("nextNodeId", "")
+                    .containsEntry("researchPhase", "completed")
+                    .containsKey("sourceCount")
+                    .containsKey("evidenceCount")
+                    .containsKey("qualityGatePassed")
+                    .containsKey("artifactCount");
+        }
+        finally {
+            properties.getGraph().getCheckpoint().setEnabled(originalCheckpointEnabled);
+        }
+    }
+
+    @Test
+    void resumesResearchGraphFromCheckpointWithoutRecreatingPlan() {
+        boolean originalCheckpointEnabled = properties.getGraph().getCheckpoint().isEnabled();
+        properties.getGraph().getCheckpoint().setEnabled(true);
+
+        try {
+            String runId = "run-research-resume-" + UUID.randomUUID();
+            String threadId = "thread-research-resume-" + UUID.randomUUID();
+            ResearchPlan existingPlan = planStore.save(plan(runId, threadId, "resume topic"));
+
+            RunnableConfig runnableConfig = RunnableConfig.builder().threadId(threadId).build();
+            checkpointSaver.put(runnableConfig, Checkpoint.builder()
+                    .id("cp-research-resume-" + UUID.randomUUID())
+                    .nodeId("create_or_load_plan")
+                    .nextNodeId("search_sources")
+                    .state(Map.ofEntries(
+                            Map.entry(AgentGraphStateKeys.RUN_ID, runId),
+                            Map.entry(AgentGraphStateKeys.THREAD_ID, threadId),
+                            Map.entry(AgentGraphStateKeys.MODE, RunMode.RESEARCH.name()),
+                            Map.entry(AgentGraphStateKeys.USER_MESSAGE, existingPlan.topic()),
+                            Map.entry(AgentGraphStateKeys.MODEL_NAME, "zhipu"),
+                            Map.entry(AgentGraphStateKeys.RESEARCH_OPTIONS, Map.of(
+                                    "depth", "quick",
+                                    "timeWindow", "latest",
+                                    "maxSources", 5,
+                                    "requireCitations", false,
+                                    "outputFormat", "answer"
+                            )),
+                            Map.entry(AgentGraphStateKeys.RESEARCH_STEPS, 0),
+                            Map.entry(AgentGraphStateKeys.QUALITY_GATE_PASSED, false),
+                            Map.entry(AgentGraphStateKeys.EMITTED_EVIDENCE_IDS, List.of()),
+                            Map.entry(AgentGraphStateKeys.RESEARCH_PHASE, "planning"),
+                            Map.entry(AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, 0),
+                            Map.entry(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, 0),
+                            Map.entry(AgentGraphStateKeys.MODEL_STEPS, List.of()),
+                            Map.entry(AgentGraphStateKeys.MESSAGE_WINDOW, List.of()),
+                            Map.entry(AgentGraphStateKeys.TOOL_CALLS, List.of()),
+                            Map.entry(AgentGraphStateKeys.TOOL_RESULTS, List.of()),
+                            Map.entry(AgentGraphStateKeys.ARTIFACTS, List.of()),
+                            Map.entry(AgentGraphStateKeys.FINAL_ANSWER, "")
+                    ))
+                    .build());
+
+            when(modelClient.generate(any()))
+                    .thenReturn(Mono.just(new ModelResponse("resume synthesis")));
+
+            List<AgentEvent> events = graphResearchRuntime.run(request(runId, threadId,
+                            new LoopConfig(1, 2, 30_000, ResearchOptions.quick())))
+                    .collectList()
+                    .block();
+
+            assertThat(events).noneSatisfy(event ->
+                    assertThat(event.type()).isEqualTo(AgentEventType.RESEARCH_PLAN_CREATED));
+            assertThat(events).anySatisfy(event ->
+                    assertThat(event.type()).isEqualTo(AgentEventType.SOURCE_FOUND));
+            assertThat(planStore.findByRunId(runId)).hasValueSatisfying(plan ->
+                    assertThat(plan.planId()).isEqualTo(existingPlan.planId()));
+
+            Checkpoint finalCheckpoint = checkpointSaver.get(runnableConfig).orElseThrow();
+            assertThat(finalCheckpoint.getNextNodeId()).isBlank();
+            List<Map<String, Object>> modelSteps = (List<Map<String, Object>>) finalCheckpoint.getState()
+                    .get(AgentGraphStateKeys.MODEL_STEPS);
+            assertThat(modelSteps)
+                    .noneSatisfy(step -> assertThat(step)
+                            .containsEntry("node", "create_or_load_plan")
+                            .containsEntry("status", "reused"));
+        }
+        finally {
+            properties.getGraph().getCheckpoint().setEnabled(originalCheckpointEnabled);
+        }
+    }
+
+    private static GraphResearchRuntimeRequest request(String runId, String threadId, LoopConfig loopConfig) {
+        AgentRunConfig runConfig = new AgentRunConfig(
+                threadId,
+                runId,
+                "zhipu",
+                true,
+                false,
+                10,
+                Path.of("."),
+                RunMode.RESEARCH,
+                loopConfig.researchOptions(),
+                Map.of()
+        );
+
+        AgentRequest agentRequest = new AgentRequest(threadId, "deepseek technology software", "zhipu");
+        AgentLoop loop = new AgentLoop(
+                prompt -> Mono.just(new ModelResponse("<final_answer>research done</final_answer>")),
+                new ToolRegistry(List.of())
+        );
+
+        return new GraphResearchRuntimeRequest(
+                loop,
+                loopConfig,
+                runConfig,
+                agentRequest,
+                "You are research assistant",
+                "deepseek technology software",
+                new AtomicInteger(0),
+                null,
+                List.of(),
+                List.of(),
+                List.of()
+        );
+    }
+
+    private static ResearchPlan plan(String runId, String threadId, String topic) {
+        List<ResearchDimension> dimensions = List.of(
+                new ResearchDimension("facts", "Facts and data", "Collect factual evidence",
+                        ResearchTaskStatus.PENDING, List.of(topic + " facts"), 1, 0, 0, List.of()),
+                new ResearchDimension("cases", "Case studies", "Collect examples",
+                        ResearchTaskStatus.PENDING, List.of(topic + " case studies"), 1, 0, 0, List.of()),
+                new ResearchDimension("limits", "Limitations and counter views", "Collect risks and counterpoints",
+                        ResearchTaskStatus.PENDING, List.of(topic + " limitations"), 1, 0, 0, List.of())
+        );
+        return new ResearchPlan(
+                "plan-" + UUID.randomUUID(),
+                threadId,
+                runId,
+                topic,
+                List.of("What matters about " + topic + "?"),
+                dimensions,
+                List.of(topic),
+                "Prefer reliable sources",
+                "Answer",
+                "CREATED",
+                Instant.now(),
+                Instant.now()
+        );
     }
 
     private static WebSearchProvider searchProvider() {

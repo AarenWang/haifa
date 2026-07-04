@@ -299,8 +299,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 LoopConfig loopConfig = new LoopConfig(
                         maxSteps, maxToolCalls, this.properties.getResearchTimeout(), researchOptions);
 
-                boolean activeChatGraph = shouldUseActiveChatGraph(effectiveRequest);
-                boolean activeResearchGraph = shouldUseActiveResearchGraph(effectiveRequest);
+                boolean activeChatGraph = shouldUseActiveChatGraph(this.properties, this.graphChatRuntime, effectiveRequest);
+                boolean activeResearchGraph = shouldUseActiveResearchGraph(this.properties, this.graphResearchRuntime, effectiveRequest);
                 if (!activeChatGraph && !activeResearchGraph) {
                     triggerGraphShadow(config, effectiveRequest, prompt);
                 }
@@ -540,20 +540,20 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this.graphResearchRuntime = graphResearchRuntime;
     }
 
-    private boolean shouldUseActiveChatGraph(AgentRequest request) {
-        return this.graphChatRuntime != null
-                && this.properties.getGraph() != null
-                && this.properties.getGraph().isEnabled()
-                && this.properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_CHAT
+    public static boolean shouldUseActiveChatGraph(DeerFlowProperties properties, GraphChatRuntime graphChatRuntime, AgentRequest request) {
+        return graphChatRuntime != null
+                && properties.getGraph() != null
+                && properties.getGraph().isEnabled()
+                && properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_CHAT
                 && request != null
                 && request.isChatMode();
     }
 
-    private boolean shouldUseActiveResearchGraph(AgentRequest request) {
-        return this.graphResearchRuntime != null
-                && this.properties.getGraph() != null
-                && this.properties.getGraph().isEnabled()
-                && this.properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_RESEARCH
+    public static boolean shouldUseActiveResearchGraph(DeerFlowProperties properties, GraphResearchRuntime graphResearchRuntime, AgentRequest request) {
+        return graphResearchRuntime != null
+                && properties.getGraph() != null
+                && properties.getGraph().isEnabled()
+                && properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_RESEARCH
                 && request != null
                 && request.isResearchMode();
     }

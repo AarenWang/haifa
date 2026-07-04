@@ -76,7 +76,7 @@ class SQLiteCheckpointSaverTest {
     }
 
     @Test
-    void interruptsAndResumesGraphExecutionUsingSQLiteSaver() {
+    void savesCheckpointsDuringGraphExecutionUsingSQLiteSaver() {
         // Temporarily enable checkpointing in properties
         boolean originalCheckpointEnabled = properties.getGraph().getCheckpoint().isEnabled();
         properties.getGraph().getCheckpoint().setEnabled(true);
@@ -128,71 +128,26 @@ class SQLiteCheckpointSaverTest {
                     List.of()
             );
 
-            // Execute the graph. It should run load_context -> apply_prompt_middlewares -> call_model -> parse_model_output,
-            // then suspend before execute_tools!
+            // Execute the graph. It should run through the chat graph while checkpointing each transition.
             List<AgentEvent> events = graphChatRuntime.run(request)
                     .collectList()
                     .block();
 
             assertThat(events).isNotEmpty();
-
-            // Verify a checkpoint was successfully saved in SQLite and the next node is execute_tools
-            RunnableConfig runnableConfig = RunnableConfig.builder().threadId(threadId).build();
-            Optional<Checkpoint> cp = checkpointSaver.get(runnableConfig);
-            assertThat(cp).isPresent();
-            assertThat(cp.get().getNextNodeId()).isEqualTo("execute_tools");
-
-            // Now, mock the model response for the resume phase to return final answer
-            AgentLoop resumeLoop = new AgentLoop(
-                    prompt -> Mono.just(new ModelResponse("<final_answer>done execution</final_answer>")),
-                    new ToolRegistry(List.of())
-            );
-
-            String nextRunId = "run-interrupt-resume-" + UUID.randomUUID();
-            AgentRunConfig nextRunConfig = new AgentRunConfig(
-                    threadId,
-                    nextRunId,
-                    "zhipu",
-                    true,
-                    false,
-                    4,
-                    Path.of("."),
-                    RunMode.CHAT,
-                    null,
-                    Map.of()
-            );
-
-            GraphChatRuntimeRequest resumeRequest = new GraphChatRuntimeRequest(
-                    resumeLoop,
-                    new LoopConfig(3, 2, 30_000, null),
-                    nextRunConfig,
-                    agentRequest,
-                    "You are helpful assistant",
-                    "call tool list_workspace_files please",
-                    new AtomicInteger(0),
-                    null,
-                    List.of(),
-                    List.of(),
-                    List.of()
-            );
-
-            // Resume the graph. It should run execute_tools -> call_model -> parse_model_output -> finalize.
-            List<AgentEvent> resumeEvents = graphChatRuntime.run(resumeRequest)
-                    .collectList()
-                    .block();
-
-            assertThat(resumeEvents).isNotEmpty();
-
-            // Verify it completed with final answer
-            assertThat(resumeEvents).anySatisfy(event -> {
+            assertThat(events).anySatisfy(event -> {
+                assertThat(event.type()).isEqualTo(AgentEventType.TOOL_COMPLETED);
+                assertThat(event.metadata().get("status")).isEqualTo("SUCCESS");
+            });
+            assertThat(events).anySatisfy(event -> {
                 assertThat(event.type()).isEqualTo(AgentEventType.RUN_COMPLETED);
                 assertThat(event.content()).contains("done execution");
             });
 
-            // The checkpoint should have no nextNodeId now (meaning graph finished)
-            Optional<Checkpoint> finalCp = checkpointSaver.get(runnableConfig);
-            assertThat(finalCp).isPresent();
-            assertThat(finalCp.get().getNextNodeId()).isBlank();
+            // Verify a terminal checkpoint was successfully saved in SQLite.
+            RunnableConfig runnableConfig = RunnableConfig.builder().threadId(threadId).build();
+            Optional<Checkpoint> cp = checkpointSaver.get(runnableConfig);
+            assertThat(cp).isPresent();
+            assertThat(cp.get().getNextNodeId()).isBlank();
 
         } finally {
             properties.getGraph().getCheckpoint().setEnabled(originalCheckpointEnabled);

@@ -6,6 +6,7 @@ import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.model.ModelMessage;
+import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
@@ -14,6 +15,7 @@ import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -69,6 +71,30 @@ class ChatExecuteToolsNodeTest {
     }
 
     @Test
+    void skillAllowedHighRiskToolExecutesAndReceivesActiveSkills() {
+        AtomicInteger executions = new AtomicInteger();
+        AtomicReference<ToolRequest> capturedRequest = new AtomicReference<>();
+        AgentTool tool = tool("run_script", request -> {
+            executions.incrementAndGet();
+            capturedRequest.set(request);
+            return ToolResult.of("run_script", "script result");
+        });
+        ChatExecuteToolsNode node = new ChatExecuteToolsNode(
+                new ToolRegistry(List.of(tool)),
+                new DeerFlowProperties(),
+                new ToolPolicyService(List.of())
+        );
+
+        Map<String, Object> update = node.apply(state("run_script", List.of(skill("script-skill", "run_script")))).join();
+
+        assertThat(executions).hasValue(1);
+        assertThat(capturedRequest.get().activeSkills())
+                .extracting(Skill::name)
+                .containsExactly("script-skill");
+        assertObservation(update, "run_script", "script result", "SUCCESS");
+    }
+
+    @Test
     void missingToolWritesNotFoundObservationWithoutFailingGraph() {
         ChatExecuteToolsNode node = new ChatExecuteToolsNode(
                 new ToolRegistry(List.of()),
@@ -100,10 +126,23 @@ class ChatExecuteToolsNodeTest {
     }
 
     private static OverAllState state(String toolName) {
+        return state(toolName, List.of());
+    }
+
+    private static OverAllState state(String toolName, List<Skill> activeSkills) {
         return new OverAllState(Map.of(
                 AgentGraphStateKeys.RUN_ID, "run-1",
                 AgentGraphStateKeys.THREAD_ID, "thread-1",
                 AgentGraphStateKeys.MODE, RunMode.CHAT.name(),
+                AgentGraphStateKeys.ACTIVE_SKILLS, activeSkills.stream()
+                        .map(skill -> Map.of(
+                                "name", skill.name(),
+                                "description", skill.description(),
+                                "source", skill.source(),
+                                "allowedTools", List.copyOf(skill.allowedTools()),
+                                "activationHints", skill.activationHints()
+                        ))
+                        .toList(),
                 AgentGraphStateKeys.UPLOADED_FILE_IDS, List.of("file-1"),
                 AgentGraphStateKeys.PENDING_TOOL_CALLS, List.of(Map.of(
                         "id", "call-1",
@@ -111,6 +150,10 @@ class ChatExecuteToolsNodeTest {
                         "arguments", "{\"value\":1}"
                 ))
         ));
+    }
+
+    private static Skill skill(String name, String allowedTool) {
+        return new Skill(name, name + " description", "test", "", Map.of(), Set.of(allowedTool), List.of());
     }
 
     private static Map<String, Object> assertObservation(Map<String, Object> update, String toolName,

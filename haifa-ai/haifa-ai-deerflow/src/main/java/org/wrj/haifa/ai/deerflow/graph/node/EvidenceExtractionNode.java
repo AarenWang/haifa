@@ -36,7 +36,7 @@ public class EvidenceExtractionNode implements AsyncNodeAction {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
 
-            List<Object> rawEmitted = state.<List<Object>>value("emittedEvidenceIds").orElse(List.of());
+            List<Object> rawEmitted = state.<List<Object>>value(AgentGraphStateKeys.EMITTED_EVIDENCE_IDS).orElse(List.of());
             List<String> emitted = rawEmitted.stream().map(String::valueOf).toList();
             List<String> newEmitted = new ArrayList<>(emitted);
 
@@ -62,8 +62,10 @@ public class EvidenceExtractionNode implements AsyncNodeAction {
             }
 
             Map<String, Object> update = new HashMap<>();
-            update.put("emittedEvidenceIds", newEmitted);
+            update.put(AgentGraphStateKeys.EMITTED_EVIDENCE_IDS, newEmitted);
             update.put(AgentGraphStateKeys.RESEARCH_PHASE, "evidence");
+            update.put(AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, researchRuntimeSupport.listSourcesByRun(runId).size());
+            update.put(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, evidenceItems.size());
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "extract_evidence", "status", "completed")));
             return update;
         });

@@ -36,9 +36,22 @@ public class ResearchPlanningNode implements AsyncNodeAction {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
             String topic = state.<String>value(AgentGraphStateKeys.USER_MESSAGE).orElse("");
-            ResearchOptions options = (ResearchOptions) state.data().get("researchOptions");
-            if (options == null) {
-                options = ResearchOptions.defaults();
+            ResearchOptions options = ResearchNodeStateSupport.researchOptions(
+                    state.data().get(AgentGraphStateKeys.RESEARCH_OPTIONS));
+
+            // Idempotency: if plan already exists for this run, reuse it
+            ResearchPlan existingPlan = planStore.findByRunId(runId).orElse(null);
+            if (existingPlan != null) {
+                Map<String, Object> planMap = new HashMap<>();
+                planMap.put("planId", existingPlan.planId());
+                planMap.put("topic", existingPlan.topic());
+                planMap.put("dimensionCount", existingPlan.dimensionCount());
+
+                Map<String, Object> update = new HashMap<>();
+                update.put(AgentGraphStateKeys.RESEARCH_PLAN_REF, planMap);
+                update.put(AgentGraphStateKeys.RESEARCH_PHASE, "planning");
+                update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "create_or_load_plan", "status", "reused")));
+                return update;
             }
 
             PlanGenerationResult result = planner.generatePlan(threadId, runId, topic, options);

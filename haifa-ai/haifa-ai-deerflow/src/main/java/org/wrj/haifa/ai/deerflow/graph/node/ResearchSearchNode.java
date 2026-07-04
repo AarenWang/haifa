@@ -88,11 +88,10 @@ public class ResearchSearchNode implements AsyncNodeAction {
 
             String query = queries.get(0);
             int maxResults = 5;
-            ResearchOptions options = (ResearchOptions) state.data().get("researchOptions");
-            if (options != null) {
-                maxResults = options.maxSources() / Math.max(1, plan.dimensionCount());
-                if (maxResults < 3) maxResults = 3;
-            }
+            ResearchOptions options = ResearchNodeStateSupport.researchOptions(
+                    state.data().get(AgentGraphStateKeys.RESEARCH_OPTIONS));
+            maxResults = options.maxSources() / Math.max(1, plan.dimensionCount());
+            if (maxResults < 3) maxResults = 3;
 
             String searchResultRaw = provider.search(query, maxResults);
             SearchIngestionResult ingestion = researchRuntimeSupport.ingestSearchResults(threadId, runId, searchResultRaw);
@@ -114,6 +113,8 @@ public class ResearchSearchNode implements AsyncNodeAction {
 
             Map<String, Object> update = new HashMap<>();
             update.put(AgentGraphStateKeys.RESEARCH_PHASE, "search");
+            update.put(AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, researchRuntimeSupport.listSourcesByRun(runId).size());
+            update.put(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, researchRuntimeSupport.listEvidenceByRun(runId).size());
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "search_sources", "status", "completed")));
             return update;
         });

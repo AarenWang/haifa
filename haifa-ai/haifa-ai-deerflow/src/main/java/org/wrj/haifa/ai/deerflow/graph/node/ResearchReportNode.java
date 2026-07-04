@@ -10,6 +10,7 @@ import org.wrj.haifa.ai.deerflow.artifact.ReportWriteResult;
 import org.wrj.haifa.ai.deerflow.artifact.ReportWriterService;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
+import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
@@ -48,10 +49,19 @@ public class ResearchReportNode implements AsyncNodeAction {
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
-            ResearchOptions options = (ResearchOptions) state.data().get("researchOptions");
-            if (options == null) {
-                options = ResearchOptions.defaults();
+
+            // Idempotency: if artifacts already exist, reuse them
+            List<Map<String, Object>> existingArtifacts = AgentGraphStateView.of(state).artifacts();
+            if (!existingArtifacts.isEmpty()) {
+                Map<String, Object> update = new HashMap<>();
+                update.put(AgentGraphStateKeys.FINAL_ANSWER, state.<String>value(AgentGraphStateKeys.FINAL_ANSWER).orElse(""));
+                update.put(AgentGraphStateKeys.RESEARCH_PHASE, "completed");
+                update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "write_report", "status", "reused")));
+                return update;
             }
+
+            ResearchOptions options = ResearchNodeStateSupport.researchOptions(
+                    state.data().get(AgentGraphStateKeys.RESEARCH_OPTIONS));
 
             ResearchPlan plan = planStore.findByRunId(runId).orElse(null);
             List<ResearchSource> sources = researchRuntimeSupport.listSourcesByRun(runId);
@@ -110,6 +120,8 @@ public class ResearchReportNode implements AsyncNodeAction {
                     "filename", result.artifact().filename()
             )));
             update.put(AgentGraphStateKeys.RESEARCH_PHASE, "completed");
+            update.put(AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, sources.size());
+            update.put(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, evidenceItems.size());
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "write_report", "status", "completed")));
             return update;
         });

@@ -58,6 +58,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
 
             AgentGraphStateView view = AgentGraphStateView.of(state);
+            var activeSkills = view.activeSkills();
             List<Map<String, Object>> pending = view.listOfMaps(AgentGraphStateKeys.PENDING_TOOL_CALLS);
             List<String> uploadedFileIds = view.list(AgentGraphStateKeys.UPLOADED_FILE_IDS).stream()
                     .filter(String.class::isInstance)
@@ -89,7 +90,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                     status = "NOT_FOUND";
                     content = "Error: tool not found: " + safeName;
                 }
-                else if (toolPolicyService != null && !toolPolicyService.isToolAllowed(safeName, List.of(), view.mode())) {
+                else if (toolPolicyService != null && !toolPolicyService.isToolAllowed(safeName, activeSkills, view.mode())) {
                     status = "DENIED";
                     deniedByPolicy = true;
                     content = "Error: tool denied by policy: " + safeName;
@@ -112,7 +113,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                                 threadId,
                                 runId,
                                 view.mode(),
-                                List.of()
+                                activeSkills
                         );
                         ToolResult result = tool.execute(toolRequest);
                         content = result.content();

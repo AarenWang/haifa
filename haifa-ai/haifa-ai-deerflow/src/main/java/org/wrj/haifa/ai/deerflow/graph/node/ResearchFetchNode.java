@@ -53,7 +53,12 @@ public class ResearchFetchNode implements AsyncNodeAction {
                     .toList();
 
             if (unfetched.isEmpty()) {
-                return Map.of(AgentGraphStateKeys.RESEARCH_PHASE, "fetch_skipped");
+                return Map.of(
+                        AgentGraphStateKeys.RESEARCH_PHASE, "fetch_skipped",
+                        AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, sources.size(),
+                        AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, researchRuntimeSupport.listEvidenceByRun(runId).size(),
+                        AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "fetch_sources", "status", "skipped"))
+                );
             }
 
             String providerId = properties.getWebFetchProvider();
@@ -101,6 +106,8 @@ public class ResearchFetchNode implements AsyncNodeAction {
 
             Map<String, Object> update = new HashMap<>();
             update.put(AgentGraphStateKeys.RESEARCH_PHASE, "fetch");
+            update.put(AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, researchRuntimeSupport.listSourcesByRun(runId).size());
+            update.put(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, researchRuntimeSupport.listEvidenceByRun(runId).size());
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "fetch_sources", "status", "completed")));
             return update;
         });

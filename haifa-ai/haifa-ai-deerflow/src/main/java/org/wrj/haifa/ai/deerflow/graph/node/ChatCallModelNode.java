@@ -58,6 +58,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
 
             // Fetch state messages using view
             AgentGraphStateView view = AgentGraphStateView.of(state);
+            var activeSkills = view.activeSkills();
             Map<String, Object> promptMap = view.map(AgentGraphStateKeys.MODEL_PROMPT);
             String stateSystemPrompt = stringValue(promptMap.get("systemPrompt"));
             String stateUserPrompt = stringValue(promptMap.get("userPrompt"));
@@ -90,7 +91,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
             StringBuilder toolDescriptions = new StringBuilder();
             for (AgentTool tool : toolRegistry.tools()) {
                 String toolName = tool.name();
-                if (toolPolicyService != null && !toolPolicyService.isToolAllowed(toolName, List.of(), view.mode())) {
+                if (toolPolicyService != null && !toolPolicyService.isToolAllowed(toolName, activeSkills, view.mode())) {
                     continue;
                 }
                 toolDescriptions.append("- ").append(toolName).append(": ").append(tool.description()).append("\n");

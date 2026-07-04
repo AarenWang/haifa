@@ -118,4 +118,42 @@ class GraphChatRuntimeTest {
         assertThat(history.get(1).role()).isEqualTo(MessageRole.ASSISTANT);
         assertThat(history.get(1).content()).contains("hello user from graph");
     }
+
+    @Test
+    void activeChatToolLoopHandlesNotFoundToolAndReturnsToModel() {
+        String runId = "run-chat-not-found-" + UUID.randomUUID();
+        String threadId = "thread-chat-not-found-" + UUID.randomUUID();
+        messageStore.add(threadId, runId, MessageRole.USER, "call unknown_tool", Map.of());
+
+        AgentRunConfig runConfig = new AgentRunConfig(
+                threadId, runId, "zhipu", true, false, 4,
+                Path.of("."), RunMode.CHAT, null, Map.of()
+        );
+        AgentRequest agentRequest = new AgentRequest(threadId, "call unknown_tool", "zhipu");
+
+        when(modelClient.generate(any()))
+                .thenReturn(
+                        Mono.just(new ModelResponse("<tool_call name=\"unknown_tool\">{}</tool_call>")),
+                        Mono.just(new ModelResponse("<final_answer>Tool unknown_tool was not found.</final_answer>")));
+
+        AgentLoop loop = new AgentLoop(
+                prompt -> Mono.just(new ModelResponse("<final_answer>Tool unknown_tool was not found.</final_answer>")),
+                new ToolRegistry(List.of())
+        );
+
+        GraphChatRuntimeRequest request = new GraphChatRuntimeRequest(
+                loop, new LoopConfig(3, 2, 30_000, null),
+                runConfig, agentRequest, "You are chat assistant", "call unknown_tool",
+                new AtomicInteger(0), null, List.of(), List.of(), List.of()
+        );
+
+        List<AgentEvent> events = graphChatRuntime.run(request).collectList().block();
+        assertThat(events).isNotEmpty();
+
+        assertThat(events).anySatisfy(e -> {
+            assertThat(e.type()).isEqualTo(AgentEventType.TOOL_COMPLETED);
+            assertThat(e.metadata().get("status")).isEqualTo("NOT_FOUND");
+        });
+        assertThat(events).anySatisfy(e -> assertThat(e.type()).isEqualTo(AgentEventType.RUN_COMPLETED));
+    }
 }

@@ -3,6 +3,7 @@ package org.wrj.haifa.ai.deerflow.graph.state;
 import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
 
 import org.springframework.stereotype.Component;
@@ -37,6 +38,11 @@ public class AgentGraphStateFactory {
 
     public Map<String, Object> create(AgentRunConfig config, AgentRequest request, List<MessageRecord> threadHistory,
             ModelPrompt prompt) {
+        return create(config, request, threadHistory, prompt, List.of());
+    }
+
+    public Map<String, Object> create(AgentRunConfig config, AgentRequest request, List<MessageRecord> threadHistory,
+            ModelPrompt prompt, List<Skill> activeSkills) {
         Objects.requireNonNull(config, "config must not be null");
         Objects.requireNonNull(request, "request must not be null");
 
@@ -47,6 +53,7 @@ public class AgentGraphStateFactory {
         state.put(AgentGraphStateKeys.USER_ID, safe(request.userId()));
         state.put(AgentGraphStateKeys.USER_MESSAGE, truncate(request.message()));
         state.put(AgentGraphStateKeys.MODEL_NAME, safe(config.modelName()));
+        state.put(AgentGraphStateKeys.ACTIVE_SKILLS, activeSkillRefs(activeSkills));
         state.put(AgentGraphStateKeys.UPLOADED_FILE_IDS, List.copyOf(request.uploadedFileIds()));
         state.put(AgentGraphStateKeys.REQUEST_METADATA, Map.copyOf(request.metadata()));
         state.put(AgentGraphStateKeys.MESSAGE_WINDOW, messageWindow(threadHistory));
@@ -57,7 +64,7 @@ public class AgentGraphStateFactory {
         state.put(AgentGraphStateKeys.PENDING_TOOL_CALLS, List.of());
         state.put(AgentGraphStateKeys.TODOS, Map.of());
         state.put(AgentGraphStateKeys.RESEARCH_PLAN_REF, Map.of());
-        state.put("researchOptions", config.researchOptions());
+        state.put(AgentGraphStateKeys.RESEARCH_OPTIONS, config.researchOptions());
         state.put(AgentGraphStateKeys.RESEARCH_PHASE, "");
         state.put(AgentGraphStateKeys.SUBAGENTS, Map.of());
         state.put(AgentGraphStateKeys.CLARIFICATION, Map.of());
@@ -98,6 +105,21 @@ public class AgentGraphStateFactory {
         ref.put("userPrompt", truncate(prompt.userPrompt()));
         ref.put("modelName", safe(prompt.modelName()));
         return Map.copyOf(ref);
+    }
+
+    private List<Map<String, Object>> activeSkillRefs(List<Skill> activeSkills) {
+        List<Skill> skills = activeSkills == null ? List.of() : activeSkills;
+        return skills.stream()
+                .map(skill -> {
+                    Map<String, Object> ref = new LinkedHashMap<>();
+                    ref.put("name", safe(skill.name()));
+                    ref.put("description", truncate(skill.description()));
+                    ref.put("source", safe(skill.source()));
+                    ref.put("allowedTools", List.copyOf(skill.allowedTools()));
+                    ref.put("activationHints", List.copyOf(skill.activationHints()));
+                    return Map.copyOf(ref);
+                })
+                .toList();
     }
 
     private String truncate(String value) {
