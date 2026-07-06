@@ -148,7 +148,8 @@ public class AskClarificationTool implements AgentTool {
         if (answerType == null) {
             answerType = choices.isEmpty() ? "TEXT" : "SINGLE_CHOICE_WITH_CUSTOM";
         }
-        boolean allowCustom = booleanValue(node, "allow_custom", booleanValue(node, "allowCustom", choices.isEmpty()));
+        boolean allowCustom = choices.isEmpty()
+                || booleanValue(node, "allow_custom", booleanValue(node, "allowCustom", false));
         boolean required = booleanValue(node, "required", true);
         return new ClarificationQuestion(
                 id,

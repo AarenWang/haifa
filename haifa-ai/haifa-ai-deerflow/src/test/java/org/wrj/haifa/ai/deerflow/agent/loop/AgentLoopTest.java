@@ -75,6 +75,37 @@ class AgentLoopTest {
     }
 
     @Test
+    void passesAllowedToolsAsStructuredDefinitionsToModelPrompt() {
+        List<ModelPrompt> prompts = new ArrayList<>();
+        AgentModelClient model = prompt -> {
+            prompts.add(prompt);
+            return Mono.just(new ModelResponse("<final_answer>Done</final_answer>"));
+        };
+
+        ToolRegistry registry = new ToolRegistry(List.of(new MockSearchTool(), new MockFetchTool()));
+        AgentLoop loop = new AgentLoop(model, registry);
+        AgentRunConfig config = new AgentRunConfig("thread-tools", "run-tools", "test-model", false, false,
+                4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH, null, Map.of());
+
+        loop.run(
+                LoopConfig.fromDefaults(),
+                config,
+                "You are a research assistant.",
+                "Answer directly",
+                new java.util.concurrent.atomic.AtomicInteger(),
+                null, null, null
+        ).collectList().block();
+
+        assertThat(prompts).hasSize(1);
+        assertThat(prompts.getFirst().toolDefinitions())
+                .extracting(definition -> definition.name())
+                .contains("web_search", "web_fetch");
+        assertThat(prompts.getFirst().systemPrompt())
+                .contains("structured tool-call channel")
+                .doesNotContain("emit: <tool_call");
+    }
+
+    @Test
     void stepLimitPreventsInfiniteLoop() {
         // Mock model that always requests a tool call (never gives final answer)
         AgentModelClient infiniteModel = prompt -> Mono.just(

@@ -21,6 +21,7 @@ import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
+import org.wrj.haifa.ai.deerflow.model.ModelToolDefinition;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
@@ -273,18 +274,20 @@ public class AgentLoop {
             }
 
             StringBuilder toolDescriptions = new StringBuilder();
+            List<ModelToolDefinition> toolDefinitions = new ArrayList<>();
             for (AgentTool tool : toolRegistry.tools()) {
                 String toolName = tool.name();
                 if (toolPolicy != null && !toolPolicy.isToolAllowed(toolName, activeSkills, runConfig.mode())) {
                     continue;
                 }
                 toolDescriptions.append("- ").append(toolName).append(": ").append(tool.description()).append("\n");
+                toolDefinitions.add(new ModelToolDefinition(toolName, tool.description(), tool.inputSchema()));
             }
 
             String promptReinforcement = "\nIf a user asks for information that can be measured from the local runtime or workspace, and a sandbox execution tool is available, do not claim you lack access. Use the smallest appropriate script, inspect the tool result, then answer from observed output. If the tool is disabled or denied, explain the configuration limitation.";
             String fullSystemPrompt = systemPrompt + "\n\nAvailable tools:\n" + toolDescriptions
-                    + "\nWhen you need to use a tool, emit: <tool_call name=\"tool_name\">{\"arg\":\"value\"}</tool_call>\n"
-                    + "Do not write tool calls as prose such as `Tool call: name({...})`; use only the XML tag format above.\n"
+                    + "\nWhen you need to use a tool, use the model provider's structured tool-call channel. "
+                    + "Do not write tool calls manually as XML, JSON blocks, or prose.\n"
                     + "When you have enough information, provide your final answer starting with <final_answer>."
                     + promptReinforcement;
 
@@ -339,7 +342,7 @@ public class AgentLoop {
 
                 PromptAssembler.Result assembly = this.promptAssembler.assemble(
                         fullSystemPrompt, runConfig.modelName(), typedHistory);
-                ModelPrompt prompt = assembly.prompt();
+                ModelPrompt prompt = assembly.prompt().withToolDefinitions(toolDefinitions);
                 String userPrompt = prompt.userPrompt();
                 if (log.isDebugEnabled()) {
                     log.debug("Prompt assembled. runId={}, step={}, trace={}",
@@ -505,14 +508,12 @@ public class AgentLoop {
                                 "Unparsed tool call format detected. Asking model to re-emit tool calls.",
                                 Map.of("step", step + 1, "unparsedToolCall", true)));
                         history.add("System: Your previous response looked like a tool call but could not be parsed. "
-                                + "Re-emit each tool call exactly as "
-                                + "<tool_call name=\"tool_name\">{\"arg\":\"value\"}</tool_call>. "
-                                + "Do not describe the tool call in prose and do not answer yet.");
+                                + "Re-emit each tool call through the structured tool-call channel. "
+                                + "Do not describe the tool call in prose, do not write XML, and do not answer yet.");
                         typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM,
                                 "Your previous response looked like a tool call but could not be parsed. "
-                                        + "Re-emit each tool call exactly as "
-                                        + "<tool_call name=\"tool_name\">{\"arg\":\"value\"}</tool_call>. "
-                                        + "Do not describe the tool call in prose and do not answer yet.",
+                                        + "Re-emit each tool call through the structured tool-call channel. "
+                                        + "Do not describe the tool call in prose, do not write XML, and do not answer yet.",
                                 Map.of("toolCallFormatRetry", true)));
                         continue;
                     }

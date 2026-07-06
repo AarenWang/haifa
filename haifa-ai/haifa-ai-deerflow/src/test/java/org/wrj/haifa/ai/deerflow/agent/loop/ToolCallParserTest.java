@@ -18,6 +18,20 @@ class ToolCallParserTest {
     }
 
     @Test
+    void parsesCompactToolCallTagVariant() {
+        String response = "<toolcall name=\"readuploadedfile\">{\"fileid\":\"bb274dbb-fad4-445f-a52c-9414ea758e07\"}</toolcall>";
+
+        List<ToolCallParser.ParsedToolCall> calls = parser.parse(response);
+
+        assertThat(calls).hasSize(1);
+        assertThat(calls.get(0).toolName()).isEqualTo("readuploadedfile");
+        assertThat(calls.get(0).arguments()).contains("bb274dbb-fad4-445f-a52c-9414ea758e07");
+        assertThat(parser.hasToolCall(response)).isTrue();
+        assertThat(parser.hasToolCallIntent(response)).isTrue();
+        assertThat(parser.cleanResponseText("before " + response + " after")).isEqualTo("before  after");
+    }
+
+    @Test
     void parsesNestedToolNameAndJsonToolCall() {
         String response = """
                 Let me search.

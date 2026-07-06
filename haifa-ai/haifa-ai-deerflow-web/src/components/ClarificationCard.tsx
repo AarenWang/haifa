@@ -43,7 +43,7 @@ export default function ClarificationCard({ message, isPending, onAnswer }: Clar
   const toggleChoice = (question: ClarificationQuestion, choiceId: string) => {
     if (!isSubmittable) return;
     const draft = drafts[question.id] || { selectedChoiceIds: [], customAnswer: '' };
-    const isMulti = question.answerType === 'MULTI_CHOICE_WITH_CUSTOM';
+    const isMulti = question.answerType === 'MULTI_CHOICE_WITH_CUSTOM' || question.answerType === 'MULTI_CHOICE';
     const selectedChoiceIds = isMulti
       ? draft.selectedChoiceIds.includes(choiceId)
         ? draft.selectedChoiceIds.filter((id) => id !== choiceId)
@@ -116,6 +116,7 @@ export default function ClarificationCard({ message, isPending, onAnswer }: Clar
           )}
           {questions.map((question, index) => {
             const draft = drafts[question.id] || { selectedChoiceIds: [], customAnswer: '' };
+            const shouldRenderTextInput = question.allowCustom || question.choices.length === 0;
             return (
               <section className="clarification-question" key={question.id}>
                 <div className="clarification-question-heading">
@@ -148,7 +149,7 @@ export default function ClarificationCard({ message, isPending, onAnswer }: Clar
                   </div>
                 )}
 
-                {question.allowCustom && (
+                {shouldRenderTextInput && (
                   <textarea
                     className="clarification-custom-input"
                     placeholder={question.choices.length > 0 ? '其他或补充说明...' : '请输入你的回答...'}
@@ -228,7 +229,7 @@ function parseQuestions(value: unknown): ClarificationQuestion[] {
         prompt,
         answerType: stringValue(record.answerType) || stringValue(record.answer_type) || (choices.length ? 'SINGLE_CHOICE_WITH_CUSTOM' : 'TEXT'),
         choices,
-        allowCustom: booleanValue(record.allowCustom, booleanValue(record.allow_custom, true)),
+        allowCustom: choices.length === 0 || booleanValue(record.allowCustom, booleanValue(record.allow_custom, true)),
         required: booleanValue(record.required, true),
       };
     })

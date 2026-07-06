@@ -27,6 +27,17 @@ public class ListUploadedFilesTool implements AgentTool {
     }
 
     @Override
+    public String inputSchema() {
+        return """
+                {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+                """;
+    }
+
+    @Override
     public boolean supports(String userMessage) {
         if (userMessage == null) {
             return false;

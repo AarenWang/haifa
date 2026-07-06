@@ -13,10 +13,12 @@ import java.util.regex.Pattern;
 public class ToolCallParser {
 
     private static final Pattern TOOL_CALL_PATTERN = Pattern.compile(
-            "<tool_call\\s+name=\"([^\"]+)\"\\s*>(.*?)</tool_call>", Pattern.DOTALL);
+            "<\\s*tool_?call\\s+name\\s*=\\s*(['\"])(.*?)\\1\\s*>(.*?)</\\s*tool_?call\\s*>",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     private static final Pattern TOOL_CALL_BLOCK_PATTERN = Pattern.compile(
-            "<tool_call\\s*>(.*?)</tool_call>", Pattern.DOTALL);
+            "<\\s*tool_?call\\s*>(.*?)</\\s*tool_?call\\s*>",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     private static final Pattern TOOL_NAME_TAG = Pattern.compile(
             "<tool_name\\s*>(.*?)</tool_name>", Pattern.DOTALL);
@@ -38,7 +40,7 @@ public class ToolCallParser {
             Pattern.MULTILINE);
 
     private static final Pattern TOOL_CALL_INTENT_PATTERN = Pattern.compile(
-            "(?is)(<\\s*tool_call\\b|<[^>]*?invoke\\s+name=|\\bTool\\s+call\\s*:|\\bTool\\s+call\\s*[-=])");
+            "(?is)(<\\s*tool_?call\\b|<[^>]*?invoke\\s+name=|\\bTool\\s+call\\s*:|\\bTool\\s+call\\s*[-=])");
 
     public List<ParsedToolCall> parse(String modelResponse) {
         List<ParsedToolCall> calls = new ArrayList<>();
@@ -49,8 +51,8 @@ public class ToolCallParser {
         // 1. Parse standard tool_call format
         Matcher matcher = TOOL_CALL_PATTERN.matcher(modelResponse);
         while (matcher.find()) {
-            String toolName = matcher.group(1);
-            String argsJson = matcher.group(2);
+            String toolName = matcher.group(2).trim();
+            String argsJson = matcher.group(3);
             calls.add(new ParsedToolCall(toolName, argsJson.trim(), matcher.start(), matcher.end()));
         }
 
@@ -176,8 +178,10 @@ public class ToolCallParser {
         }
         String cleaned = text;
         // Remove standard tool_call tags
-        cleaned = Pattern.compile("<tool_call\\s+name=\"[^\"]+\"\\s*>.*?</tool_call>", Pattern.DOTALL).matcher(cleaned).replaceAll("");
-        cleaned = Pattern.compile("<tool_call\\s*>.*?</tool_call>", Pattern.DOTALL).matcher(cleaned).replaceAll("");
+        cleaned = Pattern.compile("<\\s*tool_?call\\s+name\\s*=\\s*(['\"]).*?\\1\\s*>.*?</\\s*tool_?call\\s*>",
+                Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(cleaned).replaceAll("");
+        cleaned = Pattern.compile("<\\s*tool_?call\\s*>.*?</\\s*tool_?call\\s*>",
+                Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(cleaned).replaceAll("");
         // Remove invoke and parameter tags
         cleaned = Pattern.compile("<[^>]*?invoke\\s+name=\"[^\"]+\"[^>]*>").matcher(cleaned).replaceAll("");
         cleaned = Pattern.compile("</[^>]*?invoke[^>]*>").matcher(cleaned).replaceAll("");

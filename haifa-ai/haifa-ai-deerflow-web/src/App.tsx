@@ -717,7 +717,7 @@ function parseClarificationQuestions(value: unknown): ClarificationQuestion[] | 
         prompt: stringValue(record.prompt) || stringValue(record.title) || '',
         answerType: stringValue(record.answerType) || stringValue(record.answer_type) || (choices.length ? 'SINGLE_CHOICE_WITH_CUSTOM' : 'TEXT'),
         choices,
-        allowCustom: booleanValue(record.allowCustom, booleanValue(record.allow_custom, true)),
+        allowCustom: choices.length === 0 || booleanValue(record.allowCustom, booleanValue(record.allow_custom, true)),
         required: booleanValue(record.required, true),
       };
     })

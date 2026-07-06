@@ -32,6 +32,22 @@ public class ReadUploadedFileTool implements AgentTool {
     }
 
     @Override
+    public String inputSchema() {
+        return """
+                {
+                  "type": "object",
+                  "properties": {
+                    "file_id": {
+                      "type": "string",
+                      "description": "Uploaded file ID. If omitted, the first file attached to the current request is read."
+                    }
+                  },
+                  "additionalProperties": false
+                }
+                """;
+    }
+
+    @Override
     public boolean supports(String userMessage) {
         if (userMessage == null) {
             return false;

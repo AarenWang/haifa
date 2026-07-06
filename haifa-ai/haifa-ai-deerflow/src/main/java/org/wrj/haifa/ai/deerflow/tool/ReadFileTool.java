@@ -31,6 +31,23 @@ public class ReadFileTool implements AgentTool {
     }
 
     @Override
+    public String inputSchema() {
+        return """
+                {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Relative workspace path, or an allowed virtual output path."
+                    }
+                  },
+                  "required": ["path"],
+                  "additionalProperties": false
+                }
+                """;
+    }
+
+    @Override
     public boolean supports(String userMessage) {
         return userMessage != null && userMessage.toLowerCase().contains("read_file");
     }

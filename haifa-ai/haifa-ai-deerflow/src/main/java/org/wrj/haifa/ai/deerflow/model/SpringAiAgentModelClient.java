@@ -11,6 +11,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.DefaultToolDefinition;
+import org.springframework.ai.tool.definition.ToolDefinition;
+import org.springframework.ai.tool.metadata.ToolMetadata;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
@@ -92,8 +97,9 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                 .system(prompt.systemPrompt())
                 .user(effectiveUserPrompt);
 
-        if (StringUtils.hasText(prompt.modelName())) {
-            request = request.options(ChatOptions.builder().model(prompt.modelName()).build());
+        ChatOptions chatOptions = chatOptionsFor(prompt);
+        if (chatOptions != null) {
+            request = request.options(chatOptions);
         }
 
         org.springframework.ai.chat.model.ChatResponse chatResponse = request.call().chatResponse();
@@ -152,6 +158,51 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         }
 
         return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of());
+    }
+
+    static ChatOptions chatOptionsFor(ModelPrompt prompt) {
+        if (prompt.toolDefinitions().isEmpty()) {
+            return StringUtils.hasText(prompt.modelName())
+                    ? ChatOptions.builder().model(prompt.modelName()).build()
+                    : null;
+        }
+        ToolCallingChatOptions.Builder optionsBuilder = ToolCallingChatOptions.builder()
+                .toolCallbacks(toToolCallbacks(prompt.toolDefinitions()))
+                .internalToolExecutionEnabled(false);
+        if (StringUtils.hasText(prompt.modelName())) {
+            optionsBuilder.model(prompt.modelName());
+        }
+        return optionsBuilder.build();
+    }
+
+    static List<ToolCallback> toToolCallbacks(List<ModelToolDefinition> toolDefinitions) {
+        return toolDefinitions.stream()
+                .filter(tool -> StringUtils.hasText(tool.name()))
+                .map(DeclarativeToolCallback::new)
+                .map(ToolCallback.class::cast)
+                .toList();
+    }
+
+    private record DeclarativeToolCallback(ModelToolDefinition modelToolDefinition) implements ToolCallback {
+
+        @Override
+        public ToolDefinition getToolDefinition() {
+            return DefaultToolDefinition.builder()
+                    .name(modelToolDefinition.name())
+                    .description(modelToolDefinition.description())
+                    .inputSchema(modelToolDefinition.inputSchema())
+                    .build();
+        }
+
+        @Override
+        public ToolMetadata getToolMetadata() {
+            return ToolMetadata.builder().returnDirect(false).build();
+        }
+
+        @Override
+        public String call(String toolInput) {
+            return "Tool execution is managed by DeerFlow AgentLoop and is disabled inside SpringAiAgentModelClient.";
+        }
     }
 
     private static ModelResponse fallbackAnswer() {

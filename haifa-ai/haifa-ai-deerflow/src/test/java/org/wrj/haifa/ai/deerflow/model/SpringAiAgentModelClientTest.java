@@ -5,14 +5,47 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.ObjectProvider;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import reactor.test.StepVerifier;
 
 class SpringAiAgentModelClientTest {
+
+    @Test
+    void buildsStructuredToolCallingOptionsWithoutInternalExecution() {
+        ModelToolDefinition definition = new ModelToolDefinition(
+                "read_uploaded_file",
+                "Read an uploaded file.",
+                """
+                        {
+                          "type": "object",
+                          "properties": {
+                            "file_id": { "type": "string" }
+                          }
+                        }
+                        """);
+
+        ChatOptions options = SpringAiAgentModelClient.chatOptionsFor(
+                new ModelPrompt("system", "user", "qwen-max", List.of(), List.of(definition)));
+
+        assertThat(options).isInstanceOf(ToolCallingChatOptions.class);
+        ToolCallingChatOptions toolOptions = (ToolCallingChatOptions) options;
+        assertThat(toolOptions.getModel()).isEqualTo("qwen-max");
+        assertThat(toolOptions.getInternalToolExecutionEnabled()).isFalse();
+        assertThat(toolOptions.getToolCallbacks()).hasSize(1);
+
+        ToolCallback callback = toolOptions.getToolCallbacks().getFirst();
+        assertThat(callback.getToolDefinition().name()).isEqualTo("read_uploaded_file");
+        assertThat(callback.getToolDefinition().description()).contains("Read an uploaded file");
+        assertThat(callback.getToolDefinition().inputSchema()).contains("file_id");
+    }
 
     @Test
     void fallbackAnswerDoesNotExposePromptOrConversationHistory() {

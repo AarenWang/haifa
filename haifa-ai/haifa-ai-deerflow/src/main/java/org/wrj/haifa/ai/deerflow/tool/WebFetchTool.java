@@ -41,6 +41,23 @@ public class WebFetchTool implements AgentTool {
     }
 
     @Override
+    public String inputSchema() {
+        return """
+                {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "Absolute URL to fetch."
+                    }
+                  },
+                  "required": ["url"],
+                  "additionalProperties": false
+                }
+                """;
+    }
+
+    @Override
     public boolean supports(String userMessage) {
         return userMessage != null && userMessage.toLowerCase().contains("web_fetch");
     }

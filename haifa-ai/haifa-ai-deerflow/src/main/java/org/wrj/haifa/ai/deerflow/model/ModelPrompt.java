@@ -6,16 +6,22 @@ public record ModelPrompt(
     String systemPrompt,
     String userPrompt,
     String modelName,
-    List<ModelMessage> messages
+    List<ModelMessage> messages,
+    List<ModelToolDefinition> toolDefinitions
 ) {
     public ModelPrompt {
         systemPrompt = systemPrompt == null ? "" : systemPrompt;
         userPrompt = userPrompt == null ? "" : userPrompt;
         messages = messages == null ? List.of() : List.copyOf(messages);
+        toolDefinitions = toolDefinitions == null ? List.of() : List.copyOf(toolDefinitions);
     }
 
     public ModelPrompt(String systemPrompt, String userPrompt, String modelName) {
-        this(systemPrompt, userPrompt, modelName, List.of());
+        this(systemPrompt, userPrompt, modelName, List.of(), List.of());
+    }
+
+    public ModelPrompt(String systemPrompt, String userPrompt, String modelName, List<ModelMessage> messages) {
+        this(systemPrompt, userPrompt, modelName, messages, List.of());
     }
 
     public boolean hasMessages() {
@@ -27,6 +33,10 @@ public record ModelPrompt(
             return userPrompt;
         }
         return renderMessages(messages);
+    }
+
+    public ModelPrompt withToolDefinitions(List<ModelToolDefinition> toolDefinitions) {
+        return new ModelPrompt(systemPrompt, userPrompt, modelName, messages, toolDefinitions);
     }
 
     public static String renderMessages(List<ModelMessage> messages) {

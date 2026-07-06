@@ -41,6 +41,30 @@ public class WebSearchTool implements AgentTool {
     }
 
     @Override
+    public String inputSchema() {
+        return """
+                {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "description": "Search query."
+                    },
+                    "max_results": {
+                      "type": "integer",
+                      "description": "Maximum number of search results.",
+                      "minimum": 1,
+                      "maximum": 10,
+                      "default": 5
+                    }
+                  },
+                  "required": ["query"],
+                  "additionalProperties": false
+                }
+                """;
+    }
+
+    @Override
     public boolean supports(String userMessage) {
         return userMessage != null && userMessage.toLowerCase().contains("web_search");
     }

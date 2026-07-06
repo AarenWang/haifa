@@ -57,7 +57,7 @@ haifa:
       uploads-root: ${HAIFA_DEERFLOW_UPLOADS:${user.dir}/uploads}
       max-upload-bytes: 10485760
       max-converted-chars: 60000
-      allowed-upload-extensions: txt,md,json,csv,log,xml,yml,yaml,properties
+      allowed-upload-extensions: txt,md,json,csv,log,xml,yml,yaml,properties,docx
       system-prompt: >
         You are the Java DeerFlow lead agent prototype. Use the provided
         local tool observations when they are relevant, be concise, and name

@@ -65,4 +65,29 @@ class AskClarificationToolTest {
                 .containsExactly("A", "B", "C", "D");
         assertThat(record.questions().get(1).answerType()).isEqualTo("SINGLE_CHOICE_WITH_CUSTOM");
     }
+
+    @Test
+    void questionsWithoutChoicesRemainAnswerableEvenWhenCustomIsFalse() {
+        AskClarificationTool tool = new AskClarificationTool(store);
+
+        tool.execute(new ToolRequest("""
+                {
+                  "title": "Need power skill details",
+                  "questions": [
+                    {
+                      "id": "auto_elevation",
+                      "title": "Confirm auto-elevation requirement",
+                      "prompt": "Is it acceptable to trigger UAC elevation automatically?",
+                      "answer_type": "TEXT",
+                      "allow_custom": false
+                    }
+                  ]
+                }
+                """, Path.of("."), java.util.List.of(), "thread-2", "run-2"));
+
+        ClarificationRecord record = store.findPending("thread-2").orElseThrow();
+        assertThat(record.questions()).hasSize(1);
+        assertThat(record.questions().get(0).choices()).isEmpty();
+        assertThat(record.questions().get(0).allowCustom()).isTrue();
+    }
 }
