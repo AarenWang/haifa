@@ -4,10 +4,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 
 import jakarta.annotation.PostConstruct;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -27,6 +29,9 @@ public class SchemaFixer {
     private static final Pattern STATUS_CHECK_PATTERN = Pattern.compile(
             "(status\\s+[^,]*?\\s+check\\s*\\(\\s*status\\s+in\\s*\\()([^)]+)(\\)\\s*\\))",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern EVENT_TYPE_CHECK_PATTERN = Pattern.compile(
+            "(type\\s+[^,]*?\\s+check\\s*\\(\\s*type\\s+in\\s*\\()([^)]+)(\\)\\s*\\))",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern STATUS_VALUE_PATTERN = Pattern.compile("'([^']+)'");
 
     @Autowired
@@ -36,6 +41,7 @@ public class SchemaFixer {
     public void fixCheckConstraints() {
         fixTableIfMissingStatuses("deerflow_runs", List.of("SUSPENDED"));
         fixTableIfMissingStatuses("deerflow_agent_loop_runs", List.of("SUSPENDED", "TIMEOUT"));
+        fixEventsTableIfMissingTypes();
     }
 
     private void fixTableIfMissingStatuses(String tableName, List<String> requiredStatuses) {
@@ -73,7 +79,31 @@ public class SchemaFixer {
     }
 
     private String addMissingStatuses(String createSql, List<String> requiredStatuses) {
-        Matcher checkMatcher = STATUS_CHECK_PATTERN.matcher(createSql);
+        return addMissingValues(createSql, STATUS_CHECK_PATTERN, requiredStatuses, "RUNNING");
+    }
+
+    private void fixEventsTableIfMissingTypes() {
+        List<String> requiredTypes = Arrays.stream(AgentEventType.values())
+                .map(Enum::name)
+                .toList();
+        try {
+            String createSql = tableCreateSql("deerflow_events");
+            if (createSql == null || createSql.isBlank()) {
+                return;
+            }
+            String patchedSql = addMissingValues(createSql, EVENT_TYPE_CHECK_PATTERN, requiredTypes, null);
+            if (patchedSql.equals(createSql)) {
+                return;
+            }
+            rebuildTable("deerflow_events", patchedSql);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to fix SQLite event type CHECK constraint for table deerflow_events", e);
+        }
+    }
+
+    private String addMissingValues(String createSql, Pattern checkPattern, List<String> requiredValues,
+            String insertAfterValue) {
+        Matcher checkMatcher = checkPattern.matcher(createSql);
         if (!checkMatcher.find()) {
             return createSql;
         }
@@ -85,13 +115,13 @@ public class SchemaFixer {
         }
 
         boolean changed = false;
-        for (String requiredStatus : requiredStatuses) {
-            if (!values.contains(requiredStatus)) {
-                int insertAt = values.indexOf("RUNNING");
+        for (String requiredValue : requiredValues) {
+            if (!values.contains(requiredValue)) {
+                int insertAt = insertAfterValue == null ? -1 : values.indexOf(insertAfterValue);
                 if (insertAt >= 0) {
-                    values.add(insertAt + 1, requiredStatus);
+                    values.add(insertAt + 1, requiredValue);
                 } else {
-                    values.add(requiredStatus);
+                    values.add(requiredValue);
                 }
                 changed = true;
             }

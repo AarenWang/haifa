@@ -3,15 +3,28 @@ package org.wrj.haifa.ai.deerflow.tool;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Path;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentClarificationStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationRecord;
 
+@SpringBootTest
+@ActiveProfiles("test")
 class AskClarificationToolTest {
+
+    @Autowired
+    private AgentClarificationStore store;
+
+    @BeforeEach
+    void clearStore() {
+        store.clearAll();
+    }
 
     @Test
     void createsStructuredQuestionsWithGeneratedChoiceLabels() {
-        AgentClarificationStore store = new AgentClarificationStore();
         AskClarificationTool tool = new AskClarificationTool(store);
 
         ToolResult result = tool.execute(new ToolRequest("""

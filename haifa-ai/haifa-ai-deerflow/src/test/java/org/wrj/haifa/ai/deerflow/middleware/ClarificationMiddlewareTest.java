@@ -1,6 +1,10 @@
 package org.wrj.haifa.ai.deerflow.middleware;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
@@ -18,10 +22,20 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@SpringBootTest
+@ActiveProfiles("test")
 class ClarificationMiddlewareTest {
 
-    private final AgentClarificationStore store = new AgentClarificationStore();
-    private final ClarificationMiddleware middleware = new ClarificationMiddleware(store);
+    @Autowired
+    private AgentClarificationStore store;
+
+    private ClarificationMiddleware middleware;
+
+    @BeforeEach
+    void setUp() {
+        store.clearAll();
+        middleware = new ClarificationMiddleware(store);
+    }
 
     @Test
     void blocksNewRunWhenPendingClarificationExists() {

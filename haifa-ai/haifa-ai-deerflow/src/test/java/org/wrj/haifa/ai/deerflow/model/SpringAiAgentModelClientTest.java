@@ -15,6 +15,35 @@ import reactor.test.StepVerifier;
 class SpringAiAgentModelClientTest {
 
     @Test
+    void fallbackAnswerDoesNotExposePromptOrConversationHistory() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+
+        @SuppressWarnings("unchecked")
+        ObjectProvider<ChatClient.Builder> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(null);
+
+        SpringAiAgentModelClient client = new SpringAiAgentModelClient(provider, properties);
+        String internalPrompt = """
+                <conversationhistory>
+                USER: Windows 有没有电量使用 电量消耗 情况的命令行API
+                ASSISTANT:
+                TOOL: Search results for Windows command line API to check battery usage
+                </conversationhistory>
+                """;
+
+        StepVerifier.create(client.generate(new ModelPrompt("system", internalPrompt, "model")))
+                .assertNext(response -> {
+                    assertThat(response.content()).contains("Spring AI provider is not configured");
+                    assertThat(response.content()).doesNotContain(
+                            "<conversationhistory>",
+                            "TOOL:",
+                            "Prompt sent to the model adapter",
+                            "Windows 有没有电量使用");
+                })
+                .verifyComplete();
+    }
+
+    @Test
     void appliesConfiguredModelTimeoutAndRetries() {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setModelTimeout(50);

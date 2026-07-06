@@ -1,12 +1,24 @@
 package org.wrj.haifa.ai.deerflow.persistence.store;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
+@SpringBootTest
+@ActiveProfiles("test")
 class AgentClarificationStoreTest {
 
-    private final AgentClarificationStore store = new AgentClarificationStore();
+    @Autowired
+    private AgentClarificationStore store;
+
+    @BeforeEach
+    void clearStore() {
+        store.clearAll();
+    }
 
     @Test
     void testCreatePendingAndAnswerAndCancel() {
@@ -25,10 +37,13 @@ class AgentClarificationStoreTest {
 
         // Find pending
         Optional<ClarificationRecord> pending = store.findPending("thread-1");
-        assertThat(pending).isPresent().contains(record1);
+        assertThat(pending).isPresent();
+        assertThat(pending.get().clarificationId()).isEqualTo(record1.clarificationId());
+        assertThat(pending.get().status()).isEqualTo(ClarificationStatus.PENDING);
 
         Optional<ClarificationRecord> pendingByRun = store.findPendingByRunId("run-1");
-        assertThat(pendingByRun).isPresent().contains(record1);
+        assertThat(pendingByRun).isPresent();
+        assertThat(pendingByRun.get().clarificationId()).isEqualTo(record1.clarificationId());
 
         // Answer
         ClarificationRecord answered = store.answer(record1.clarificationId(), "Yes");

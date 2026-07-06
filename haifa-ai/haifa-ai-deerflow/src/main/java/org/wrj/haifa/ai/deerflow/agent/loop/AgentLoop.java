@@ -292,6 +292,15 @@ public class AgentLoop {
             String lastModelContent = "";
 
             for (int step = 0; step < config.maxSteps(); step++) {
+                if (sink.isCancelled()) {
+                    stopReason = "CANCELLED";
+                    if (agentLoopRunStore != null) {
+                        agentLoopRunStore.markCancelled(runConfig.runId(), "SINK_CANCELLED");
+                    }
+                    stopped = true;
+                    break;
+                }
+
                 if (agentLoopRunStore != null) {
                     agentLoopRunStore.updateStepCount(runConfig.runId(), step + 1);
                 }

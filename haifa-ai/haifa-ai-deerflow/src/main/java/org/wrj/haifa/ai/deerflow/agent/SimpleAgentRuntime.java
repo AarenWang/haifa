@@ -516,6 +516,19 @@ public class SimpleAgentRuntime implements AgentRuntime {
             });
 
             return Flux.concat(Flux.fromIterable(prefixEvents), modelAndTerminalEvents)
+                    .onErrorResume(ex -> {
+                        String errorMessage = describeException(ex);
+                        long totalDuration = System.currentTimeMillis() - runStartTime;
+                        log.error("DeerFlow run failed before terminal event. runId={}, threadId={}, model={}, totalDurationMs={}",
+                                run.runId(), threadId, nullToEmpty(modelName), totalDuration, ex);
+                        this.runManager.markFailed(run.runId(), errorMessage);
+                        this.threadManager.touch(threadId);
+                        this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
+                                Map.of("status", "FAILED", "errorType", ex.getClass().getName()));
+                        return Flux.just(event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
+                                Map.of("status", "FAILED", "errorType", ex.getClass().getName(),
+                                        "totalDurationMs", totalDuration)));
+                    })
                     .doOnNext(this::saveEvent)
                     .doOnCancel(() -> {
                         long totalDuration = System.currentTimeMillis() - runStartTime;

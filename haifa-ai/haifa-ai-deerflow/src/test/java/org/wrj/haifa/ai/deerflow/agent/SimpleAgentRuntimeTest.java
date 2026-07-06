@@ -30,6 +30,7 @@ import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentClarificationStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationAnswer;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunStatus;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
@@ -80,6 +81,9 @@ class SimpleAgentRuntimeTest {
 
     @Autowired
     private org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage;
+
+    @Autowired
+    private AgentClarificationStore clarificationStore;
 
     @Test
     void streamsToolAndModelEvents() throws Exception {
@@ -359,7 +363,7 @@ class SimpleAgentRuntimeTest {
 
         AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>stub</final_answer>"));
         ToolRegistry tools = new ToolRegistry(List.of());
-        AgentClarificationStore clarificationStore = new AgentClarificationStore();
+        clarificationStore.clearAll();
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(
                 properties,
                 tools,
@@ -412,7 +416,7 @@ class SimpleAgentRuntimeTest {
 
         org.wrj.haifa.ai.deerflow.model.ModelToolCall tc = new org.wrj.haifa.ai.deerflow.model.ModelToolCall("tc-clarify", "ask_clarification", "{\"question\":\"What time period?\"}");
         AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("", List.of(tc)));
-        AgentClarificationStore clarificationStore = new AgentClarificationStore();
+        clarificationStore.clearAll();
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(
                 properties,
                 new ToolRegistry(List.of(new AskClarificationTool(clarificationStore))),
@@ -448,6 +452,143 @@ class SimpleAgentRuntimeTest {
         assertThat(events).extracting(AgentEvent::type)
                 .contains(AgentEventType.CLARIFICATION_REQUIRED);
         assertThat(clarificationStore.findPending("thread-ask-clarify")).isPresent();
+    }
+
+    @Test
+    void persistsClarificationSuspensionAndCompletesAfterResume() {
+        clarificationStore.clearAll();
+
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("test system");
+        properties.setMaxIterations(4);
+
+        ModelToolCall clarificationCall = new ModelToolCall("tc-clarify", "ask_clarification", """
+                {
+                  "title": "Confirm output details",
+                  "clarification_type": "approach_choice",
+                  "context": "Need output and refresh preferences before creating the skill.",
+                  "questions": [
+                    {
+                      "id": "output_format",
+                      "title": "Output format",
+                      "prompt": "Which output should the skill produce?",
+                      "answer_type": "SINGLE_CHOICE_WITH_CUSTOM",
+                      "choices": ["Markdown report", "JSON", "HTML dashboard"]
+                    }
+                  ]
+                }
+                """);
+        AgentModelClient clarificationModel = prompt -> Mono.just(new ModelResponse("", List.of(clarificationCall)));
+        AskClarificationTool askTool = new AskClarificationTool(clarificationStore);
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(
+                properties,
+                new ToolRegistry(List.of(askTool)),
+                clarificationModel,
+                runManager,
+                threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new ClarificationMiddleware(clarificationStore),
+                        new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore,
+                toolExecutionStore,
+                modelStepStore,
+                toolCallStore,
+                agentLoopRunStore,
+                skillStorage,
+                null,
+                null,
+                null,
+                clarificationStore,
+                null,
+                null
+        );
+
+        List<AgentEvent> suspendedEvents = runtime.stream(new AgentRequest(
+                        "thread-e2e-clarification",
+                        "Create a Windows power metrics skill",
+                        null,
+                        List.of(),
+                        RunMode.CHAT,
+                        ResearchOptions.defaults()))
+                .collectList()
+                .block();
+
+        assertThat(suspendedEvents).extracting(AgentEvent::type)
+                .containsSequence(
+                        AgentEventType.RUN_STARTED,
+                        AgentEventType.MODEL_STARTED,
+                        AgentEventType.MODEL_DELTA,
+                        AgentEventType.TOOL_CALL_REQUESTED,
+                        AgentEventType.TOOL_STARTED,
+                        AgentEventType.CLARIFICATION_REQUIRED,
+                        AgentEventType.RUN_SUSPENDED);
+        String suspendedRunId = suspendedEvents.get(0).runId();
+        assertThat(runManager.find(suspendedRunId)).hasValueSatisfying(run ->
+                assertThat(run.status()).isEqualTo(RunStatus.SUSPENDED));
+        assertThat(agentEventStore.findByRunId(suspendedRunId)).extracting(AgentEvent::type)
+                .contains(AgentEventType.CLARIFICATION_REQUIRED, AgentEventType.RUN_SUSPENDED);
+
+        var pending = clarificationStore.findPending("thread-e2e-clarification").orElseThrow();
+        clarificationStore.answer(pending.clarificationId(), "Markdown report with on-demand refresh",
+                List.of(new ClarificationAnswer(
+                        "output_format",
+                        "Markdown report",
+                        List.of("a"),
+                        null
+                )));
+
+        AgentModelClient resumedModel = prompt -> {
+            assertThat(prompt.effectiveUserPrompt())
+                    .contains("<clarification_answer>")
+                    .contains("Output format")
+                    .contains("Markdown report");
+            return Mono.just(new ModelResponse("<final_answer>Skill generated after clarification.</final_answer>"));
+        };
+        SimpleAgentRuntime resumedRuntime = new SimpleAgentRuntime(
+                properties,
+                new ToolRegistry(List.of(askTool)),
+                resumedModel,
+                runManager,
+                threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new ClarificationMiddleware(clarificationStore),
+                        new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore,
+                toolExecutionStore,
+                modelStepStore,
+                toolCallStore,
+                agentLoopRunStore,
+                skillStorage,
+                null,
+                null,
+                null,
+                clarificationStore,
+                null,
+                null
+        );
+
+        List<AgentEvent> resumedEvents = resumedRuntime.stream(new AgentRequest(
+                        "thread-e2e-clarification",
+                        "Create a Windows power metrics skill",
+                        null,
+                        List.of(),
+                        RunMode.CHAT,
+                        ResearchOptions.defaults(),
+                        "default-user",
+                        Map.of("clarificationId", pending.clarificationId(),
+                                "resumedFromRunId", suspendedRunId)))
+                .collectList()
+                .block();
+
+        assertThat(clarificationStore.findPending("thread-e2e-clarification")).isEmpty();
+        assertThat(resumedEvents).extracting(AgentEvent::type)
+                .contains(AgentEventType.RUN_STARTED, AgentEventType.MODEL_COMPLETED, AgentEventType.RUN_COMPLETED);
+        String resumedRunId = resumedEvents.get(0).runId();
+        assertThat(runManager.find(resumedRunId)).hasValueSatisfying(run ->
+                assertThat(run.status()).isEqualTo(RunStatus.COMPLETED));
+        assertThat(agentEventStore.findByRunId(resumedRunId)).extracting(AgentEvent::type)
+                .contains(AgentEventType.RUN_COMPLETED);
     }
 
     private static final class ExplodingTool implements AgentTool {

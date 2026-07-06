@@ -66,6 +66,9 @@ class UnifiedStreamRuntimeTest {
     @Autowired
     private org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage;
 
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.persistence.store.AgentClarificationStore clarificationStore;
+
     @Test
     void chatRequestFlowsThroughUnifiedStream() {
         DeerFlowProperties properties = new DeerFlowProperties();
@@ -227,8 +230,7 @@ class UnifiedStreamRuntimeTest {
         properties.setMaxIterations(2);
         properties.setMaxResearchSteps(2);
 
-        org.wrj.haifa.ai.deerflow.persistence.store.AgentClarificationStore clarificationStore =
-                new org.wrj.haifa.ai.deerflow.persistence.store.AgentClarificationStore();
+        clarificationStore.clearAll();
 
         ModelToolCall tc = new ModelToolCall("tc-clarify", "ask_clarification",
                 "{\"question\":\"Which region?\"}");

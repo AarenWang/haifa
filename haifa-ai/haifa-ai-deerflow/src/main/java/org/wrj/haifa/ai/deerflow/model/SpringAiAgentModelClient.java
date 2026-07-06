@@ -49,7 +49,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         ChatClient.Builder builder = this.chatClientBuilderProvider.getIfAvailable();
         if (builder == null) {
             log.warn("Spring AI ChatClient.Builder is not available. Returning fallback answer.");
-            return Mono.just(fallbackAnswer(prompt));
+            return Mono.just(fallbackAnswer());
         }
         long startTime = System.currentTimeMillis();
         long timeoutMs = Math.max(1_000, this.properties.getModelTimeout());
@@ -154,16 +154,12 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of());
     }
 
-    private static ModelResponse fallbackAnswer(ModelPrompt prompt) {
+    private static ModelResponse fallbackAnswer() {
         String content = """
-                Spring AI provider is not configured, so this prototype returned a deterministic fallback.
+                Spring AI provider is not configured, so DeerFlow cannot generate a model answer right now.
 
-                The agent still completed the DeerFlow runtime path: run creation, safe local tools,
-                prompt assembly, model adapter invocation, and SSE event emission.
-
-                Prompt sent to the model adapter:
-                %s
-                """.formatted(prompt.effectiveUserPrompt());
+                Please configure a Spring AI chat provider and retry this request.
+                """;
         return new ModelResponse(content);
     }
 

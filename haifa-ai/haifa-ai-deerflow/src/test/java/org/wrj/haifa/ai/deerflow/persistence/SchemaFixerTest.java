@@ -55,4 +55,62 @@ class SchemaFixerTest {
         assertThat(createSql).contains("SUSPENDED");
         assertThat(indexCount).isEqualTo(1);
     }
+
+    @Test
+    void widensDeerflowEventsTypeConstraintToAllowNewAgentEvents() throws Exception {
+        Path db = Files.createTempFile("deerflow-event-schema-fixer-", ".sqlite");
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(new DriverManagerDataSource("jdbc:sqlite:" + db));
+
+        jdbcTemplate.execute("""
+                CREATE TABLE deerflow_events (
+                  id INTEGER PRIMARY KEY,
+                  content VARCHAR(20000),
+                  created_at TIMESTAMP NOT NULL,
+                  event_id VARCHAR(64) NOT NULL,
+                  metadata_json VARCHAR(4000),
+                  run_id VARCHAR(64) NOT NULL,
+                  sequence_no INTEGER NOT NULL,
+                  thread_id VARCHAR(64) NOT NULL,
+                  type VARCHAR(64) CHECK (type IN (
+                    'RUN_STARTED','TOOL_STARTED','TOOL_COMPLETED','MODEL_STARTED',
+                    'MODEL_COMPLETED','RUN_COMPLETED','RUN_FAILED','RUN_CANCELLED',
+                    'MODEL_DELTA','TOOL_CALL_REQUESTED'
+                  ))
+                )
+                """);
+        jdbcTemplate.execute("CREATE INDEX idx_events_run_id_seq ON deerflow_events(run_id, sequence_no)");
+        jdbcTemplate.update("""
+                INSERT INTO deerflow_events
+                (id, content, created_at, event_id, metadata_json, run_id, sequence_no, thread_id, type)
+                VALUES (1, 'Run started', '2026-07-02T00:00:00Z', '1', '{}', 'run-1', 1, 'thread-1', 'RUN_STARTED')
+                """);
+
+        SchemaFixer fixer = new SchemaFixer();
+        ReflectionTestUtils.setField(fixer, "jdbcTemplate", jdbcTemplate);
+        fixer.fixCheckConstraints();
+
+        jdbcTemplate.update("""
+                INSERT INTO deerflow_events
+                (id, content, created_at, event_id, metadata_json, run_id, sequence_no, thread_id, type)
+                VALUES (2, 'Need clarification', '2026-07-02T00:00:01Z', '2', '{}', 'run-1', 2, 'thread-1', 'CLARIFICATION_REQUIRED')
+                """);
+        jdbcTemplate.update("""
+                INSERT INTO deerflow_events
+                (id, content, created_at, event_id, metadata_json, run_id, sequence_no, thread_id, type)
+                VALUES (3, 'Suspended', '2026-07-02T00:00:02Z', '3', '{}', 'run-1', 3, 'thread-1', 'RUN_SUSPENDED')
+                """);
+
+        String createSql = jdbcTemplate.queryForObject(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='deerflow_events'", String.class);
+        Integer indexCount = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_run_id_seq'",
+                Integer.class);
+        Integer eventCount = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM deerflow_events WHERE type IN ('CLARIFICATION_REQUIRED', 'RUN_SUSPENDED')",
+                Integer.class);
+
+        assertThat(createSql).contains("CLARIFICATION_REQUIRED", "RUN_SUSPENDED");
+        assertThat(indexCount).isEqualTo(1);
+        assertThat(eventCount).isEqualTo(2);
+    }
 }
