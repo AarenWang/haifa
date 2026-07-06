@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
@@ -38,23 +39,27 @@ public class ApprovalPolicyService {
         String toolName = toolCall.name();
         String arguments = toolCall.arguments() != null ? toolCall.arguments() : "";
 
-        // 1. Hardline patterns check
+        // 1. Hardline patterns check. These patterns are command-oriented, so
+        // keep them away from low-risk interaction/search tool arguments such
+        // as ask_clarification.delivery_format.
         if (properties.getApproval().isHardlinePatternsEnabled()) {
-            String argsLower = arguments.toLowerCase().replace("\\", "/");
-            String[] hardlineKeywords = {
-                "rm -rf /", "del /s /q", "format", "shutdown", "reboot", "sudo", "runas",
-                ".ssh/id_rsa", ".aws/credentials", ".env"
-            };
-            for (String kw : hardlineKeywords) {
-                if (argsLower.contains(kw)) {
-                    return new ApprovalPolicyDecision(
-                            ApprovalPolicyDecisionType.DENY,
-                            RiskLevel.BLOCKED,
-                            "Command or arguments hit hardline refuse pattern: " + kw,
-                            null,
-                            null,
-                            Map.of()
-                    );
+            if (shouldScanArgumentsForHardlinePatterns(toolName)) {
+                String argsLower = arguments.toLowerCase().replace("\\", "/");
+                String[] hardlineKeywords = {
+                    "rm -rf /", "del /s /q", "format", "shutdown", "reboot", "sudo", "runas",
+                    ".ssh/id_rsa", ".aws/credentials", ".env"
+                };
+                for (String kw : hardlineKeywords) {
+                    if (argsLower.contains(kw)) {
+                        return new ApprovalPolicyDecision(
+                                ApprovalPolicyDecisionType.DENY,
+                                RiskLevel.BLOCKED,
+                                "Command or arguments hit hardline refuse pattern: " + kw,
+                                null,
+                                null,
+                                Map.of()
+                        );
+                    }
                 }
             }
 
@@ -229,5 +234,9 @@ public class ApprovalPolicyService {
             return arguments.substring(0, 1000) + "\n... (truncated)";
         }
         return arguments;
+    }
+
+    private boolean shouldScanArgumentsForHardlinePatterns(String toolName) {
+        return Set.of("run_script", "bash", "write_file", "str_replace").contains(toolName);
     }
 }

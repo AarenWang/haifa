@@ -4,6 +4,7 @@ public enum AgentEventType {
     RUN_STARTED,
     TOOL_STARTED,
     TOOL_COMPLETED,
+    TOOL_DENIED,
     MODEL_STARTED,
     MODEL_COMPLETED,
     RUN_COMPLETED,
@@ -42,4 +43,3 @@ public enum AgentEventType {
     RUN_SUSPENDED,
     RUN_RESUMED
 }
-

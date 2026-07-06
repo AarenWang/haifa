@@ -614,11 +614,13 @@ class AgentLoopTest {
         ).collectList().block();
 
         assertThat(runner.calls).isEqualTo(0);
-        assertThat(events).anySatisfy(e -> {
-            if (e.type() == AgentEventType.TOOL_COMPLETED) {
-                assertThat(e.metadata()).containsEntry("denied", true);
-                assertThat(e.content()).contains("Tool denied by policy");
-            }
-        });
+        assertThat(events)
+                .filteredOn(e -> e.type() == AgentEventType.TOOL_DENIED)
+                .isNotEmpty()
+                .first()
+                .satisfies(e -> {
+                    assertThat(e.metadata()).containsEntry("denied", true);
+                    assertThat(e.content()).contains("Tool denied by policy");
+                });
     }
 }

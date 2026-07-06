@@ -133,7 +133,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                         UUID.randomUUID().toString(),
                         runId,
                         threadId,
-                        AgentEventType.TOOL_COMPLETED,
+                        deniedByPolicy ? AgentEventType.TOOL_DENIED : AgentEventType.TOOL_COMPLETED,
                         result.content(),
                         metadata
                 ));

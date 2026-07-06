@@ -99,6 +99,11 @@ class SchemaFixerTest {
                 (id, content, created_at, event_id, metadata_json, run_id, sequence_no, thread_id, type)
                 VALUES (3, 'Suspended', '2026-07-02T00:00:02Z', '3', '{}', 'run-1', 3, 'thread-1', 'RUN_SUSPENDED')
                 """);
+        jdbcTemplate.update("""
+                INSERT INTO deerflow_events
+                (id, content, created_at, event_id, metadata_json, run_id, sequence_no, thread_id, type)
+                VALUES (4, 'Tool blocked', '2026-07-02T00:00:03Z', '4', '{}', 'run-1', 4, 'thread-1', 'TOOL_DENIED')
+                """);
 
         String createSql = jdbcTemplate.queryForObject(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='deerflow_events'", String.class);
@@ -106,11 +111,11 @@ class SchemaFixerTest {
                 "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_run_id_seq'",
                 Integer.class);
         Integer eventCount = jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM deerflow_events WHERE type IN ('CLARIFICATION_REQUIRED', 'RUN_SUSPENDED')",
+                "SELECT count(*) FROM deerflow_events WHERE type IN ('CLARIFICATION_REQUIRED', 'RUN_SUSPENDED', 'TOOL_DENIED')",
                 Integer.class);
 
-        assertThat(createSql).contains("CLARIFICATION_REQUIRED", "RUN_SUSPENDED");
+        assertThat(createSql).contains("CLARIFICATION_REQUIRED", "RUN_SUSPENDED", "TOOL_DENIED");
         assertThat(indexCount).isEqualTo(1);
-        assertThat(eventCount).isEqualTo(2);
+        assertThat(eventCount).isEqualTo(3);
     }
 }

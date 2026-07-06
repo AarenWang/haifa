@@ -6,6 +6,7 @@ function getPhaseFromEvent(type: string): AppPhase {
       return 'preparing';
     case 'TOOL_STARTED':
     case 'TOOL_COMPLETED':
+    case 'TOOL_DENIED':
       return 'gathering_context';
     case 'MODEL_STARTED':
       return 'thinking';

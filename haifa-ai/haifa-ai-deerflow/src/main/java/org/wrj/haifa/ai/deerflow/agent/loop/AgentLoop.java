@@ -259,9 +259,10 @@ public class AgentLoop {
                         emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
                                 "Policy denied " + appRecord.toolName() + " (" + appRecord.status() + ")",
                                 Map.of("toolCallId", appRecord.toolCallId(), "toolName", appRecord.toolName(), "denied", true)));
-                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
                                 denMsg,
-                                Map.of("toolCallId", appRecord.toolCallId(), "toolName", appRecord.toolName(), "denied", true)));
+                                Map.of("toolCallId", appRecord.toolCallId(), "toolName", appRecord.toolName(),
+                                        "status", "DENIED", "denied", true, "reason", appRecord.status().name())));
                         
                         history.add("Tool result (" + appRecord.toolName() + "): " + denMsg);
                         typedHistory.add(toolMessage(appRecord.toolCallId(), appRecord.toolName(), denMsg,
@@ -464,10 +465,11 @@ public class AgentLoop {
                                 "Tool call rejected by policy: " + ftc.toolCall().toolName(),
                                 Map.of("toolCallId", ftc.toolCall().id(), "toolName", ftc.toolCall().toolName(),
                                         "denied", true, "reason", ftc.reason() != null ? ftc.reason() : "rejected by middleware")));
-                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
                                 ftc.reason() != null ? ftc.reason() : "Tool call rejected by middleware",
                                 Map.of("toolCallId", ftc.toolCall().id(), "toolName", ftc.toolCall().toolName(),
-                                        "status", "REJECTED", "denied", true)));
+                                        "status", "REJECTED", "denied", true,
+                                        "reason", ftc.reason() != null ? ftc.reason() : "rejected by middleware")));
                         history.add("Tool result (" + ftc.toolCall().toolName() + "): " + (ftc.reason() != null ? ftc.reason() : "Rejected by middleware"));
                         typedHistory.add(toolMessage(ftc.toolCall().id(), ftc.toolCall().toolName(),
                                 ftc.reason() != null ? ftc.reason() : "Rejected by middleware",
@@ -589,9 +591,10 @@ public class AgentLoop {
                         emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
                                 "Policy denied " + targetToolName,
                                 Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
-                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
                                 "Tool denied by policy",
-                                Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
+                                Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
+                                        "status", "DENIED", "denied", true, "reason", "not allowed by tool policy")));
                         history.add("Tool result (" + targetToolName + "): Tool denied by policy");
                         typedHistory.add(toolMessage(toolCall.id(), targetToolName, "Tool denied by policy",
                                 "DENIED", Map.of("denied", true)));
@@ -608,9 +611,11 @@ public class AgentLoop {
                             emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
                                     "Policy denied " + targetToolName + ": " + approvalDecision.reason(),
                                     Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
-                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
                                     denMsg,
-                                    Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
+                                    Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
+                                            "status", "DENIED", "denied", true,
+                                            "reason", approvalDecision.reason() == null ? "" : approvalDecision.reason())));
                             history.add("Tool result (" + targetToolName + "): " + denMsg);
                             Map<String, Object> deniedMetadata = new HashMap<>();
                             deniedMetadata.put("denied", true);

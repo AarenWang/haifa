@@ -2,6 +2,7 @@ export type DeerFlowEventType =
   | 'RUN_STARTED'
   | 'TOOL_STARTED'
   | 'TOOL_COMPLETED'
+  | 'TOOL_DENIED'
   | 'MODEL_STARTED'
   | 'MODEL_COMPLETED'
   | 'RUN_COMPLETED'

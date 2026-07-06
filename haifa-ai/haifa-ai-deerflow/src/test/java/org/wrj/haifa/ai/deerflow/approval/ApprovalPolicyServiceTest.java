@@ -77,6 +77,21 @@ class ApprovalPolicyServiceTest {
     }
 
     @Test
+    void askClarificationArgumentsAreNotScannedAsCommands() {
+        ModelToolCall toolCall = new ModelToolCall("call-clarify", "ask_clarification", """
+                {"questions":[{"id":"delivery_format","title":"Output format","prompt":"Which format?"}]}
+                """);
+        AgentTool tool = mock(AgentTool.class);
+        when(tool.name()).thenReturn("ask_clarification");
+        AgentRunConfig runConfig = mock(AgentRunConfig.class);
+        when(runConfig.threadId()).thenReturn("thread-1");
+
+        ApprovalPolicyDecision decision = approvalPolicyService.evaluate(toolCall, tool, runConfig);
+
+        assertThat(decision.type()).isEqualTo(ApprovalPolicyDecisionType.ALLOW);
+    }
+
+    @Test
     void testHashArgs() {
         String hash1 = approvalPolicyService.hashArgs("run_script", "{\"script\":\"echo\"}");
         String hash2 = approvalPolicyService.hashArgs("run_script", "{\"script\":\"echo\"}");
