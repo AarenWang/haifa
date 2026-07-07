@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.wrj.haifa.ai.deerflow.artifact.ArtifactService;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,7 +28,8 @@ class SafetyToolsTest {
         properties.setOutputsRoot(outputs.toString());
         properties.setWriteFileEnabled(true);
 
-        WriteFileTool tool = new WriteFileTool(properties);
+        ArtifactService artifactService = new ArtifactService(properties);
+        WriteFileTool tool = new WriteFileTool(properties, artifactService);
 
         // 1. Success write inside workspace
         ToolRequest req1 = new ToolRequest("{\"path\": \"foo.txt\", \"content\": \"hello\"}", workspace);
@@ -36,9 +38,12 @@ class SafetyToolsTest {
         assertThat(Files.readString(workspace.resolve("foo.txt"))).isEqualTo("hello");
 
         // 2. Success write inside outputsRoot
-        ToolRequest req2 = new ToolRequest("{\"path\": \"../outputs/bar.txt\", \"content\": \"output\"}", workspace);
+        ToolRequest req2 = new ToolRequest("{\"path\": \"../outputs/bar.txt\", \"content\": \"output\"}",
+                workspace, List.of(), "thread-1", "run-1");
         ToolResult res2 = tool.execute(req2);
-        assertThat(res2.content()).contains("written successfully");
+        assertThat(res2.content()).contains("registered for download", "/api/deerflow/artifacts/");
+        assertThat(res2.metadata()).containsKeys("artifactId", "downloadUrl");
+        assertThat(artifactService.list("thread-1", "run-1")).hasSize(1);
         assertThat(Files.readString(outputs.resolve("bar.txt"))).isEqualTo("output");
 
         // 3. Security block when writing outside allowed roots

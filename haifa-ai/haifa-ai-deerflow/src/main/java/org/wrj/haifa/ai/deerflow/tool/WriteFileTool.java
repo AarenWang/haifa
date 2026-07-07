@@ -6,7 +6,12 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+import org.wrj.haifa.ai.deerflow.artifact.ArtifactRecord;
+import org.wrj.haifa.ai.deerflow.artifact.ArtifactService;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 
 @Component
@@ -14,9 +19,11 @@ public class WriteFileTool implements AgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final DeerFlowProperties properties;
+    private final ArtifactService artifactService;
 
-    public WriteFileTool(DeerFlowProperties properties) {
+    public WriteFileTool(DeerFlowProperties properties, ArtifactService artifactService) {
         this.properties = properties;
+        this.artifactService = artifactService;
     }
 
     @Override
@@ -26,7 +33,7 @@ public class WriteFileTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Write content to a file. Arguments: {\"path\": \"relative/path/to/file\", \"content\": \"file content\"}";
+        return "Write content to a file. Arguments: {\"path\": \"relative/path/to/file\", \"content\": \"file content\"}. For user-facing deliverables, write under outputs/ so the file is registered as a downloadable artifact.";
     }
 
     @Override
@@ -77,7 +84,23 @@ public class WriteFileTool implements AgentTool {
 
             Files.createDirectories(resolved.getParent());
             Files.writeString(resolved, content, StandardCharsets.UTF_8);
-            return ToolResult.of(name(), "File written successfully: " + requestedPath);
+            Map<String, Object> metadata = new HashMap<>();
+            metadata.put("path", absResolved.toString());
+            if (StringUtils.hasText(request.threadId()) && StringUtils.hasText(request.runId())
+                    && absResolved.startsWith(outputsPath)) {
+                ArtifactRecord artifact = artifactService.register(request.threadId(), request.runId(), absResolved, null);
+                String downloadUrl = "/api/deerflow/artifacts/" + artifact.artifactId() + "/download";
+                metadata.put("artifactId", artifact.artifactId());
+                metadata.put("filename", artifact.filename());
+                metadata.put("mimeType", artifact.mimeType());
+                metadata.put("size", artifact.size());
+                metadata.put("downloadUrl", downloadUrl);
+                return ToolResult.of(name(),
+                        "File written and registered for download: " + artifact.filename()
+                                + " (" + downloadUrl + ")",
+                        metadata);
+            }
+            return ToolResult.of(name(), "File written successfully: " + requestedPath, metadata);
         } catch (Exception e) {
             return ToolResult.of(name(), "Error: " + e.getMessage());
         }

@@ -49,13 +49,15 @@ class ToolPolicyServiceTest {
     void allowedToolsForSkillsIncludesBuiltinAndSkillTools() {
         Skill skill = new Skill("research", "Do research", "public", "md", Map.of(), Set.of("web_search"));
         Set<String> allowed = policy.allowedToolsForSkills(List.of(skill));
-        assertThat(allowed).containsExactlyInAnyOrder("builtin_a", "builtin_b", "web_search");
+        assertThat(allowed).contains("builtin_a", "builtin_b", "web_search", "write_file", "str_replace");
+        assertThat(allowed).doesNotContain("run_script", "bash");
     }
 
     @Test
-    void allowedToolsForSkillsWithEmptySkillsReturnsOnlyBuiltin() {
+    void allowedToolsForSkillsWithEmptySkillsReturnsBuiltinAndConfiguredTools() {
         Set<String> allowed = policy.allowedToolsForSkills(List.of());
-        assertThat(allowed).containsExactlyInAnyOrder("builtin_a", "builtin_b");
+        assertThat(allowed).contains("builtin_a", "builtin_b", "web_search", "web_fetch", "write_file", "str_replace");
+        assertThat(allowed).doesNotContain("run_script", "bash");
     }
 
     @Test
@@ -101,22 +103,32 @@ class ToolPolicyServiceTest {
     }
 
     @Test
-    void runScriptRequiresSkillInAllModes() {
+    void runScriptIsAllowedByConfigurationNotSkillActivation() {
         AgentTool runScript = new DummyTool("run_script", "run script");
-        ToolPolicyService localPolicy = new ToolPolicyService(List.of(runScript));
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        ToolPolicyService localPolicy = new ToolPolicyService(List.of(runScript), properties);
 
-        // CHAT mode, no active skills => disallowed
-        assertThat(localPolicy.isToolAllowed("run_script", List.of(), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT)).isFalse();
+        assertThat(localPolicy.isToolAllowed("run_script", List.of(), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT)).isTrue();
+        assertThat(localPolicy.isToolAllowed("run_script", List.of(), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH)).isTrue();
 
-        // CHAT mode, with local-script-execution skill => allowed
         Skill skill = new Skill("local-script-execution", "Execute script", "public", "md", Map.of(), Set.of("run_script"));
         assertThat(localPolicy.isToolAllowed("run_script", List.of(skill), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT)).isTrue();
+    }
 
-        // RESEARCH mode, no active skills => disallowed
-        assertThat(localPolicy.isToolAllowed("run_script", List.of(), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH)).isFalse();
+    @Test
+    void disabledConfiguredToolIsDeniedEvenWhenSkillMentionsIt() {
+        AgentTool runScript = new DummyTool("run_script", "run script");
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(false);
+        ToolPolicyService localPolicy = new ToolPolicyService(List.of(runScript), properties);
 
-        // RESEARCH mode, with skill => allowed
-        assertThat(localPolicy.isToolAllowed("run_script", List.of(skill), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH)).isTrue();
+        Skill skill = new Skill("local-script-execution", "Execute script", "public", "md", Map.of(), Set.of("run_script"));
+        assertThat(localPolicy.isToolAllowed("run_script", List.of(skill), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT)).isFalse();
+        assertThat(localPolicy.evaluateTool("run_script", List.of(skill), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT).reason())
+                .contains("run-script-enabled=false");
     }
 
     private static final class DummyTool implements AgentTool {

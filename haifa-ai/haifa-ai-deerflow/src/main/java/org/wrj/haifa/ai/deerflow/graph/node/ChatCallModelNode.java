@@ -91,7 +91,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
             StringBuilder toolDescriptions = new StringBuilder();
             for (AgentTool tool : toolRegistry.tools()) {
                 String toolName = tool.name();
-                if (toolPolicyService != null && !toolPolicyService.isToolAllowed(toolName, activeSkills, view.mode())) {
+                if (toolPolicyService != null && !toolPolicyService.evaluateTool(toolName, activeSkills, view.mode()).allowed()) {
                     continue;
                 }
                 toolDescriptions.append("- ").append(toolName).append(": ").append(tool.description()).append("\n");

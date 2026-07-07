@@ -28,6 +28,7 @@ import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.middleware.ToolOutputBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyDecision;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
@@ -277,7 +278,7 @@ public class AgentLoop {
             List<ModelToolDefinition> toolDefinitions = new ArrayList<>();
             for (AgentTool tool : toolRegistry.tools()) {
                 String toolName = tool.name();
-                if (toolPolicy != null && !toolPolicy.isToolAllowed(toolName, activeSkills, runConfig.mode())) {
+                if (toolPolicy != null && !toolPolicy.evaluateTool(toolName, activeSkills, runConfig.mode()).allowed()) {
                     continue;
                 }
                 toolDescriptions.append("- ").append(toolName).append(": ").append(tool.description()).append("\n");
@@ -588,17 +589,21 @@ public class AgentLoop {
                     String targetToolName = targetTool != null ? targetTool.name() : toolCall.toolName();
 
                     // Policy check
-                    if (toolPolicy != null && !toolPolicy.isToolAllowed(targetToolName, activeSkills, runConfig.mode())) {
+                    ToolPolicyDecision toolDecision = toolPolicy == null
+                            ? ToolPolicyDecision.allow()
+                            : toolPolicy.evaluateTool(targetToolName, activeSkills, runConfig.mode());
+                    if (!toolDecision.allowed()) {
                         emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
                                 "Policy denied " + targetToolName,
                                 Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
+                        String deniedMessage = "Tool denied by policy: " + toolDecision.reason();
                         emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
-                                "Tool denied by policy",
+                                deniedMessage,
                                 Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
-                                        "status", "DENIED", "denied", true, "reason", "not allowed by tool policy")));
-                        history.add("Tool result (" + targetToolName + "): Tool denied by policy");
-                        typedHistory.add(toolMessage(toolCall.id(), targetToolName, "Tool denied by policy",
-                                "DENIED", Map.of("denied", true)));
+                                        "status", "DENIED", "denied", true, "reason", toolDecision.reason())));
+                        history.add("Tool result (" + targetToolName + "): " + deniedMessage);
+                        typedHistory.add(toolMessage(toolCall.id(), targetToolName, deniedMessage,
+                                "DENIED", Map.of("denied", true, "reason", toolDecision.reason())));
                         continue;
                     }
 

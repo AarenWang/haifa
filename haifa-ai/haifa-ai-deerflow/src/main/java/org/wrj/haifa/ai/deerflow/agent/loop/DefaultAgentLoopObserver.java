@@ -42,6 +42,13 @@ public class DefaultAgentLoopObserver implements AgentLoopObserver {
     @Override
     public FinalAnswerDecision onFinalAnswerProposed(AgentRunConfig runConfig, String rawAnswer, List<AgentEvent> events,
             AtomicInteger seq, int step, int totalToolCalls) {
+        if (totalToolCalls == 0 && claimsCreatedDownloadableFile(rawAnswer)) {
+            return FinalAnswerDecision.reject(
+                    "Do not claim that a downloadable file was created unless a tool actually wrote and registered it. "
+                            + "Call `write_file` with a path under `outputs/` first, then provide the artifact download link.",
+                    Map.of("reason", "artifact_claim_without_tool", "toolCount", 0));
+        }
+
         if (todoStore == null) {
             return FinalAnswerDecision.accept(rawAnswer, Map.of());
         }
@@ -69,6 +76,27 @@ public class DefaultAgentLoopObserver implements AgentLoopObserver {
         }
 
         return FinalAnswerDecision.accept(rawAnswer, Map.of("todoCount", todos.size()));
+    }
+
+    private static boolean claimsCreatedDownloadableFile(String rawAnswer) {
+        if (rawAnswer == null || rawAnswer.isBlank()) {
+            return false;
+        }
+        String normalized = rawAnswer.toLowerCase();
+        boolean mentionsFileType = normalized.contains(".eml")
+                || normalized.contains(".pdf")
+                || normalized.contains(".docx")
+                || normalized.contains(".xlsx")
+                || normalized.contains(".pptx")
+                || normalized.contains(".zip")
+                || normalized.contains(".md");
+        boolean claimsCreated = normalized.contains("已保存")
+                || normalized.contains("已生成")
+                || normalized.contains("供下载")
+                || normalized.contains("download")
+                || normalized.contains("saved to")
+                || normalized.contains("generated");
+        return mentionsFileType && claimsCreated;
     }
 
     @Override

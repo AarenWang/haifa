@@ -322,7 +322,8 @@ function App() {
             if (
               evt.type === 'ARTIFACT_CREATED' ||
               evt.type === 'REPORT_COMPLETED' ||
-              evt.type === 'RUN_COMPLETED'
+              evt.type === 'RUN_COMPLETED' ||
+              hasArtifactMetadata(evt)
             ) {
               refreshArtifactData(evt.threadId, evt.runId);
             }
@@ -402,7 +403,8 @@ function App() {
           if (
             evt.type === 'ARTIFACT_CREATED' ||
             evt.type === 'REPORT_COMPLETED' ||
-            evt.type === 'RUN_COMPLETED'
+            evt.type === 'RUN_COMPLETED' ||
+            hasArtifactMetadata(evt)
           ) {
             refreshArtifactData(evt.threadId, evt.runId);
           }
@@ -738,6 +740,10 @@ function getThreadIdFromUrl() {
     return undefined;
   }
   return new URLSearchParams(window.location.search).get('threadId') || undefined;
+}
+
+function hasArtifactMetadata(evt: { metadata?: Record<string, unknown> }) {
+  return typeof evt.metadata?.artifactId === 'string' && evt.metadata.artifactId.length > 0;
 }
 
 function syncThreadIdToUrl(threadId?: string) {

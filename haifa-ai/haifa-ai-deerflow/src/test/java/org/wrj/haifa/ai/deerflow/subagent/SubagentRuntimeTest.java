@@ -19,6 +19,7 @@ import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
 import org.wrj.haifa.ai.deerflow.research.SearchIngestionResult;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyDecision;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
@@ -106,6 +107,7 @@ class SubagentRuntimeTest {
 
         // Allow web_search in policy, task is always excluded or disallowed inside subagent
         when(toolPolicyService.isToolAllowed(eq("web_search"), any(), any())).thenReturn(true);
+        when(toolPolicyService.evaluateTool(eq("web_search"), any(), any())).thenReturn(ToolPolicyDecision.allow());
 
         SubagentResult result = subagentRuntime.execute(
                 "Run unit tests", "Find failing tests", "general-purpose",
@@ -174,6 +176,7 @@ class SubagentRuntimeTest {
         };
         when(toolRegistry.tools()).thenReturn(List.of(searchTool));
         when(toolPolicyService.isToolAllowed(eq("web_search"), any(), any())).thenReturn(true);
+        when(toolPolicyService.evaluateTool(eq("web_search"), any(), any())).thenReturn(ToolPolicyDecision.allow());
         when(researchRuntimeSupport.ingestSearchResults(eq("thread-parent"), eq("run-parent"), eq("search raw")))
                 .thenReturn(new SearchIngestionResult(List.of(), "registered"));
 

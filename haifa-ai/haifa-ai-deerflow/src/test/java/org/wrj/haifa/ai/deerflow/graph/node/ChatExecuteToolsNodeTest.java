@@ -54,24 +54,27 @@ class ChatExecuteToolsNodeTest {
             executions.incrementAndGet();
             return ToolResult.of("write_file", "should not execute");
         });
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWriteFileEnabled(false);
         ChatExecuteToolsNode node = new ChatExecuteToolsNode(
                 new ToolRegistry(List.of(tool)),
-                new DeerFlowProperties(),
-                new ToolPolicyService(List.of())
+                properties,
+                new ToolPolicyService(List.of(), properties)
         );
 
         Map<String, Object> update = node.apply(state("write_file")).join();
 
         assertThat(executions).hasValue(0);
         Map<String, Object> metadata = assertObservation(update, "write_file",
-                "Error: tool denied by policy: write_file", "DENIED");
+                "Error: tool denied by policy: write_file is disabled by haifa.ai.deerflow.write-file-enabled=false", "DENIED");
         assertThat(metadata)
                 .containsEntry("deniedByPolicy", true)
-                .containsEntry("denied", true);
+                .containsEntry("denied", true)
+                .containsEntry("reason", "write_file is disabled by haifa.ai.deerflow.write-file-enabled=false");
     }
 
     @Test
-    void skillAllowedHighRiskToolExecutesAndReceivesActiveSkills() {
+    void configuredRunScriptExecutesAndReceivesActiveSkills() {
         AtomicInteger executions = new AtomicInteger();
         AtomicReference<ToolRequest> capturedRequest = new AtomicReference<>();
         AgentTool tool = tool("run_script", request -> {
@@ -79,10 +82,14 @@ class ChatExecuteToolsNodeTest {
             capturedRequest.set(request);
             return ToolResult.of("run_script", "script result");
         });
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
         ChatExecuteToolsNode node = new ChatExecuteToolsNode(
                 new ToolRegistry(List.of(tool)),
-                new DeerFlowProperties(),
-                new ToolPolicyService(List.of())
+                properties,
+                new ToolPolicyService(List.of(), properties)
         );
 
         Map<String, Object> update = node.apply(state("run_script", List.of(skill("script-skill", "run_script")))).join();

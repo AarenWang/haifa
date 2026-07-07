@@ -15,6 +15,7 @@ import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallResult;
 import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyDecision;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
@@ -81,6 +82,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                 String content;
                 String errorType = "";
                 boolean deniedByPolicy = false;
+                String deniedReason = "";
                 AgentTool tool = toolRegistry.tools().stream()
                         .filter(t -> t.name().equals(safeName))
                         .findFirst()
@@ -90,42 +92,29 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                     status = "NOT_FOUND";
                     content = "Error: tool not found: " + safeName;
                 }
-                else if (toolPolicyService != null && !toolPolicyService.isToolAllowed(safeName, activeSkills, view.mode())) {
-                    status = "DENIED";
-                    deniedByPolicy = true;
-                    content = "Error: tool denied by policy: " + safeName;
+                else if (toolPolicyService != null) {
+                    ToolPolicyDecision decision = toolPolicyService.evaluateTool(safeName, activeSkills, view.mode());
+                    if (decision.allowed()) {
+                        ToolExecution execution = executeTool(tool, safeName, safeArguments, callId, uploadedFileIds, runId, threadId, view);
+                        status = execution.status();
+                        content = execution.content();
+                        errorType = execution.errorType();
+                    } else {
+                        status = "DENIED";
+                        deniedByPolicy = true;
+                        deniedReason = decision.reason();
+                        content = "Error: tool denied by policy: " + deniedReason;
+                    }
                 }
                 else {
-                    GraphEventRegistry.publish(runId, AgentEvent.of(
-                            UUID.randomUUID().toString(),
-                            runId,
-                            threadId,
-                            AgentEventType.TOOL_STARTED,
-                            "Executing tool " + safeName,
-                            Map.of("toolCallId", callId, "toolName", safeName, "arguments", safeArguments)
-                    ));
-                    try {
-                        Path workspaceRoot = Path.of(properties.getWorkspaceRoot() != null ? properties.getWorkspaceRoot() : ".");
-                        ToolRequest toolRequest = new ToolRequest(
-                                safeArguments,
-                                workspaceRoot,
-                                uploadedFileIds,
-                                threadId,
-                                runId,
-                                view.mode(),
-                                activeSkills
-                        );
-                        ToolResult result = tool.execute(toolRequest);
-                        content = result.content();
-                    } catch (Exception ex) {
-                        status = "FAILED";
-                        errorType = ex.getClass().getSimpleName();
-                        content = "Error executing tool " + safeName + ": " + ex.getMessage();
-                    }
+                    ToolExecution execution = executeTool(tool, safeName, safeArguments, callId, uploadedFileIds, runId, threadId, view);
+                    status = execution.status();
+                    content = execution.content();
+                    errorType = execution.errorType();
                 }
 
                 long duration = System.currentTimeMillis() - startTime;
-                Map<String, Object> metadata = resultMetadata(status, safeName, callId, duration, deniedByPolicy, errorType);
+                Map<String, Object> metadata = resultMetadata(status, safeName, callId, duration, deniedByPolicy, deniedReason, errorType);
                 ToolResult result = ToolResult.of(safeName, content, metadata);
                 persistToolCallResult(callId, safeName, safeArguments, status, content, duration, metadata);
 
@@ -166,6 +155,40 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
         });
     }
 
+    private ToolExecution executeTool(AgentTool tool, String toolName, String arguments, String callId,
+                                      List<String> uploadedFileIds, String runId, String threadId,
+                                      AgentGraphStateView view) {
+        GraphEventRegistry.publish(runId, AgentEvent.of(
+                UUID.randomUUID().toString(),
+                runId,
+                threadId,
+                AgentEventType.TOOL_STARTED,
+                "Executing tool " + toolName,
+                Map.of("toolCallId", callId, "toolName", toolName, "arguments", arguments)
+        ));
+        try {
+            Path workspaceRoot = Path.of(properties.getWorkspaceRoot() != null ? properties.getWorkspaceRoot() : ".");
+            ToolRequest toolRequest = new ToolRequest(
+                    arguments,
+                    workspaceRoot,
+                    uploadedFileIds,
+                    threadId,
+                    runId,
+                    view.mode(),
+                    view.activeSkills()
+            );
+            ToolResult result = tool.execute(toolRequest);
+            return new ToolExecution("SUCCESS", result.content(), "");
+        }
+        catch (Exception ex) {
+            return new ToolExecution("FAILED", "Error executing tool " + toolName + ": " + ex.getMessage(),
+                    ex.getClass().getSimpleName());
+        }
+    }
+
+    private record ToolExecution(String status, String content, String errorType) {
+    }
+
     private void persistToolCallRequested(String callId, String toolName, String arguments, String runId, String threadId) {
         if (toolCallStore == null) {
             return;
@@ -199,7 +222,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
     }
 
     private static Map<String, Object> resultMetadata(String status, String toolName, String callId, long durationMs,
-                                                      boolean deniedByPolicy, String errorType) {
+                                                      boolean deniedByPolicy, String deniedReason, String errorType) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("status", status);
         metadata.put("toolName", toolName);
@@ -208,7 +231,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
         if (deniedByPolicy) {
             metadata.put("deniedByPolicy", true);
             metadata.put("denied", true);
-            metadata.put("reason", "Tool denied by policy");
+            metadata.put("reason", deniedReason == null || deniedReason.isBlank() ? "Tool denied by policy" : deniedReason);
         }
         if (errorType != null && !errorType.isBlank()) {
             metadata.put("errorType", errorType);

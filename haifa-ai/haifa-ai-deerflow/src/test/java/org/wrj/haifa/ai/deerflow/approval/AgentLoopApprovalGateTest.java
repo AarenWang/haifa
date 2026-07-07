@@ -26,6 +26,7 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyDecision;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import reactor.core.publisher.Mono;
@@ -63,6 +64,7 @@ class AgentLoopApprovalGateTest {
         AgentRunConfig runConfig = new AgentRunConfig("thread-1", "run-1", "gpt-4", false, false, 5, java.nio.file.Path.of("."), RunMode.CHAT, ResearchOptions.defaults(), Map.of());
         ToolPolicyService toolPolicy = mock(ToolPolicyService.class);
         when(toolPolicy.isToolAllowed(any(), any(), any())).thenReturn(true);
+        when(toolPolicy.evaluateTool(any(), any(), any())).thenReturn(ToolPolicyDecision.allow());
 
         // Mock tool
         AgentTool mockTool = mock(AgentTool.class);

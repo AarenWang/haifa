@@ -106,18 +106,22 @@ class ChatCallModelNodeTest {
     }
 
     @Test
-    void disclosesSkillAllowedHighRiskToolFromGraphState() {
+    void disclosesConfiguredRunScriptToolFromGraphState() {
         AtomicReference<ModelPrompt> capturedPrompt = new AtomicReference<>();
         AgentTool runScript = tool("run_script");
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
         ChatCallModelNode node = new ChatCallModelNode(
                 prompt -> {
                     capturedPrompt.set(prompt);
                     return Mono.just(new ModelResponse("<final_answer>ok</final_answer>"));
                 },
                 new ToolRegistry(List.of(runScript)),
-                new DeerFlowProperties()
+                properties
         );
-        ReflectionTestUtils.setField(node, "toolPolicyService", new ToolPolicyService(List.of()));
+        ReflectionTestUtils.setField(node, "toolPolicyService", new ToolPolicyService(List.of(), properties));
 
         node.apply(new OverAllState(Map.of(
                 AgentGraphStateKeys.RUN_ID, "run-3",

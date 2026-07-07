@@ -63,6 +63,7 @@ import org.wrj.haifa.ai.deerflow.thread.ThreadRecord;
 import org.wrj.haifa.ai.deerflow.todo.TodoItem;
 import org.wrj.haifa.ai.deerflow.todo.TodoStore;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyDecision;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
@@ -799,12 +800,16 @@ public class SimpleAgentRuntime implements AgentRuntime {
         }
 
         for (AgentTool tool : plannedTools) {
-            if (this.toolPolicyService != null && !this.toolPolicyService.isToolAllowed(tool.name(), activeSkills)) {
+            ToolPolicyDecision decision = this.toolPolicyService == null
+                    ? ToolPolicyDecision.allow()
+                    : this.toolPolicyService.evaluateTool(tool.name(), activeSkills, config.mode());
+            if (!decision.allowed()) {
                 events.add(event(seq, config, AgentEventType.TOOL_STARTED, "Policy denied " + tool.name(),
                         Map.of("tool", tool.name(), "denied", true)));
-                results.add(ToolResult.of(tool.name(), "Tool denied by policy: not in allowed-tools for active skills."));
-                events.add(event(seq, config, AgentEventType.TOOL_DENIED, "Tool denied by policy",
-                        Map.of("tool", tool.name(), "denied", true, "reason", "not in allowed-tools for active skills")));
+                String deniedMessage = "Tool denied by policy: " + decision.reason();
+                results.add(ToolResult.of(tool.name(), deniedMessage));
+                events.add(event(seq, config, AgentEventType.TOOL_DENIED, deniedMessage,
+                        Map.of("tool", tool.name(), "denied", true, "reason", decision.reason())));
                 continue;
             }
             long toolStartTime = System.currentTimeMillis();

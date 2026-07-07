@@ -63,8 +63,8 @@ export default function ActivityTrace({ events, isOpen = false, onClose }: Activ
             </span>
           </div>
         ) : (
-          events.map((evt) => (
-            <EventCard key={evt.eventId} event={evt} />
+          events.map((evt, index) => (
+            <EventCard key={`${evt.runId}:${evt.eventId}:${index}`} event={evt} />
           ))
         )}
       </div>

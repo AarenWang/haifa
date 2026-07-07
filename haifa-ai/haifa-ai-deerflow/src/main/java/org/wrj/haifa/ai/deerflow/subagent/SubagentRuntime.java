@@ -274,7 +274,7 @@ public class SubagentRuntime implements ApplicationContextAware {
 
             // Apply policy check (parent's policy)
             ToolPolicyService toolPolicy = getToolPolicyService();
-            if (toolPolicy != null && !toolPolicy.isToolAllowed(toolName, activeSkills, parentMode)) {
+            if (toolPolicy != null && !toolPolicy.evaluateTool(toolName, activeSkills, parentMode).allowed()) {
                 continue;
             }
 

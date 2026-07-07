@@ -127,7 +127,11 @@ export default function ArtifactPanel({ artifacts, onFollowUp }: ArtifactPanelPr
                   Follow-up
                 </button>
               )}
-              <a className="artifact-download" href={artifactDownloadUrl(selected.artifactId)}>
+              <a
+                className="artifact-download"
+                href={artifactDownloadUrl(selected.artifactId)}
+                download={selected.filename}
+              >
                 <Download size={14} />
                 Download
               </a>

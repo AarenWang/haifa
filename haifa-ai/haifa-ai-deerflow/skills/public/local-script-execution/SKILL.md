@@ -2,7 +2,7 @@
 name: local-script-execution
 description: Use when a task requires local observation, lightweight computation, file inspection, environment checks, or script-based verification.
 allowed-tools: [run_script]
-activation-hints: [local observation, lightweight computation, file inspection, environment checks, script-based verification, system resource, CPU, memory, 内存, 使用率, 当前电脑, 本机, 系统资源, 运行脚本, 执行脚本, 跑一下, 检查环境]
+activation-hints: [local observation, lightweight computation, file inspection, environment checks, script-based verification, system resource, CPU, memory, process, tasklist, powershell, 当前电脑, 本机, 系统资源, 进程, 运行脚本, 执行脚本, 跑一下, 检查环境]
 ---
 
 # Local Script Execution Skill

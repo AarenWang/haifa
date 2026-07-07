@@ -606,7 +606,7 @@ class AgentLoopTest {
     }
 
     @Test
-    void policyDeniesHighRiskToolWhenActiveSkillsNull(@TempDir Path tmp) {
+    void policyDeniesRunScriptWhenConfigurationDisablesIt(@TempDir Path tmp) {
         AgentModelClient mockModel = prompt -> Mono.just(new ModelResponse(
                 "<tool_call name=\"run_script\">{\"language\":\"python\",\"code\":\"print('nope')\"}</tool_call>"));
 
@@ -630,7 +630,9 @@ class AgentLoopTest {
         RunScriptTool tool = new RunScriptTool(properties, runner, new CommandPolicy(properties));
         ToolRegistry registry = new ToolRegistry(List.of(tool));
         AgentLoop loop = new AgentLoop(mockModel, registry);
-        ToolPolicyService policy = new ToolPolicyService(List.of(tool));
+        DeerFlowProperties policyProperties = new DeerFlowProperties();
+        policyProperties.setRunScriptEnabled(false);
+        ToolPolicyService policy = new ToolPolicyService(List.of(tool), policyProperties);
 
         AgentRunConfig config = new AgentRunConfig("thread-policy", "run-policy", "test-model", false, false,
                 2, tmp.resolve("workspace"), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT, null, Map.of());
