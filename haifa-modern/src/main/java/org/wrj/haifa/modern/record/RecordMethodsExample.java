@@ -2,7 +2,7 @@ package org.wrj.haifa.modern.record;
 
 public class RecordMethodsExample {
     public static void main(String[] args) {
-        var p = new PersonRecord("Bob", 25);
+        var p = new PersonWithMethods("Bob", 25);
         System.out.println(p.greeting());
         System.out.println("Is adult? " + p.isAdult());
     }

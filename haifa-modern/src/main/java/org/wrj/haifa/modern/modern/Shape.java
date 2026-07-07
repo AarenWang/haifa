@@ -6,7 +6,7 @@ package org.wrj.modern;
  * Sealed classes 限制了哪些类可以是其子类
  * 提供了更好的类层次结构控制
  */
-public sealed class Shape permits Circle, Rectangle, Triangle {
+public abstract sealed class Shape permits Circle, Rectangle, Triangle {
     private String name;
 
     public Shape(String name) {
