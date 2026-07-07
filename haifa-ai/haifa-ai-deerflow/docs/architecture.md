@@ -1,190 +1,367 @@
-# Haifa-AI-DeerFlow 技术架构说明文档
+# haifa-ai-deerflow 架构说明
 
-本文档详细描述了 **haifa-ai-deerflow** 项目的设计理念、系统组件和核心数据流。该项目是一个轻量级的、基于 Spring Boot 的 Agent 框架，旨在支持响应式流式执行（Reactive Streaming）、多用户上下文隔离、动态人设规则（Persona）、受控沙箱脚本执行、人工审批协同（HITL）以及自动化的运行后内存反思（Memory Reflection）机制。
+本文依据当前代码重写，事实来源限定为本模块的 `pom.xml`、`src/main/java` 和 `src/main/resources/application.yml`。旧文档内容不作为依据。
 
----
+## 模块定位
 
-## 1. 高层架构概述
+`haifa-ai-deerflow` 是一个基于 Spring Boot WebFlux 的最小 DeerFlow Java 运行时。它提供：
 
-Haifa-AI-DeerFlow 采用响应式、事件驱动的模型，将 Agent 的运行时执行与前端 API 交互层进行了解耦。后端技术栈主要基于 Spring Boot (Spring WebFlux)、Spring Data JPA 以及 Project Reactor。系统内置了多种运行时组件，可根据配置在标准 Agent 循环与基于 Graph 的状态流图引擎之间灵活路由。
+- SSE 形式的 Agent Run 流式执行接口。
+- 基于 Spring AI `ChatClient` 的模型调用，工具调用由本运行时解析和执行。
+- 本地文件、上传文件、Web Search/Fetch、脚本执行、子 Agent、Todo、澄清和审批等工具。
+- 研究模式的计划、搜索、抓取、证据抽取、质量门和 Markdown 报告产物。
+- SQLite/JPA 持久化线程、运行、消息、事件、模型步骤、工具调用、上传和长期记忆。
+- 可选的 Alibaba Spring AI Graph 路径，用于 chat/research 主动执行或 chat shadow 执行。
 
-下图展示了系统的高层组件及其交互关系：
+当前模块 artifact 为 `haifa-ai-deerflow`。主类是 `org.wrj.haifa.ai.deerflow.DeerFlowApplication`。
+
+## 总体结构
 
 ```mermaid
-graph TD
-    Client[Web 浏览器 / 前端客户端] <-->|Server-Sent Events / REST| WebController[RunController / MemoryController / ApprovalController]
-    WebController <-->|响应式数据流| Runtime[SimpleAgentRuntime]
-    
-    Runtime <-->|运行时路由: Standard vs Graph| RuntimeRoute{GraphRuntimeMode}
-    RuntimeRoute -->|STANDARD| AgentLoop[AgentLoop / SubagentRuntime]
-    RuntimeRoute -->|SHADOW / ACTIVE_CHAT / ACTIVE_RESEARCH| GraphRuntime[GraphChatRuntime / GraphResearchRuntime]
-    
-    GraphRuntime <-->|状态与检查点管理| GraphState[AgentGraphStateView / GraphCheckpointRecorder]
-    GraphRuntime <-->|LLM & Graph Exec| AlibabaGraph[Spring AI Alibaba Graph Core]
-    
-    AgentLoop <-->|安全与人工审核门禁| ApprovalGate[ApprovalPolicyService / ApprovalStore]
-    AgentLoop <-->|拦截中间件| MiddlewareChain[中间件处理链]
-    
-    MiddlewareChain <-->|注入用户人设| PersonaMW[PersonaMiddleware]
-    MiddlewareChain <-->|注入记忆事实| MemoryMW[StructuredMemoryMiddleware]
-    MiddlewareChain <-->|压缩历史消息| SummarizeMW[SummarizationMiddleware]
-    
-    AgentLoop <-->|LLM 调用| ModelClient[SpringAiAgentModelClient]
-    AgentLoop <-->|工具执行| ToolRegistry[ToolRegistry]
-    ToolRegistry <-->|受控脚本执行| RunScriptTool[RunScriptTool / CommandPolicy]
-    RunScriptTool <-->|受限沙箱| Sandbox[LocalRestrictedSandboxRunner / DockerSandboxRunner]
-    
-    Runtime -->|异步触发事件| ReflectionService[MemoryReflectionService]
-    ReflectionService <-->|JPA 存储| DB[(SQLite 数据库 / JPA)]
+flowchart LR
+    Client["HTTP/SSE Client"] --> Web["WebFlux Controllers<br/>/api/deerflow/**"]
+    Web --> Runtime["SimpleAgentRuntime"]
+    Runtime --> Middleware["MiddlewareChain"]
+    Runtime --> Loop["AgentLoop"]
+    Runtime --> Graph["Graph runtimes<br/>optional"]
+    Loop --> Model["SpringAiAgentModelClient"]
+    Loop --> Tools["ToolRegistry + ToolPolicy + ApprovalPolicy"]
+    Tools --> Sandbox["ConfiguredSandboxRunner<br/>local or docker"]
+    Tools --> Providers["WebSearch/WebFetch providers"]
+    Runtime --> Research["Research services"]
+    Runtime --> Stores["JPA stores + in-memory stores"]
+    Stores --> SQLite["SQLite deerflow.sqlite"]
+    Research --> Artifacts["outputs/ artifacts"]
 ```
 
----
+核心包职责：
 
-## 2. 核心组件说明
+- `web`: REST/SSE 控制器。
+- `agent`: 运行时、模型循环、事件、请求和运行配置。
+- `model`: Spring AI 模型客户端、提示和工具调用解析。
+- `tool`: 内置工具、工具注册和工具策略。
+- `sandbox`: 命令策略、本地/Docker 沙箱执行。
+- `graph`: Alibaba Spring AI Graph 的 chat/research/shadow 运行时和 checkpoint。
+- `research`: 研究计划、来源、证据、质量门、引用和研究事件支持。
+- `middleware`: prompt 构建、技能、摘要、persona、记忆、todo 等中间件。
+- `skill`: 文件系统技能加载和 slash/activation-hint 激活。
+- `persistence`: JPA entity、repository、store 和 SQLite checkpoint store。
+- `memory`: persona、长期记忆事实、候选记忆和异步 reflection。
+- `upload`, `artifact`, `approval`, `todo`, `subagent`: 对应能力的运行时组件。
 
-### 2.1 API 与 Web 交互层
-*   **RunController**：对外暴露 REST 接口以启动对话流（`/api/run/chat`）和研究流（`/api/run/research`），并支持在 Run 挂起（例如 Clarification 或 Approval 待处理）时恢复运行（`/api/runs/{runId}/resume`）。
-*   **MemoryController**：提供关于记忆事实（Facts）、人设记录（Personas）的管理入口，并处理对提取出来的记忆候选（Memory Candidates）的审核与批准操作（`/api/memory/*`）。
-*   **ApprovalController**：提供人工审批决策 API（`/api/deerflow/approvals/**`），支持获取待处理审批、对具体高风险动作进行 `APPROVE` 或 `DENY` 决策。
-*   **UserIdResolver**：从 HTTP 请求头的 `X-User-Id` 字段中解析出用户 ID。如果不存在，则默认为 `"default-user"`，以确保严格的多租户用户级别数据隔离。
+## 启动与配置事实
 
-### 2.2 运行时引擎与路由 (Runtime Engine & Routing)
-*   **SimpleAgentRuntime**：管理 Run 记录的完整生命周期。它根据 `haifa.ai.deerflow.graph.mode` 配置将执行流分流路由给标准模式或 Graph 静态流图模式：
-    *   **STANDARD**：拉起主 `AgentLoop` 通过 Reactor 流式调度派发。
-    *   **ACTIVE_CHAT / ACTIVE_RESEARCH**：委托给 Graph 运行时执行，并在流式响应中输出结果。
-    *   **SHADOW**：标准模式执行，同时启动影子图并行分析。
-*   **AgentLoop**：控制 Agent 的思考/执行循环，在单次循环中决定是否调用外部 Tool、发起 LLM 交互，并判断是否满足终止条件。
+默认配置在 `src/main/resources/application.yml`：
 
-### 2.3 Graph 运行时与状态适配 (Graph Runtime & State Adapters)
-*   **GraphChatRuntime & GraphResearchRuntime**：对接 `spring-ai-alibaba-graph-core` 实现的流图运行适配器。
-*   **AgentGraphStateView**：封装图的动态状态属性（如消息窗口大小、任务待办队列等），将状态图数据在底层的 Map 表示与结构化视图之间做适配映射。
-*   **GraphCheckpointRecorder & AgentGraphCheckpointStore**：在每次 Graph 流图状态转换完毕时，将最新的图状态实体（Checkpoint Entity）以及状态 JSON 快照保存至 SQLite 数据库中，支持历史回溯。
+- HTTP 端口：`8095`。
+- Web 类型：`reactive`。
+- SQLite 路径：`${user.dir}/data/deerflow.sqlite`。
+- workspace：`${HAIFA_DEERFLOW_WORKSPACE:${user.dir}}`。
+- skills root：`${HAIFA_DEERFLOW_SKILLS:${user.dir}/skills}`。
+- 上传目录：`${user.dir}/uploads`，默认允许 `txt,md,json,csv,log,xml,yml,yaml,properties,docx`，最大 10 MB。
+- 输出目录由 `DeerFlowProperties` 的 `outputsRoot` 管理，默认 `${user.dir}/outputs`。
+- 研究默认开启，默认深度 `STANDARD`，配置中 `max-research-steps=100`、`max-research-sources=100`、`max-fetches-per-run=200`。
+- Web Search/Fetch 默认 provider 都是 `aliyun`，API key 读取 `ALIYUN_API_KEY` 或 `DASHSCOPE_API_KEY`。
+- Graph 默认未开启，`mode=off`，checkpoint 默认未开启。
 
-### 2.4 人工审核门禁 (Human-in-the-Loop Approval Gate)
-*   **ApprovalPolicyService**：在 Agent 执行命令前进行高风险动作判定。例如对 `run_script`（或开启的 `bash`）工具，它会拦截并将其判定为高危操作，输出 `AWAITING_APPROVAL`。
-*   **AgentApprovalStore**：对审批请求实体进行持久化管理，记录审批上下文（风险原因、动作参数、状态等）。
-*   **Approval Gate (AgentLoop Integration)**：在执行被拦截的高风险动作时，AgentLoop 将中止当前的 execution pipeline，将 Run 标记为 `AWAITING_APPROVAL`，并发送 `APPROVAL_NEEDED` 事件。当用户做完审批决策并调用 `resume` 时恢复执行。
+需要特别区分代码默认值和当前 YAML：
 
-### 2.5 受控脚本执行与沙箱 (RunScriptTool & Sandbox)
-*   **RunScriptTool & CommandPolicy**：允许 Agent 编写 Python、Powershell、Node.js、Bash 脚本执行，并通过安全策略引擎（CommandPolicy）进行敏感路径屏蔽、反 shell 操作拼接、以及特殊 shell 符号阻断审计。
-*   **SandboxRunner**：
-    *   `LocalRestrictedSandboxRunner`：清空环境、只保留受限 PATH、限制临时工作目录，跨平台处理 Windows Powershell 与 Unix-like shell 脚本调起。
-    *   `DockerSandboxRunner`：提供高强度容器隔离，workspace 只读绑定挂载，临时工作区独占可写挂载，并施加 CPU、内存、PIDs 等硬件限制。
+- `DeerFlowProperties` 代码默认 `bashEnabled=false`、`runScriptEnabled=false`、`sandbox.enabled=false`、`approval.enabled=true`。
+- 当前 `application.yml` 将 `bash-enabled=true`、`run-script-enabled=true`、`sandbox.enabled=true`、`sandbox.backend=local`、`sandbox.network-enabled=true`、`run-script-local-unsafe-allowed=true`，并将 `approval.enabled=false`。
+- 因此按当前 YAML 启动时，本地脚本执行和网络访问是打开的，审批保护是关闭的；生产或共享环境应显式覆盖这些配置。
 
-### 2.6 中间件过滤链 (Middleware Chain)
-在 Agent 组装发送给 LLM 的 System Prompt 前，Prompt 会依次流经拦截器链：
-1.  **PersonaMiddleware**：识别当前用户的激活人设，将人设灵魂规则（Soul Rules）包裹在 `<persona-identity-and-style-only>` 标签中注入 Prompt，并追加开发者安全防护规则，以防人设被提示词注入攻击破坏。
-2.  **StructuredMemoryMiddleware**：从数据库读取当前用户在 `active` 状态下的长期记忆事实（如用户偏好、开发规范等），动态拼接并注入系统 Prompt。
-3.  **SummarizationMiddleware**：当上下文消息长度超出 Token 预算时，自动对历史对话进行总结和压缩。
+模型侧通过 Spring AI 注入 `ChatClient.Builder`。如果没有可用的 Spring AI 模型 provider，`SpringAiAgentModelClient` 会返回一段 fallback 文本而不是执行真实模型调用。`openai` Maven profile 会引入 OpenAI starter；YAML 中 OpenAI API key、base url 和 model 都通过环境变量占位。
 
-### 2.7 记忆反思与审核系统 (Memory Reflection System)
-*   **MemoryReflectionService**：在会话运行结束（Run Finished）时被异步触发。
-    *   **大模型提取**：使用特定的 Prompt 让大模型总结本次对话，提炼出事实更新信息、待执行动作（`ADD`、`UPDATE`、`ARCHIVE`）以及历史犯错教训（`sourceError`）。
-    *   **噪音清洗**：在保存之前，使用正则过滤器 `UPLOAD_SENTENCE_RE` 清洗掉类似于“用户上传了 XXX 文件”等只在单次会话有效的瞬态噪音事实。
-    *   **人工审核**：提炼的记忆作为 `MemoryCandidateEntity` 写入数据库等待用户在前端审批。在 `MemoryController` 审批通过时，系统会与已有的 Active Facts 进行去重（Trim 及大小写归一化匹配），避免重复写入。
+## HTTP API
 
----
+所有接口位于 `web` 包，用户身份由 `X-User-Id` 解析，缺省为 `default-user`。
 
-## 3. 核心数据流
+主要接口：
 
-### 3.1 响应式流式执行流程 (SSE Stream)
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Front as 浏览器前端
-    participant Controller as RunController
-    participant Runtime as SimpleAgentRuntime
-    participant Model as SpringAiAgentModelClient
-    
-    Front->>Controller: POST /api/run/chat (带 X-User-Id 请求头)
-    Controller->>Runtime: startStreamRun(threadId, request)
-    Runtime->>Controller: Flux<ServerSentEvent<AgentEvent>>
-    Controller->>Front: SSE 实时推送 (响应头 X-Accel-Buffering: no)
-    
-    loop 循环思考执行
-        Runtime->>Model: generate(Prompt)
-        Note over Model: 出现超时/网络失败? 间隔3s自动重试 (最多3次)
-        Model-->>Runtime: ModelResponse (包含工具调用或最终回复)
-        Runtime-->>Controller: emitEvent(RunStep / 状态更新)
-        Controller-->>Front: 推送 SSE 消息
-    end
-    Runtime-->>Controller: emitEvent(RunFinished)
-    Controller-->>Front: 结束并关闭连接
-```
+- `GET /api/deerflow/health`: 健康检查和配置摘要。
+- `POST /api/deerflow/runs/stream`: 创建 run 并以 `text/event-stream` 返回 Agent 事件。
+- `POST /api/deerflow/runs/{runId}/resume`: 恢复澄清或审批挂起的 run，并继续 SSE。
+- `GET /api/deerflow/runs/{runId}` 以及 `/events`、`/approvals`、`/tool-executions`、`/tool-calls`、`/model-steps`。
+- `GET /api/deerflow/runs/{runId}/sources`、`/evidence`、`/plan`、`/progress`、`/quality-gate`: 研究运行查询。
+- `POST /api/deerflow/threads`，`GET /api/deerflow/threads`，`GET/PATCH /api/deerflow/threads/{threadId}`，以及线程下 runs/messages 查询。
+- `POST /api/deerflow/uploads`，`GET /api/deerflow/uploads`，`GET /api/deerflow/uploads/{fileId}`，`GET /content`，`DELETE`。
+- `GET /api/deerflow/artifacts`，`GET /api/deerflow/artifacts/{artifactId}`，`GET /download`。
+- `GET /api/deerflow/approvals/pending`，`GET /api/deerflow/approvals/run/{runId}`，`POST /api/deerflow/approvals/{approvalId}/decision`。
+- `GET /api/deerflow/clarifications/pending`，`POST /api/deerflow/clarifications/{clarificationId}/answer`。
+- `GET/PUT /api/deerflow/persona`。
+- `GET/POST/PATCH/DELETE /api/deerflow/memory/facts`。
+- `GET /api/deerflow/memory/candidates`，`POST /approve`，`POST /reject`。
 
-### 3.2 人工审核干预流 (HITL Approval Gate Flow)
-```mermaid
-sequenceDiagram
-    autonumber
-    participant LLM as LLM 语言模型
-    participant Loop as AgentLoop
-    participant Policy as ApprovalPolicyService
-    participant Store as AgentApprovalStore
-    participant Front as 浏览器前端
-    participant Controller as ApprovalController
-    
-    Loop->>LLM: generate(Prompt)
-    LLM-->>Loop: 返回 ToolCall: run_script(language="python", code="...")
-    Loop->>Policy: evaluateToolCall("run_script", arguments)
-    Policy-->>Loop: Decision: REQUIRE_APPROVAL
-    Loop->>Store: createApprovalRequest(runId, toolCallDetails)
-    Store-->>Loop: 返回 approvalId
-    Loop-->>Front: 流式推送 SSE: AgentEvent (type=APPROVAL_NEEDED, content=approvalId)
-    Note over Loop: Run 进入 AWAITING_APPROVAL 状态，暂停执行
-    
-    Front->>Controller: POST /api/deerflow/approvals/{approvalId}/decision {"decision":"APPROVE"}
-    Controller->>Store: updateStatus(approvalId, APPROVED)
-    Front->>Controller: POST /api/deerflow/runs/{runId}/resume
-    Controller->>Loop: resume()
-    Note over Loop: 恢复运行，继续执行 run_script 工具并获取输出
-```
+## Run 生命周期
 
-### 3.3 Graph 运行时流图状态更新与 Checkpoint 流程
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Runtime as SimpleAgentRuntime
-    participant Graph as GraphChatRuntime
-    participant Core as Spring AI Alibaba Graph Core
-    participant Record as GraphCheckpointRecorder
-    participant DB as SQLite 数据库
-    
-    Runtime->>Graph: run(request)
-    Graph->>Core: runGraph(stateMap)
-    
-    loop 状态节点转移
-        Core->>Core: 执行节点运算 (Node Execution)
-        Core->>Record: onStateTransition(stateSnapshot)
-        Record->>DB: 保存 Graph Checkpoint 记录 (SQLite)
-    end
-    
-    Core-->>Graph: 返回最终状态
-    Graph-->>Runtime: 交付最终运行结果
-```
+`SimpleAgentRuntime` 是当前主运行时：
 
-### 3.4 异步长期记忆反思流程
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Runtime as SimpleAgentRuntime
-    participant Reflect as MemoryReflectionService
-    participant LLM as LLM 语言模型
-    participant DB as SQLite 数据库
-    
-    Runtime->>Reflect: reflect(threadId, runId) [异步线程触发]
-    Reflect->>DB: 读取 Run 历史记录 (解析对应的 userId)
-    Reflect->>DB: 检索本次 Thread 的完整上下文消息
-    Reflect->>LLM: generate(反思提示词 Prompt)
-    LLM-->>Reflect: 返回 JSON 候选集 (包含 Facts更新、Action动作、sourceError教训)
-    Note over Reflect: 使用正则过滤临时上传文件/瞬态描述语句
-    Reflect->>DB: 写入 MemoryCandidates 候选表 (等待审批)
-```
+1. 接收 `AgentRequest`，创建或复用 thread，创建 run，并持久化用户消息。
+2. 根据请求和配置生成 `AgentRunConfig`，包括 runId、threadId、model、workspace、run mode、研究配置和 userId。
+3. 发出 `RUN_STARTED`。
+4. 解析 active skills：支持 `/skill-name`，也支持 skill 的 activation hints；研究模式会自动尝试加入 `deep-research`。
+5. 通过 `MiddlewareChain` 构造最终 `ModelPrompt`。
+6. 根据 Graph 配置选择执行路径：
+   - `ACTIVE_CHAT` 且 chat mode：走 `GraphChatRuntime`。
+   - `ACTIVE_RESEARCH` 且 research mode：走 `GraphResearchRuntime`。
+   - 否则走普通 `AgentLoop`；如果 Graph 是 `SHADOW`，chat 会并行触发 shadow graph，但主结果仍来自 `AgentLoop`。
+7. 根据终态事件更新 run 状态：completed、failed、suspended 或 cancelled。
+8. 完成后异步触发 `MemoryReflectionService.reflectAsync`，抽取长期记忆候选。
+9. 研究模式完成后由 `ReportWriterService` 生成 Markdown 报告并注册 artifact，同时发出 `REPORT_*` 和 `ARTIFACT_CREATED` 事件。
 
----
+核心事件类型定义在 `AgentEventType`，覆盖 run、模型、工具、研究、质量门、报告、子 Agent、Todo、澄清和审批。
 
-## 4. 关键设计决策
+## AgentLoop
 
-1.  **基于 HTTP 请求头的租户级隔离**：系统没有将当前用户标识维护在全局有状态组件中，而是要求所有 API 端点显式解析 `X-User-Id` 头，将用户作用域（User Scope）贯穿整个响应式调用链与异步反射线程，彻底避免了多租户场景下的数据越权访问。
-2.  **“提取-审核-落库”记忆审批模型**：相比自动写入的记忆模型，Haifa 采用了“LLM 反思提取 -> 写入 Candidate 候选区 -> 用户手工 Approve”的安全决策环。这把控了生成事实的准确性，防止幻觉噪音污染 Agent 系统。
-3.  **基于 SQLite 持久化层替代 H2/文件树**：系统现将所有 thread、messages、memory facts、candidates、approvals 以及 graph checkpoints 统一存储至 SQLite 数据库中。这提供了轻量级、零服务器依赖的关系型持久化基础，利于本地测试部署。
-4.  **静态 Graph 引擎与 Agent Loop 协作路由**：引入了 Graph Core 流图引擎，但保留了标准 Agent Loop。通过模式配置（`haifa.ai.deerflow.graph.mode`），开发者可以控制对话/研究使用动态的多轮 Agent 决策循环，还是使用严密而结构化的静态 Graph 节点流图，甚至使用 Shadow 模式对比两者结果，为运行时提供高度的灵活性。
+`AgentLoop` 是非 Graph 路径的核心循环：
+
+- 每步调用 `AgentModelClient.generate`。
+- 工具以 Spring AI structured tool-call 形式暴露给模型，但 `internalToolExecutionEnabled(false)`，实际执行由本运行时完成。
+- 如果模型没有 structured tool call，会 fallback 解析文本中的 XML/DSML 风格工具标签。
+- 最终回答要求以 `<final_answer>` 语义结束。
+- 工具调用会先经过 `ToolPolicyService`，再经过 `ApprovalPolicyService`。
+- 多个工具调用通过 `CompletableFuture` 并行执行。
+- 工具结果会被 `ToolOutputBudgetMiddleware` 检查，过长输出可外置到 `outputs/tool-outputs`，并发出 `TOOL_OUTPUT_BUDGET_EXCEEDED`。
+- `ask_clarification` 会创建澄清记录，发出 `CLARIFICATION_REQUIRED` 和 `RUN_SUSPENDED`。
+- 审批策略要求人工确认时会创建审批记录，发出 `APPROVAL_REQUIRED` 和 `RUN_SUSPENDED`。
+- `write_todos` 会发出 Todo 事件；默认 observer 会在未完成 Todo 时阻止最终回答并发出 `TODO_GATE_BLOCKED`。
+
+恢复路径：
+
+- 澄清恢复通过 `RunController.resume` 写入 clarification metadata，`ClarificationMiddleware` 将问答上下文注入 prompt。
+- 审批恢复会校验 approval 状态、过期时间和工具参数 hash；通过后执行原工具，拒绝或过期则产生对应事件。
+
+## Graph 路径
+
+Graph 能力在 `graph` 包内，配置项为 `deerflow.graph.enabled`、`mode` 和 checkpoint 子配置。
+
+支持模式：
+
+- `OFF`: 不使用 Graph。
+- `SHADOW`: chat 请求旁路运行 shadow graph，主结果仍来自 `AgentLoop`。
+- `ACTIVE_CHAT`: chat 请求由 `GraphChatRuntime` 主动执行。
+- `ACTIVE_RESEARCH`: research 请求由 `GraphResearchRuntime` 主动执行。
+
+`GraphChatRuntime` 的节点：
+
+`load_context -> apply_prompt_middlewares -> call_model -> parse_model_output -> execute_tools -> call_model ... -> finalize`
+
+如果没有待执行工具，或步数达到限制，则进入 `finalize`。
+
+`GraphResearchRuntime` 的节点：
+
+`create_or_load_plan -> search_sources -> fetch_sources -> extract_evidence -> quality_gate -> write_report`
+
+质量门未通过且未达到最大步数时会回到 `search_sources`。
+
+Checkpoint：
+
+- JPA 表为 `agent_graph_checkpoints`，实现为 `SQLiteCheckpointSaver` 和 `AgentGraphCheckpointStore`。
+- 开启 checkpoint 后，Graph 使用 threadId 编译运行配置，并可基于最新 checkpoint 的 next node 恢复。
+- research 恢复会额外校验 checkpoint 中的 runId 必须与当前 runId 匹配。
+
+## Prompt 中间件
+
+`MiddlewareChain` 按 `@MiddlewareOrder` 排序执行，当前主要中间件：
+
+- `TokenBudgetMiddleware` order 1：超出字符预算时返回预算错误。
+- `SkillActivationMiddleware` order 5：注入 active skill 的系统提示。
+- `SummarizationMiddleware` order 8：达到阈值时压缩历史对话。
+- `DynamicContextMiddleware` order 10：注入运行时上下文。
+- `PersonaMiddleware` order 12：注入当前用户 persona。
+- `StructuredMemoryMiddleware` order 15：注入 active 长期记忆事实。
+- `ClarificationMiddleware` order 18：恢复澄清后注入问答上下文。
+- `ThreadMemoryMiddleware` order 20：研究模式下注入线程内计划、来源、证据和 artifact 上下文。
+- `TodoMiddleware` order 25：注入 todo 使用要求和当前 todo 状态。
+- `ToolErrorHandlingMiddleware` order 30：为工具错误处理补充提示。
+- `ResearchPlanMiddleware` order 50：研究模式下注入当前研究计划。
+
+另外，`SubagentLimitMiddleware` 和默认 loop observer 作为 loop 观察者参与子 Agent 限流、Todo gate 等运行时约束。
+
+## Skills
+
+技能由 `FileSystemSkillStorage` 从两个目录加载：
+
+- `${skillsRoot}/public`
+- `${skillsRoot}/custom`
+
+启动时会把 classpath 下 `skills/public/**` 初始化到 public skills 目录。`SkillParser` 解析每个技能目录内的 `SKILL.md`，支持 front matter 中的 `name`、`description`、`allowed-tools` / `allowed_tools`、`activation-hints`，也会识别 `references`、`templates`、`scripts`、`assets` 子目录。
+
+技能激活方式：
+
+- 用户消息包含 `/skill-name`。
+- 用户消息命中技能的 activation hint。
+- 研究模式自动尝试加入 `deep-research`。
+
+技能可以通过 allowed tools 扩展工具可见性，但 `run_script`、`bash` 等高风险工具仍受全局配置、沙箱和审批策略约束。
+
+## 工具与安全边界
+
+工具由 `ToolRegistry` 收集所有 `AgentTool` bean。当前内置工具覆盖：
+
+- 基础上下文：`current_time`、`tool_search`。
+- 工作区文件：`ls`、`glob`、`grep`、`read_file`、`read_workspace_file`、`list_workspace_files`、`write_file`、`str_replace`。
+- 上传文件：`list_uploaded_files`、`read_uploaded_file`、`present_files`。
+- Web 和媒体：`web_search`、`web_fetch`、`image_search`、`view_image`。
+- 执行类：`bash`、`run_script`。
+- 协作控制：`task`、`write_todos`、`ask_clarification`。
+- 测试/模拟：`mock_search`、`mock_fetch`。
+
+`ToolPolicyService` 控制工具是否对当前 run 可见：
+
+- `bash` 需要 `bash-enabled=true` 且 sandbox 开启。
+- `run_script` 需要 `run-script-enabled=true` 且 sandbox 开启。
+- 本地 sandbox backend 下，`run_script` 还要求 `run-script-local-unsafe-allowed=true`。
+- 写文件和替换文件分别受 `write-file-enabled`、`str-replace-enabled` 控制。
+- 技能 allowed tools 可以允许特定技能工具，但不会绕过工具自身的配置检查。
+
+`CommandPolicy` 负责命令和脚本内容的硬边界：
+
+- 命令字符串禁止 shell 控制字符，包括 `&`、`;`、`|`、反引号、重定向和换行。
+- 默认拒绝模式包括 `rm -rf`、`format`、`shutdown`、`reboot`、`del /s`、`Remove-Item -Recurse`。
+- 拒绝敏感路径和越界路径，如 `.git`、`/etc`、`/var`、`c:/windows`、home 引用、`..`、宿主机绝对路径。
+- allowed commands 来自 `sandbox.allowedCommands`，并会把允许的脚本语言纳入可执行命令集合。
+
+`run_script` 的当前实现：
+
+- 参数为 `language`、`code`、可选 `args`、可选 `purpose`。
+- 支持 `python`、`python3`、`powershell`、`node`、`bash`，最终仍受 `allowed-script-languages` 限制。
+- 代码大小上限为 64 KB，单个参数上限为 2 KB。
+- 脚本写入 `outputs/sandbox/{runId}/scripts/{uuid}/script.ext` 后执行。
+- PowerShell 在 Windows 使用 `powershell -NoProfile -ExecutionPolicy Bypass -File`，非 Windows 使用 `pwsh`。
+
+Sandbox backend：
+
+- `local`: `LocalRestrictedSandboxRunner` 在受限工作目录运行宿主机进程；会清空环境变量，仅设置 `PATH`、`HOME`、`USERPROFILE` 和显式传入 env。metadata 标记 `strongIsolation=false`。
+- `docker`: `DockerSandboxRunner` 使用 `docker run --rm`，可关闭网络，限制 memory/cpu/pids，rootfs 只读，`/tmp` 为 tmpfs，workspace 只读挂载到 `/workspace`，sandbox 可写挂载到 `/sandbox`。metadata 标记 `strongIsolation=true`。
+
+## 审批与澄清
+
+审批逻辑由 `ApprovalPolicyService` 和 `ApprovalStore` 组成。当前唯一实现 `AgentApprovalStore` 是 `ConcurrentHashMap` 内存存储，不落 SQLite。
+
+审批策略开启时：
+
+- 可对 hardline 模式直接拒绝。
+- `run_script` 在本地 backend 或 network enabled 场景可要求审批。
+- `write_file`、`patch`、`str_replace` 可要求审批。
+- `bash` 默认要求审批。
+- 支持 session approval 和 always approval 的语义，但由于 store 是内存态，进程重启后不会保留。
+
+当前 `application.yml` 中审批整体关闭，因此按默认 YAML 启动不会拦截这些动作。
+
+澄清逻辑由 `AskClarificationTool`、`AgentClarificationStore`、`ClarificationController` 和 `ClarificationMiddleware` 组成。澄清记录通过 JPA 持久化，run 会进入 suspended，用户回答后通过 resume 继续。
+
+## 研究模式
+
+研究模式由 `RunMode.RESEARCH` 驱动，主要组件：
+
+- `ResearchPlanner`: 生成或恢复研究计划。
+- `ResearchRuntimeSupport`: 协调搜索、抓取、证据抽取和质量门。
+- `ResearchLoopObserver`: 观察 `web_search`、`web_fetch` 工具结果并注册来源/证据。
+- `ResearchQualityGate`: 检查来源数量、维度覆盖、证据和引用完整性。
+- `CitationManager`: 管理引用编号。
+- `ReportWriterService`: 输出 Markdown 研究报告。
+
+数据流：
+
+1. 生成研究计划和任务。
+2. 按维度调用 search provider。
+3. 对来源调用 fetch provider。
+4. 从抓取内容中抽取证据。
+5. 质量门判断是否继续搜索/抓取。
+6. 生成 Markdown 报告并注册 artifact。
+
+当前可用 provider 实现：
+
+- Search: `aliyun`、`duckduckgo`。
+- Fetch: `aliyun`、`jina`。
+
+枚举中还列出 Tavily、Brave、Exa、Firecrawl、InfoQuest、GroundRoute、Serper、SearXNG、Browserless、fastCRW 等 provider id，但当前代码中没有对应实现类；配置到这些 provider 会因为找不到实现或缺少 key 校验而无法正常使用。
+
+研究计划、来源、证据和引用当前都是内存存储：
+
+- `InMemoryResearchPlanStore`
+- `InMemorySourceRegistry`
+- `InMemoryEvidenceStore`
+- `CitationManager`
+
+因此 `/sources`、`/evidence`、`/plan` 等研究查询依赖当前进程内状态。报告 Markdown 文件会写入 `outputs`，但 artifact 注册表本身也是内存态。
+
+## 持久化与状态
+
+SQLite/JPA 持久化的主要状态：
+
+| 状态 | 表/实现 |
+| --- | --- |
+| 线程 | `deerflow_threads` |
+| 运行 | `deerflow_runs` |
+| 消息 | `deerflow_messages` |
+| Agent 事件 | `deerflow_events` |
+| 模型步骤 | `deerflow_model_steps` |
+| 工具调用 | `deerflow_tool_calls` |
+| 工具执行 | `deerflow_tool_executions` |
+| Agent loop run | `deerflow_agent_loop_runs` |
+| 上传文件元数据 | `deerflow_uploads` |
+| 长期记忆事实 | `deerflow_memory_facts` |
+| 长期记忆候选 | `deerflow_memory_candidates` |
+| Persona | `deerflow_personas` |
+| 澄清 | `deerflow_clarifications` |
+| Graph checkpoint | `agent_graph_checkpoints` |
+
+内存态状态：
+
+- 审批请求：`AgentApprovalStore`。
+- Todo：`InMemoryTodoStore`。
+- 研究计划、来源、证据、引用。
+- Artifact registry：`ArtifactService` 中的 `ConcurrentHashMap`。
+
+文件系统状态：
+
+- 上传文件内容：`uploadsRoot`。
+- 研究报告和工具外置输出：`outputsRoot`。
+- 沙箱脚本工作目录：`outputsRoot/sandbox/...`。
+- 技能目录：`skillsRoot/public` 和 `skillsRoot/custom`。
+
+## 上传、文件和 Artifact
+
+上传由 `UploadStorageService` 管理：
+
+- 校验扩展名和大小。
+- 保存文件到 uploads root。
+- 写入 `deerflow_uploads`。
+- `DocumentConversionService` 支持 `.docx` 文本转换，转换内容最大长度由 `max-converted-chars` 控制。
+
+Artifact 由 `ArtifactService` 管理：
+
+- 只允许注册 `outputsRoot` 下的真实文件。
+- registry 是内存 `ConcurrentHashMap`。
+- 下载时再次校验路径必须仍在 `outputsRoot` 下并且文件存在。
+- Markdown artifact 可读取预览。
+
+## 长期记忆
+
+长期记忆分两层：
+
+- 已确认事实：`MemoryFactStore`，注入 prompt 时只读取当前用户 active facts。
+- 候选事实：`MemoryCandidateStore`，由反思或接口创建，需 approve 后成为事实。
+
+`MemoryReflectionService` 在 run completed 后异步运行：
+
+- 读取本次 run 的消息和已有 active facts。
+- 调用模型输出 JSON 数组候选，支持 `ADD`、`UPDATE`、`ARCHIVE`。
+- 研究模式会明确要求不要把临时搜索事实、来源或研究结论写成长久记忆。
+- 会过滤上传文件、临时搜索和 session-scoped 相关内容。
+
+Persona 独立存储在 `deerflow_personas`，由 `PersonaMiddleware` 注入，主要影响身份和表达风格。
+
+## 当前实现边界
+
+- 当前 YAML 是本地实验取向：local sandbox、脚本执行、网络访问开启，审批关闭。
+- `local` sandbox 不是强隔离；metadata 明确标记 `strongIsolation=false`。
+- 审批、Todo、研究计划/来源/证据/引用、artifact registry 是内存态，重启后不可恢复。
+- Graph 默认关闭；只有显式开启并设置 active/shadow mode 后才参与运行。
+- Web provider 默认是 Aliyun，需要 API key；DuckDuckGo/Jina 虽有实现，但需要配置切换。
+- provider 枚举列出的很多第三方 provider 目前没有实现类。
+- Spring AI provider 未配置时不会真实调用模型，只会返回 fallback 文本。
+- `mcp-enabled` 存在配置项，但当前主运行流没有看到 MCP 工具接入实现。
+- `MockSearchTool` 和 `MockFetchTool` 仍作为内置工具存在，适合测试或离线流程，不代表真实 Web 能力。
