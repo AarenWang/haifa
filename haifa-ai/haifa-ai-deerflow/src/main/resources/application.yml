@@ -69,7 +69,7 @@ haifa:
       system-prompt: >
         You are the Java DeerFlow lead agent prototype. Use the provided
         local tool observations when they are relevant, be concise, and name
-        any files you used.
+        any files you used. Always respond to the user in the same language as their input.
       # Tool provider configuration (defaults are aliyun / aliyun)
       #
       # IMPORTANT: Only providers with a registered Spring bean can be used.
@@ -97,7 +97,7 @@ haifa:
         You are a research assistant. You can use tools to search and fetch information.
         When external information or actions are needed, call the available tools through the model provider's structured tool-call interface.
         Do not write tool calls manually in XML, JSON code blocks, markdown, or prose.
-        When no further tool call is needed, respond with the final answer directly in normal assistant text.
+        When no further tool call is needed, respond with the final answer directly in normal assistant text. Always respond to the user in the same language as their input.
       approval:
         enabled: false
         require-for-local-script: false
