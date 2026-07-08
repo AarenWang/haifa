@@ -11,16 +11,37 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.nio.charset.StandardCharsets;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.tool.UserDataPathResolver;
 
 @Component
 public class LocalRestrictedSandboxRunner implements SandboxRunner {
 
+    private static final List<String> WINDOWS_ESSENTIAL_ENVS = List.of(
+        "SystemRoot", "SystemDrive", "windir", "COMSPEC", "PATHEXT", "TEMP", "TMP",
+        "APPDATA", "LOCALAPPDATA", "ProgramData", "CommonProgramFiles", "OS",
+        "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS"
+    );
+
+    private static final List<String> UNIX_ESSENTIAL_ENVS = List.of(
+        "TERM", "SHELL", "USER", "LOGNAME", "TEMP", "TMP", "TMPDIR",
+        "LANG", "LC_ALL", "LC_CTYPE"
+    );
+
     private final DeerFlowProperties properties;
+    private final UserDataPathResolver pathResolver;
 
     public LocalRestrictedSandboxRunner(DeerFlowProperties properties) {
+        this(properties, null);
+    }
+
+    @Autowired
+    public LocalRestrictedSandboxRunner(DeerFlowProperties properties, UserDataPathResolver pathResolver) {
         this.properties = properties;
+        this.pathResolver = pathResolver != null ? pathResolver : new UserDataPathResolver(properties);
     }
 
     @Override
@@ -44,25 +65,53 @@ public class LocalRestrictedSandboxRunner implements SandboxRunner {
         }
         Process process = null;
         try {
-            List<String> processCmd;
+            String resolvedCommand = pathResolver.rewriteContainerPathsToLocal(request.command());
+            List<String> processCmd = new ArrayList<>();
             if (request.cmdArgs() != null && !request.cmdArgs().isEmpty()) {
-                processCmd = request.cmdArgs();
+                for (String arg : request.cmdArgs()) {
+                    processCmd.add(pathResolver.rewriteContainerPathsToLocal(arg));
+                }
             } else {
-                processCmd = shellCommand(request.command());
+                processCmd = shellCommand(resolvedCommand);
             }
             ProcessBuilder processBuilder = new ProcessBuilder(processCmd);
             processBuilder.directory(workdir.toFile());
-            processBuilder.environment().clear();
-            processBuilder.environment().put("PATH", System.getenv().getOrDefault("PATH", ""));
-            processBuilder.environment().put("HOME", workdir.toString());
-            processBuilder.environment().put("USERPROFILE", workdir.toString());
-            processBuilder.environment().putAll(request.environment());
+            Map<String, String> processEnv = processBuilder.environment();
+            processEnv.clear();
+            processEnv.put("PATH", System.getenv().getOrDefault("PATH", ""));
+            processEnv.put("PYTHONIOENCODING", "utf-8");
+
+            String os = System.getProperty("os.name").toLowerCase();
+            if (os.contains("win")) {
+                processEnv.put("HOME", workdir.toString());
+                processEnv.put("USERPROFILE", workdir.toString());
+                for (String key : WINDOWS_ESSENTIAL_ENVS) {
+                    String val = System.getenv(key);
+                    if (val != null) {
+                        processEnv.put(key, val);
+                    }
+                }
+            } else {
+                String home = System.getenv("HOME");
+                if (home != null) {
+                    processEnv.put("HOME", home);
+                }
+                for (String key : UNIX_ESSENTIAL_ENVS) {
+                    String val = System.getenv(key);
+                    if (val != null) {
+                        processEnv.put(key, val);
+                    }
+                }
+                processEnv.putIfAbsent("LANG", "en_US.UTF-8");
+                processEnv.putIfAbsent("LC_ALL", "en_US.UTF-8");
+            }
+            processEnv.putAll(request.environment());
 
             process = processBuilder.start();
             ByteArrayOutputStream stdout = new ByteArrayOutputStream();
             ByteArrayOutputStream stderr = new ByteArrayOutputStream();
             Thread stdoutThread = streamTo(process.getInputStream(), stdout);
-            Thread stderrThread = streamTo(process.getErrorStream(), stderr);
+            Thread ThreadStderr = streamTo(process.getErrorStream(), stderr);
 
             Duration timeout = request.timeout();
             boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
@@ -71,12 +120,16 @@ public class LocalRestrictedSandboxRunner implements SandboxRunner {
                 terminateProcessTree(process);
             }
             stdoutThread.join(1_000);
-            stderrThread.join(1_000);
+            ThreadStderr.join(1_000);
 
             int exitCode = timedOut ? -1 : process.exitValue();
-            TruncatedOutput truncated = truncate(stdout.toString(), stderr.toString(), properties.getSandbox().getMaxOutputChars());
+            TruncatedOutput truncated = truncate(stdout.toString(StandardCharsets.UTF_8), stderr.toString(StandardCharsets.UTF_8), properties.getSandbox().getMaxOutputChars());
+            
+            String maskedStdout = pathResolver.maskLocalPathsToContainer(truncated.stdout());
+            String maskedStderr = pathResolver.maskLocalPathsToContainer(truncated.stderr());
+
             long durationMs = System.currentTimeMillis() - start;
-            return new SandboxResult(sandboxId, exitCode, truncated.stdout(), truncated.stderr(), durationMs, timedOut,
+            return new SandboxResult(sandboxId, exitCode, maskedStdout, maskedStderr, durationMs, timedOut,
                     truncated.truncated(), Map.of(
                             "sandboxBackend", SandboxBackend.LOCAL.id(),
                             "isolationLevel", "local-restricted",

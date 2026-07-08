@@ -46,6 +46,25 @@ class UserDataPathResolverTest {
                 .isEqualTo("/mnt/user-data/outputs/reports/final.md");
     }
 
+    @Test
+    void rewritesAndMasksVirtualPaths(@TempDir Path tmp) {
+        DeerFlowProperties properties = properties(tmp);
+        UserDataPathResolver resolver = new UserDataPathResolver(properties);
+
+        String text = "Read from /mnt/user-data/uploads/input.csv and write to /mnt/user-data/workspace/result.csv and /mnt/user-data/outputs/report.md";
+        String localUploads = tmp.resolve("uploads").toAbsolutePath().normalize().toString().replace('\\', '/');
+        String localWorkspace = tmp.resolve("workspace").toAbsolutePath().normalize().toString().replace('\\', '/');
+        String localOutputs = tmp.resolve("outputs").toAbsolutePath().normalize().toString().replace('\\', '/');
+
+        String rewritten = resolver.rewriteContainerPathsToLocal(text);
+        assertThat(rewritten).contains(localUploads + "/input.csv");
+        assertThat(rewritten).contains(localWorkspace + "/result.csv");
+        assertThat(rewritten).contains(localOutputs + "/report.md");
+
+        String masked = resolver.maskLocalPathsToContainer(rewritten);
+        assertThat(masked).isEqualTo(text);
+    }
+
     private static DeerFlowProperties properties(Path tmp) {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setWorkspaceRoot(tmp.resolve("workspace").toString());

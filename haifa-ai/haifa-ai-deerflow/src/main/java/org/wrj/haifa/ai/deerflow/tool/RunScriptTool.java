@@ -93,7 +93,8 @@ public class RunScriptTool implements AgentTool {
             java.util.List<String> args = new java.util.ArrayList<>();
             if (node.has("args") && node.get("args").isArray()) {
                 for (JsonNode argNode : node.get("args")) {
-                    args.add(argNode.asText());
+                    String rawArg = argNode.asText();
+                    args.add(pathResolver.rewriteContainerPathsToLocal(rawArg));
                 }
             }
 
@@ -158,7 +159,8 @@ public class RunScriptTool implements AgentTool {
 
             try {
                 Files.createDirectories(normalizedDir);
-                Files.writeString(scriptFile, code, StandardCharsets.UTF_8);
+                String rewrittenCode = pathResolver.rewriteContainerPathsToLocal(code);
+                Files.writeString(scriptFile, rewrittenCode, StandardCharsets.UTF_8);
             } catch (IOException ex) {
                 return ToolResult.of(name(), "Error writing script file: " + ex.getMessage());
             }
@@ -246,6 +248,18 @@ public class RunScriptTool implements AgentTool {
         builder.append("Output truncated: ").append(result.outputTruncated()).append("\n");
         builder.append("Stdout:\n").append(result.stdout().isBlank() ? "(empty)" : result.stdout()).append("\n");
         builder.append("Stderr:\n").append(result.stderr().isBlank() ? "(empty)" : result.stderr());
+
+        if (result.exitCode() != 0 || !result.stderr().isBlank()) {
+            String stderr = result.stderr();
+            if (stderr.contains("ModuleNotFoundError") || stderr.contains("No module named")) {
+                builder.append("\n\n[Dependency Tip] Sandbox execution failed because a required Python module is missing. ");
+                builder.append("If you need libraries like 'pandas' or 'numpy' and they are not available in this local sandbox, ");
+                builder.append("please rewrite your script using only standard libraries (e.g. csv, json, math) or request clarification.");
+            } else if (stderr.contains("node: command not found") || stderr.contains("node is not recognized")) {
+                builder.append("\n\n[Dependency Tip] Sandbox execution failed because 'node' is not installed or available on this sandbox's PATH. ");
+                builder.append("Please fall back to other available scripting languages or standard methods.");
+            }
+        }
         return builder.toString();
     }
 

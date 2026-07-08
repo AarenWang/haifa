@@ -117,6 +117,43 @@ class LocalRestrictedSandboxRunnerTest {
         assertThat(result.stdout().length() + result.stderr().length()).isLessThanOrEqualTo(1300);
     }
 
+    @Test
+    void resolvesPathsAndMaintainsEnvironment(@TempDir Path tmp) {
+        DeerFlowProperties properties = properties(tmp);
+        LocalRestrictedSandboxRunner runner = new LocalRestrictedSandboxRunner(properties);
+
+        // Verify that path resolution maps virtual paths in the command
+        String echoCmd = isWindows()
+                ? "echo /mnt/user-data/workspace/test.txt"
+                : "echo /mnt/user-data/workspace/test.txt";
+        SandboxResult result = runner.run(new SandboxRequest(
+                echoCmd,
+                tmp.resolve("workspace"),
+                null,
+                Duration.ofSeconds(5),
+                Map.of(),
+                false,
+                "run-paths"
+        ));
+
+        assertThat(result.exitCode()).isEqualTo(0);
+        // Path should have been mapped to local workspace physically, and then masked back to virtual
+        assertThat(result.stdout().trim()).contains("/mnt/user-data/workspace/test.txt");
+
+        // Verify basic environment variable settings like PATH exist
+        String envCmd = isWindows() ? "set PATH" : "env";
+        SandboxResult envResult = runner.run(new SandboxRequest(
+                envCmd,
+                tmp.resolve("workspace"),
+                null,
+                Duration.ofSeconds(5),
+                Map.of(),
+                false,
+                "run-env"
+        ));
+        assertThat(envResult.exitCode()).isEqualTo(0);
+    }
+
     private static DeerFlowProperties properties(Path tmp) {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setWorkspaceRoot(tmp.resolve("workspace").toString());

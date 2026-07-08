@@ -126,6 +126,28 @@ public class UserDataPathResolver {
         return path;
     }
 
+    public String rewriteContainerPathsToLocal(String text) {
+        if (text == null) return null;
+        String result = text;
+        result = result.replace(VIRTUAL_UPLOADS_ROOT, slash(uploadsRoot()));
+        result = result.replace(VIRTUAL_WORKSPACE_ROOT, slash(workspaceRoot()));
+        result = result.replace(VIRTUAL_OUTPUTS_ROOT, slash(outputsRoot()));
+        return result;
+    }
+
+    public String maskLocalPathsToContainer(String text) {
+        if (text == null) return null;
+        String result = text;
+        result = result.replace(slash(uploadsRoot()), VIRTUAL_UPLOADS_ROOT);
+        result = result.replace(slash(workspaceRoot()), VIRTUAL_WORKSPACE_ROOT);
+        result = result.replace(slash(outputsRoot()), VIRTUAL_OUTPUTS_ROOT);
+        // Handle Windows backslash paths compatible masking
+        result = result.replace(uploadsRoot().toString(), VIRTUAL_UPLOADS_ROOT);
+        result = result.replace(workspaceRoot().toString(), VIRTUAL_WORKSPACE_ROOT);
+        result = result.replace(outputsRoot().toString(), VIRTUAL_OUTPUTS_ROOT);
+        return result;
+    }
+
     private static boolean isUnder(Path child, Path root) {
         return child.toAbsolutePath().normalize().startsWith(root.toAbsolutePath().normalize());
     }
