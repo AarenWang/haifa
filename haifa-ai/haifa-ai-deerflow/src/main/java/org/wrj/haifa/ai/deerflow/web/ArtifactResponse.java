@@ -8,6 +8,11 @@ public record ArtifactResponse(
         String mimeType,
         long size,
         String createdAt,
-        String preview
+        String preview,
+        boolean previewTruncated,
+        boolean renderable,
+        boolean sourceViewable,
+        String downloadUrl,
+        String rawUrl
 ) {
 }

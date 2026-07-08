@@ -20,6 +20,7 @@ interface AnswerWorkspaceProps {
   pendingClarification?: PendingClarification;
   onAnswerClarification?: (answer: string, clarification: PendingClarification, answers?: ClarificationAnswer[]) => void;
   onSubmitQuestion?: (question: string) => void;
+  onOpenCanvas?: (artifactId?: string) => void;
 }
 
 interface ExecutionStep {
@@ -329,6 +330,7 @@ export default function AnswerWorkspace({
   pendingClarification,
   onAnswerClarification,
   onSubmitQuestion,
+  onOpenCanvas,
 }: AnswerWorkspaceProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
@@ -522,22 +524,39 @@ export default function AnswerWorkspace({
     }
   };
 
-  const handleCodeBlockClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  const handleConversationClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
+
+    // 1. Intercept copy code button
     const btn = target.closest('.copy-code-btn') as HTMLButtonElement | null;
-    if (!btn) return;
-    const wrapper = btn.closest('.code-block-wrapper') as HTMLElement | null;
-    if (!wrapper) return;
-    const codeEl = wrapper.querySelector('pre code');
-    if (!codeEl) return;
-    const text = codeEl.textContent || '';
-    navigator.clipboard.writeText(text).catch(() => {});
-    const originalText = btn.textContent || '';
-    btn.textContent = '已复制';
-    setTimeout(() => {
-      btn.textContent = originalText;
-    }, 2000);
-  }, []);
+    if (btn) {
+      const wrapper = btn.closest('.code-block-wrapper') as HTMLElement | null;
+      if (wrapper) {
+        const codeEl = wrapper.querySelector('pre code');
+        if (codeEl) {
+          const text = codeEl.textContent || '';
+          navigator.clipboard.writeText(text).catch(() => {});
+          const originalText = btn.textContent || '';
+          btn.textContent = '已复制';
+          setTimeout(() => {
+            btn.textContent = originalText;
+          }, 2000);
+        }
+      }
+      return;
+    }
+
+    // 2. Intercept artifact links
+    const link = target.closest('a') as HTMLAnchorElement | null;
+    if (link && onOpenCanvas) {
+      const href = link.getAttribute('href') || '';
+      const match = href.match(/\/api\/deerflow\/artifacts\/([a-f0-9-]+)/i);
+      if (match) {
+        e.preventDefault();
+        onOpenCanvas(match[1]);
+      }
+    }
+  }, [onOpenCanvas]);
 
   const isEmpty = status === 'idle' && visibleMessages.length === 0 && !finalAnswer && !error;
 
@@ -561,7 +580,7 @@ export default function AnswerWorkspace({
       ) : (
         <>
           {visibleMessages.length > 0 && (
-            <div className="conversation-list" onClick={handleCodeBlockClick}>
+            <div className="conversation-list" onClick={handleConversationClick}>
               {visibleMessages.map((message) => (
                 <div key={message.messageId}>
                   <div
@@ -744,7 +763,7 @@ export default function AnswerWorkspace({
                 <Sparkles size={14} style={{ color: 'var(--blue)' }} />
                 推荐问题：
               </div>
-              <div style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {recommendations.slice(0, 3).map((q, idx) => (
                   <button
                     key={idx}
@@ -763,12 +782,12 @@ export default function AnswerWorkspace({
                       display: 'flex',
                       alignItems: 'center',
                       gap: '4px',
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0
+                      whiteSpace: 'normal',
+                      textAlign: 'left'
                     }}
                   >
-                    <Sparkles size={10} style={{ opacity: 0.6, color: 'var(--blue)' }} />
-                    {q}
+                    <Sparkles size={10} style={{ opacity: 0.6, color: 'var(--blue)', flexShrink: 0 }} />
+                    <span style={{ wordBreak: 'break-word' }}>{q}</span>
                   </button>
                 ))}
               </div>

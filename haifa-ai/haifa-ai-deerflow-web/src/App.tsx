@@ -25,6 +25,7 @@ import TaskComposer, { type PendingClarification } from './components/TaskCompos
 import AnswerWorkspace from './components/AnswerWorkspace';
 import ActivityTrace from './components/ActivityTrace';
 import ArtifactPanel from './components/ArtifactPanel';
+import ArtifactCanvas from './components/ArtifactCanvas';
 import ResearchInspector from './components/ResearchInspector';
 import ResearchPlanView from './components/ResearchPlanView';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
@@ -39,6 +40,7 @@ function App() {
   const [isMemoryOpen, setIsMemoryOpen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isTraceOpen, setIsTraceOpen] = useState<boolean>(false);
+  const [canvasArtifactId, setCanvasArtifactId] = useState<string | null>(null);
 
   const toggleSidebar = useCallback(() => {
     setIsSidebarOpen((open) => !open);
@@ -55,6 +57,42 @@ function App() {
     state.status,
     state.threadId
   );
+  const handleOpenCanvas = useCallback((artifactId?: string) => {
+    const target = artifactId || state.artifacts[0]?.artifactId;
+    if (target) {
+      setCanvasArtifactId(target);
+      setIsSidebarOpen(false);
+      setIsTraceOpen(false);
+    }
+  }, [state.artifacts]);
+
+  const handleCloseCanvas = useCallback(() => {
+    setCanvasArtifactId(null);
+  }, []);
+
+  useEffect(() => {
+    if (canvasArtifactId && !state.artifacts.some((artifact) => artifact.artifactId === canvasArtifactId)) {
+      setCanvasArtifactId(null);
+    }
+  }, [canvasArtifactId, state.artifacts]);
+
+  const previousThreadId = useRef(state.threadId);
+  const previousArtifactsCount = useRef(state.artifacts.length);
+
+  useEffect(() => {
+    if (state.threadId !== previousThreadId.current) {
+      previousThreadId.current = state.threadId;
+      previousArtifactsCount.current = state.artifacts.length;
+      return;
+    }
+    if (state.artifacts.length > previousArtifactsCount.current) {
+      const newest = state.artifacts[0];
+      if (newest) {
+        handleOpenCanvas(newest.artifactId);
+      }
+    }
+    previousArtifactsCount.current = state.artifacts.length;
+  }, [state.artifacts, state.threadId, handleOpenCanvas]);
 
   useEffect(() => {
     const threadId = getThreadIdFromUrl();
@@ -621,6 +659,7 @@ function App() {
             pendingClarification={pendingClarification}
             onAnswerClarification={handleAnswerClarification}
             onSubmitQuestion={handleSubmitQuestion}
+            onOpenCanvas={handleOpenCanvas}
           />
           {state.lastRequest?.mode === 'research' && (
             <ResearchPlanView
@@ -629,7 +668,7 @@ function App() {
               qualityGate={state.qualityGate}
             />
           )}
-          <ArtifactPanel artifacts={state.artifacts} />
+          <ArtifactPanel artifacts={state.artifacts} onOpenCanvas={handleOpenCanvas} />
           {state.lastRequest?.mode === 'research' && (
             <ResearchInspector
               sources={state.researchSources}
@@ -667,6 +706,14 @@ function App() {
             setIsSidebarOpen(false);
             setIsTraceOpen(false);
           }}
+        />
+      )}
+      {canvasArtifactId && (
+        <ArtifactCanvas
+          artifacts={state.artifacts}
+          selectedArtifactId={canvasArtifactId}
+          onSelectArtifact={setCanvasArtifactId}
+          onClose={handleCloseCanvas}
         />
       )}
       {isMemoryOpen && <MemorySettingsModal onClose={() => setIsMemoryOpen(false)} />}

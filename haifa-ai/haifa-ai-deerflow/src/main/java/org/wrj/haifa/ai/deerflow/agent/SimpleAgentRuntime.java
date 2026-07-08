@@ -110,6 +110,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private GraphShadowRuntime graphShadowRuntime;
 
     @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.artifact.ArtifactService artifactService;
+
+    @Autowired(required = false)
     private GraphChatRuntime graphChatRuntime;
 
     @Autowired(required = false)
@@ -170,7 +173,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 .toList();
 
         List<org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver> observers = new ArrayList<>();
-        observers.add(new DefaultAgentLoopObserver(todoStore));
+        observers.add(new DefaultAgentLoopObserver(todoStore, artifactService));
         if (subagentLimitMiddleware != null) {
             observers.add(subagentLimitMiddleware);
         }

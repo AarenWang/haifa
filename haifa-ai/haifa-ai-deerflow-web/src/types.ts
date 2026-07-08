@@ -99,6 +99,11 @@ export interface ArtifactRecord {
   size: number;
   createdAt: string;
   preview?: string;
+  previewTruncated?: boolean;
+  renderable?: boolean;
+  sourceViewable?: boolean;
+  downloadUrl?: string;
+  rawUrl?: string;
 }
 
 export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';

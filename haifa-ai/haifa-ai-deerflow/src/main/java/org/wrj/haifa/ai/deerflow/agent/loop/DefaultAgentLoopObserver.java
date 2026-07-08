@@ -10,6 +10,8 @@ import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.todo.TodoItem;
 import org.wrj.haifa.ai.deerflow.todo.TodoSnapshot;
 import org.wrj.haifa.ai.deerflow.todo.TodoStore;
+import org.wrj.haifa.ai.deerflow.artifact.ArtifactService;
+import org.wrj.haifa.ai.deerflow.artifact.ArtifactRecord;
 
 /**
  * Default implementation of AgentLoopObserver with todo checklist verification.
@@ -18,9 +20,16 @@ import org.wrj.haifa.ai.deerflow.todo.TodoStore;
 public class DefaultAgentLoopObserver implements AgentLoopObserver {
 
     protected final TodoStore todoStore;
+    protected final ArtifactService artifactService;
 
     public DefaultAgentLoopObserver(TodoStore todoStore) {
         this.todoStore = todoStore;
+        this.artifactService = null;
+    }
+
+    public DefaultAgentLoopObserver(TodoStore todoStore, ArtifactService artifactService) {
+        this.todoStore = todoStore;
+        this.artifactService = artifactService;
     }
 
     @Override
@@ -45,10 +54,22 @@ public class DefaultAgentLoopObserver implements AgentLoopObserver {
     public FinalAnswerDecision onFinalAnswerProposed(AgentRunConfig runConfig, String rawAnswer, List<AgentEvent> events,
             AtomicInteger seq, int step, int totalToolCalls) {
         if (totalToolCalls == 0 && claimsCreatedDownloadableFile(rawAnswer)) {
-            return FinalAnswerDecision.reject(
-                    "Do not claim that a downloadable file was created unless a tool actually wrote and registered it. "
-                            + "Call `write_file` with a path under `outputs/` first, then provide the artifact download link.",
-                    Map.of("reason", "artifact_claim_without_tool", "toolCount", 0));
+            boolean alreadyRegistered = false;
+            if (artifactService != null) {
+                List<ArtifactRecord> registered = artifactService.list(runConfig.threadId(), null);
+                for (ArtifactRecord art : registered) {
+                    if (rawAnswer.contains(art.artifactId()) || rawAnswer.contains(art.filename())) {
+                        alreadyRegistered = true;
+                        break;
+                    }
+                }
+            }
+            if (!alreadyRegistered) {
+                return FinalAnswerDecision.reject(
+                        "Do not claim that a downloadable file was created unless a tool actually wrote and registered it. "
+                                + "Call `write_file` with a path under `outputs/` first, then provide the artifact download link.",
+                        Map.of("reason", "artifact_claim_without_tool", "toolCount", 0));
+            }
         }
 
         if (todoStore == null) {

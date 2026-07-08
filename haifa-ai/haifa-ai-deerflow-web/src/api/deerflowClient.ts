@@ -417,6 +417,9 @@ export function artifactDownloadUrl(artifactId: string): string {
 }
 
 
+export function artifactRawUrl(artifactId: string): string {
+  return `/api/deerflow/artifacts/${encodeURIComponent(artifactId)}/raw`;
+}
 export async function createThread(payload: {
   threadId?: string;
   title?: string;
