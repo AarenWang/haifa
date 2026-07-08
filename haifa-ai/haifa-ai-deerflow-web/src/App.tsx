@@ -452,6 +452,13 @@ function App() {
     });
   }, [handleResumeRun, state.threadId]);
 
+  const handleSubmitQuestion = useCallback((question: string) => {
+    handleRun({
+      message: question,
+      mode: state.lastRequest?.mode || 'chat',
+    });
+  }, [handleRun, state.lastRequest?.mode]);
+
   const handleStop = useCallback(() => {
     if (abortRef.current) {
       abortRef.current.abort();
@@ -604,6 +611,8 @@ function App() {
             phase={state.phase}
             status={state.status}
             messages={state.messages}
+            events={state.events}
+            threadId={state.threadId}
             finalAnswer={state.finalAnswer}
             error={state.error}
             onReRun={state.status === 'failed' ? handleReRun : undefined}
@@ -611,6 +620,7 @@ function App() {
             onResumeRun={handleResumeRun}
             pendingClarification={pendingClarification}
             onAnswerClarification={handleAnswerClarification}
+            onSubmitQuestion={handleSubmitQuestion}
           />
           {state.lastRequest?.mode === 'research' && (
             <ResearchPlanView

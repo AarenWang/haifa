@@ -3815,3 +3815,94 @@ body {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* Follow-up recommendations and Thinking/Steps UI elements */
+.recommendation-pill:hover {
+  background: var(--border-color) !important;
+  border-color: var(--blue) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.thinking-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-color);
+  width: fit-content;
+  margin: 12px 0;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.thinking-icon {
+  color: var(--blue);
+}
+
+.steps-accordion-card {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--card-bg);
+  margin: 12px 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.steps-accordion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.steps-accordion-header:hover {
+  color: var(--text-color);
+}
+
+.steps-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-color);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.step-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-color);
+}
+
+.step-item-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.step-item-duration {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.steps-token-dashboard {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color);
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

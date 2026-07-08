@@ -7,7 +7,7 @@ spring:
   application:
     name: haifa-ai-deerflow
   datasource:
-    url: jdbc:sqlite:${deerflow.persistence.sqlite.path}
+    url: jdbc:sqlite:${deerflow.persistence.sqlite.path}?journal_mode=WAL&busy_timeout=5000
     driver-class-name: org.sqlite.JDBC
   jpa:
     hibernate:

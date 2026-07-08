@@ -131,13 +131,9 @@ public class RunController {
             }
         }
 
-        Flux<ServerSentEvent<AgentEvent>> body = this.agentRuntime.stream(new AgentRequest(
+        Flux<ServerSentEvent<AgentEvent>> body = toSseFlux(this.agentRuntime.stream(new AgentRequest(
                 request.threadId(), request.message(), request.model(), request.uploadedFileIds(),
-                request.mode(), request.researchOptions(), userId))
-                .map(event -> ServerSentEvent.<AgentEvent>builder(event)
-                        .id(event.runId() + ":" + event.eventId())
-                        .event(event.type().name().toLowerCase())
-                        .build());
+                request.mode(), request.researchOptions(), userId)));
         return org.springframework.http.ResponseEntity.ok()
                 .header("Content-Type", "text/event-stream")
                 .header("Cache-Control", "no-cache")
@@ -211,11 +207,7 @@ public class RunController {
                 metadata
         );
 
-        Flux<ServerSentEvent<AgentEvent>> body = this.agentRuntime.stream(resumeRequest)
-                .map(event -> ServerSentEvent.<AgentEvent>builder(event)
-                        .id(event.runId() + ":" + event.eventId())
-                        .event(event.type().name().toLowerCase())
-                        .build());
+        Flux<ServerSentEvent<AgentEvent>> body = toSseFlux(this.agentRuntime.stream(resumeRequest));
 
         return org.springframework.http.ResponseEntity.ok()
                 .header("Content-Type", "text/event-stream")
@@ -223,6 +215,23 @@ public class RunController {
                 .header("Connection", "keep-alive")
                 .header("X-Accel-Buffering", "no")
                 .body(body);
+    }
+
+    private Flux<ServerSentEvent<AgentEvent>> toSseFlux(Flux<AgentEvent> eventFlux) {
+        Flux<ServerSentEvent<AgentEvent>> sseStream = eventFlux
+                .map(event -> ServerSentEvent.<AgentEvent>builder(event)
+                        .id(event.runId() + ":" + event.eventId())
+                        .event(event.type().name().toLowerCase())
+                        .build())
+                .share();
+
+        Flux<ServerSentEvent<AgentEvent>> heartbeat = Flux.interval(java.time.Duration.ofSeconds(10))
+                .map(i -> ServerSentEvent.<AgentEvent>builder()
+                        .comment("keep-alive")
+                        .build())
+                .takeUntilOther(sseStream.then());
+
+        return Flux.merge(sseStream, heartbeat);
     }
 
     private org.wrj.haifa.ai.deerflow.agent.ResearchOptions reconstructResearchOptions(java.util.Map<String, Object> metadata) {
