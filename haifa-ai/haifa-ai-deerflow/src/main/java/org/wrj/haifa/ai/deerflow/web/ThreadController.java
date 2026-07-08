@@ -19,6 +19,7 @@ import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import java.util.List;
 import reactor.core.publisher.Mono;
 
@@ -30,12 +31,14 @@ public class ThreadController {
     private final RunManager runManager;
     private final MessageStore messageStore;
     private final AgentModelClient modelClient;
+    private final DeerFlowProperties properties;
 
-    public ThreadController(ThreadManager threadManager, RunManager runManager, MessageStore messageStore, AgentModelClient modelClient) {
+    public ThreadController(ThreadManager threadManager, RunManager runManager, MessageStore messageStore, AgentModelClient modelClient, DeerFlowProperties properties) {
         this.threadManager = threadManager;
         this.runManager = runManager;
         this.messageStore = messageStore;
         this.modelClient = modelClient;
+        this.properties = properties;
     }
 
     @PostMapping
@@ -132,7 +135,8 @@ public class ThreadController {
                             "- Output MUST be a JSON array of strings only.";
                     String userPrompt = "Conversation Context:\n" + conversation + "\n\nGenerate 3 follow-up questions";
 
-                    return this.modelClient.generate(new ModelPrompt(systemPrompt, userPrompt, null))
+                    String modelName = this.properties.getModel();
+                    return this.modelClient.generate(new ModelPrompt(systemPrompt, userPrompt, modelName))
                             .map(response -> {
                                 String content = response.content() != null ? response.content() : "";
                                 List<String> parsed = parseJsonStringList(content);

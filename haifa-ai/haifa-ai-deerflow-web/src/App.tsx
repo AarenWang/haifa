@@ -629,19 +629,11 @@ function App() {
               qualityGate={state.qualityGate}
             />
           )}
-          <ArtifactPanel
-            artifacts={state.artifacts}
-            onFollowUp={(filename) => {
-              setExternalMessage(`Please refine/expand the report ${filename} to...`);
-            }}
-          />
+          <ArtifactPanel artifacts={state.artifacts} />
           {state.lastRequest?.mode === 'research' && (
             <ResearchInspector
               sources={state.researchSources}
               evidenceItems={state.evidenceItems}
-              onFollowUp={(sourceTitle) => {
-                setExternalMessage(`Please look deeper into the source "${sourceTitle}" to investigate...`);
-              }}
             />
           )}
           <TaskComposer

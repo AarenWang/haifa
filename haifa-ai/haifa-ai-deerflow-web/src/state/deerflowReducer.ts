@@ -86,7 +86,10 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
     }
     case 'ADD_EVENT': {
       const event = action.payload;
-      const nextEvents = [...state.events, event];
+      const isModelDelta = event.type === 'MODEL_DELTA';
+      const isFinalModelDelta = isModelDelta && !!(event.metadata && (event.metadata.modelDurationMs !== undefined || event.metadata.persistAssistantToolCalls));
+      const shouldAddEvent = !isModelDelta || isFinalModelDelta;
+      const nextEvents = shouldAddEvent ? [...state.events, event] : state.events;
       const nextPhase = getPhaseFromEvent(event.type);
       let nextStatus: AppState['status'] = state.status;
       let nextFinalAnswer = state.finalAnswer;

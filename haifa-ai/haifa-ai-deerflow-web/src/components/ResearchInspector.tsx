@@ -5,10 +5,9 @@ import type { EvidenceItem, ResearchSource } from '../types';
 interface ResearchInspectorProps {
   sources: ResearchSource[];
   evidenceItems: EvidenceItem[];
-  onFollowUp?: (sourceTitle: string) => void;
 }
 
-export default function ResearchInspector({ sources, evidenceItems, onFollowUp }: ResearchInspectorProps) {
+export default function ResearchInspector({ sources, evidenceItems }: ResearchInspectorProps) {
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
 
   const selectedSource = useMemo(
@@ -86,16 +85,6 @@ export default function ResearchInspector({ sources, evidenceItems, onFollowUp }
                       <ExternalLink size={12} />
                       Open source
                     </a>
-                    {onFollowUp && (
-                      <button
-                        type="button"
-                        className="research-follow-up-btn btn btn-ghost"
-                        onClick={() => onFollowUp(selectedSource.title || selectedSource.url)}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', fontSize: '12px' }}
-                      >
-                        Follow-up
-                      </button>
-                    )}
                   </div>
                 </div>
                 <div className="research-evidence-score">
