@@ -40,6 +40,10 @@ public class DeerFlowProperties {
     @Max(20)
     private int maxIterations = 4;
 
+    @Min(1)
+    @Max(100)
+    private int maxToolCalls = 80;
+
     @Min(0)
     private int charBudget = 0;
 
@@ -452,6 +456,14 @@ public class DeerFlowProperties {
 
     public void setMaxIterations(int maxIterations) {
         this.maxIterations = maxIterations;
+    }
+
+    public int getMaxToolCalls() {
+        return maxToolCalls;
+    }
+
+    public void setMaxToolCalls(int maxToolCalls) {
+        this.maxToolCalls = maxToolCalls;
     }
 
     public int getCharBudget() {

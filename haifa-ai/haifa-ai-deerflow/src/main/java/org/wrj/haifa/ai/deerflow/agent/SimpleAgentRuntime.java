@@ -295,7 +295,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 }
 
                 int maxSteps = request.isResearchMode() ? this.properties.getMaxResearchSteps() : config.maxIterations();
-                int maxToolCalls = request.isResearchMode() ? this.properties.getMaxFetchesPerRun() : 15;
+                int maxToolCalls = request.isResearchMode() ? this.properties.getMaxFetchesPerRun() : this.properties.getMaxToolCalls();
                 LoopConfig loopConfig = new LoopConfig(
                         maxSteps, maxToolCalls, this.properties.getResearchTimeout(), researchOptions);
 

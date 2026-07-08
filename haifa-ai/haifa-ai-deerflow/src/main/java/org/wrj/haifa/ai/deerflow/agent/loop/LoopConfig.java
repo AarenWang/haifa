@@ -11,7 +11,7 @@ public record LoopConfig(
 
     public LoopConfig {
         maxSteps = Math.max(1, Math.min(100, maxSteps));
-        maxToolCalls = Math.max(1, Math.min(50, maxToolCalls));
+        maxToolCalls = Math.max(1, Math.min(100, maxToolCalls));
         timeoutMs = Math.max(30_000, timeoutMs);
         researchOptions = researchOptions == null ? ResearchOptions.defaults() : researchOptions;
     }

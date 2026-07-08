@@ -42,6 +42,7 @@ haifa:
       model: ${HAIFA_DEERFLOW_MODEL:}
       model-timeout: ${HAIFA_DEERFLOW_MODEL_TIMEOUT:300000}
       max-iterations: 20
+      max-tool-calls: ${HAIFA_DEERFLOW_MAX_TOOL_CALLS:80}
       user-data-root: ${HAIFA_DEERFLOW_USER_DATA:${user.dir}/data/user-data}
       workspace-root: ${HAIFA_DEERFLOW_WORKSPACE:${user.dir}/data/user-data/workspace}
       skills-root: ${HAIFA_DEERFLOW_SKILLS:${user.dir}/skills}
