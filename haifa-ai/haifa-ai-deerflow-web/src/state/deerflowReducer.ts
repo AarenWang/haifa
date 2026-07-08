@@ -100,6 +100,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       if (event.type === 'MODEL_DELTA') {
         const chunk = event.content || '';
         const runId = event.runId;
+        const isFinal = !!(event.metadata && (event.metadata.modelDurationMs !== undefined || event.metadata.persistAssistantToolCalls));
         const existingAssistantIdx = nextMessages.findIndex(
           (m) => m.role === 'ASSISTANT' && m.runId === runId
         );
@@ -107,7 +108,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
           const existing = nextMessages[existingAssistantIdx];
           nextMessages[existingAssistantIdx] = {
             ...existing,
-            content: existing.content + chunk,
+            content: isFinal ? chunk : existing.content + chunk,
           };
         } else {
           nextMessages.push({

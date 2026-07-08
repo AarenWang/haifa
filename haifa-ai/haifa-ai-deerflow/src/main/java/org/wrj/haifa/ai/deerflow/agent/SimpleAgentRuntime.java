@@ -846,6 +846,14 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
     private void saveEvent(AgentEvent event) {
         try {
+            // Do not save intermediate MODEL_DELTA streaming chunks to the database to prevent database bloat and write lock issues
+            if (event.type() == AgentEventType.MODEL_DELTA) {
+                Map<String, Object> meta = event.metadata();
+                boolean isFinal = meta != null && (meta.containsKey("modelDurationMs") || meta.containsKey("persistAssistantToolCalls"));
+                if (!isFinal) {
+                    return;
+                }
+            }
             this.agentEventStore.save(event);
             if (event.type() == AgentEventType.TOOL_STARTED) {
                 String toolName = (String) event.metadata().get("toolName");

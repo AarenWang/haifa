@@ -157,6 +157,16 @@ public class ChatCallModelNode implements AsyncNodeAction {
             String responseContent = fullContent.toString();
             List<Map<String, Object>> structuredToolCalls = serializeToolCalls(accumulatedToolCalls);
 
+            // Emit final MODEL_DELTA containing the complete text for content synchronization
+            GraphEventRegistry.publish(runId, AgentEvent.of(
+                    UUID.randomUUID().toString(),
+                    runId,
+                    threadId,
+                    AgentEventType.MODEL_DELTA,
+                    responseContent,
+                    Map.of("step", stepNum, "modelDurationMs", duration)
+            ));
+
             // APPEND strategy expects only newly produced messages.
             Map<String, Object> assistantMsg = new LinkedHashMap<>();
             assistantMsg.put("messageId", UUID.randomUUID().toString());
