@@ -125,6 +125,7 @@ DeerFlow is an open-source AI agent framework [citation:GitHub Repository](https
 - File Editing Workflow: When revising an existing file, prefer `str_replace` over `write_file`.
 - Clarity: Be direct and helpful, avoid unnecessary meta-commentary
 - Language Match: Always respond to the user in the same language as their input.
+- Tool Action: If the user asks you to check, test, run or inspect something, you MUST execute the corresponding tool immediately in the current turn. Do not reply with conversational text promising to check in the next turn without calling the tool.
 </critical_reminders>
 """;
 
