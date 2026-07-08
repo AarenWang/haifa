@@ -2149,16 +2149,16 @@ body {
   max-height: 220px;
   overflow-y: auto;
   padding: 0 8px 8px;
-  gap: 4px;
+  gap: 6px;
 }
 
 .todo-row {
-  min-height: 30px;
+  min-height: 32px;
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 7px;
+  grid-template-columns: 18px minmax(0, 1fr) 54px;
+  align-items: start;
+  column-gap: 7px;
+  padding: 7px;
   border-radius: var(--radius);
   color: var(--text-secondary);
 }
@@ -2180,13 +2180,22 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  margin-top: 1px;
 }
 
 .todo-content {
   min-width: 0;
-  font-size: 13px;
-  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.todo-row.in-progress .todo-content {
+  -webkit-line-clamp: 3;
 }
 
 .todo-row.completed .todo-content,
@@ -2195,10 +2204,14 @@ body {
 }
 
 .todo-status-label {
-  flex: 0 0 auto;
+  min-width: 0;
+  justify-self: end;
+  padding-top: 2px;
   font-size: 11px;
   font-weight: 700;
   color: var(--text-muted);
+  text-align: right;
+  white-space: nowrap;
 }
 
 .todo-row.in-progress .todo-status-label {
@@ -3880,22 +3893,41 @@ body {
 }
 
 .step-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
   color: var(--text-color);
 }
 
 .step-item-left {
+  min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
   font-size: 12.5px;
 }
 
+.step-item-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.step-item-detail {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .step-item-duration {
+  flex: 0 0 auto;
+  padding-top: 2px;
   font-size: 11px;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .steps-token-dashboard {

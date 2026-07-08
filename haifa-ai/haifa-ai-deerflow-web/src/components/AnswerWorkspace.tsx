@@ -31,6 +31,144 @@ interface ExecutionStep {
   durationMs?: number;
 }
 
+type StepArguments = Record<string, unknown>;
+
+const STEP_DETAIL_MAX = 220;
+
+const parseToolArguments = (rawArgs: unknown): StepArguments | undefined => {
+  if (!rawArgs) return undefined;
+  if (typeof rawArgs === 'object' && !Array.isArray(rawArgs)) return rawArgs as StepArguments;
+  if (typeof rawArgs !== 'string') return undefined;
+  const trimmed = rawArgs.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as StepArguments : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const textValue = (value: unknown): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map(textValue).filter(Boolean).join(', ');
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const firstText = (record: StepArguments | undefined, keys: string[]): string => {
+  if (!record) return '';
+  for (const key of keys) {
+    const value = textValue(record[key]);
+    if (value) return value;
+  }
+  return '';
+};
+
+const shortenDetail = (value: string, max = STEP_DETAIL_MAX): string => {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
+};
+
+const summarizeRecord = (record: StepArguments | undefined): string => {
+  if (!record) return '';
+  const pairs = Object.entries(record)
+    .filter(([, value]) => value !== undefined && value !== null && textValue(value) !== '')
+    .slice(0, 4)
+    .map(([key, value]) => `${key}: ${textValue(value)}`);
+  return shortenDetail(pairs.join('；'));
+};
+
+const summarizeTodos = (args: StepArguments | undefined): string => {
+  const todos = Array.isArray(args?.todos) ? args.todos as StepArguments[] : undefined;
+  if (!todos) return '读取当前 Todo 列表';
+  const current = todos.find((todo) => textValue(todo.status) === 'in_progress');
+  const completed = todos.filter((todo) => textValue(todo.status) === 'completed').length;
+  const pending = todos.filter((todo) => textValue(todo.status) === 'pending').length;
+  const currentText = current ? `，当前进行：${shortenDetail(textValue(current.content), 90)}` : '';
+  return `更新 Todo：共 ${todos.length} 项，已完成 ${completed} 项，待处理 ${pending} 项${currentText}`;
+};
+
+const summarizeStepDetail = (toolName: string, rawArgs: unknown, metadata: Record<string, unknown>, content?: string): string => {
+  const args = parseToolArguments(rawArgs);
+  const rawArgText = typeof rawArgs === 'string' ? rawArgs : textValue(rawArgs);
+
+  switch (toolName) {
+    case 'web_search': {
+      const query = firstText(args, ['query', 'q', 'search_query', 'keyword', 'keywords']) || firstText(metadata, ['query']);
+      const maxResults = firstText(args, ['max_results', 'maxResults']) || firstText(metadata, ['maxResults']);
+      return query ? `搜索关键词：${query}${maxResults ? `；最多 ${maxResults} 条结果` : ''}` : shortenDetail(rawArgText || content || '执行网络搜索');
+    }
+    case 'web_fetch':
+    case 'read_url_content': {
+      const url = firstText(args, ['url', 'Url', 'URL']) || firstText(metadata, ['url']);
+      return url ? `读取网页：${url}` : shortenDetail(rawArgText || content || '提取网页内容');
+    }
+    case 'read_file':
+    case 'view_file':
+    case 'read_uploaded_file': {
+      const file = firstText(args, ['path', 'filepath', 'file_path', 'file', 'AbsolutePath', 'TargetFile', 'fileId', 'fileName']) || firstText(metadata, ['path', 'virtualPath', 'filename', 'fileName']);
+      return file ? `读取文件：${file}` : shortenDetail(rawArgText || content || '读取文件内容');
+    }
+    case 'list_uploaded_files':
+      return '列出当前线程上传文件';
+    case 'ls':
+    case 'list_dir': {
+      const dir = firstText(args, ['path', 'directory', 'DirectoryPath']) || firstText(metadata, ['path']);
+      return dir ? `查看目录：${dir}` : '查看目录列表';
+    }
+    case 'glob': {
+      const pattern = firstText(args, ['pattern', 'Pattern', 'glob']);
+      return pattern ? `匹配文件：${pattern}` : shortenDetail(rawArgText || '按通配符查找文件');
+    }
+    case 'grep':
+    case 'grep_search': {
+      const query = firstText(args, ['query', 'Query', 'pattern', 'Pattern', 'regex']);
+      const path = firstText(args, ['path', 'include', 'glob']);
+      return query ? `搜索文本：${query}${path ? `；范围：${path}` : ''}` : shortenDetail(rawArgText || '在代码或文件中搜索文本');
+    }
+    case 'write_todos':
+      return summarizeTodos(args);
+    case 'write_file':
+    case 'write_to_file':
+    case 'replace_file_content':
+    case 'multi_replace_file_content':
+    case 'str_replace': {
+      const file = firstText(args, ['path', 'file_path', 'TargetFile', 'filepath']) || firstText(metadata, ['path', 'virtualPath', 'filename']);
+      return file ? `修改文件：${file}` : shortenDetail(rawArgText || content || '写入或修改文件');
+    }
+    case 'bash':
+    case 'run_command': {
+      const command = firstText(args, ['command', 'cmd', 'CommandLine']);
+      return command ? `执行命令：${command}` : shortenDetail(rawArgText || content || '执行终端命令');
+    }
+    case 'run_script': {
+      const purpose = firstText(args, ['purpose', 'description']);
+      const language = firstText(args, ['language']);
+      return shortenDetail([purpose && `目的：${purpose}`, language && `语言：${language}`].filter(Boolean).join('；') || rawArgText || '运行脚本');
+    }
+    case 'image_search': {
+      const query = firstText(args, ['query', 'q']);
+      return query ? `搜索图片：${query}` : shortenDetail(rawArgText || '搜索图片素材');
+    }
+    case 'task': {
+      const task = firstText(args, ['task', 'prompt', 'description']);
+      return task ? `委派任务：${task}` : shortenDetail(rawArgText || '委派子任务');
+    }
+    case 'ask_clarification': {
+      const question = firstText(args, ['question', 'prompt']);
+      return question ? `请求澄清：${question}` : shortenDetail(rawArgText || '请求用户补充信息');
+    }
+    default:
+      return summarizeRecord(args) || shortenDetail(firstText(metadata, ['description']) || content || rawArgText || '执行工具调用');
+  }
+};
+
 const parseExecutionSteps = (events: DeerFlowEvent[]): ExecutionStep[] => {
   const stepsMap: Record<string, ExecutionStep> = {};
   const orderedIds: string[] = [];
@@ -38,53 +176,11 @@ const parseExecutionSteps = (events: DeerFlowEvent[]): ExecutionStep[] => {
   (events || []).forEach((evt) => {
     const meta = evt.metadata || {};
     const toolCallId = (meta.toolCallId as string) || evt.eventId;
+    const toolName = ((meta.toolName as string) || (meta.tool as string) || '').trim();
 
-    if (evt.type === 'TOOL_STARTED') {
-      const toolName = (meta.toolName as string) || '';
-      const rawArgs = meta.arguments;
-      let argString = '';
-      if (rawArgs) {
-        if (typeof rawArgs === 'string') {
-          argString = rawArgs;
-        } else {
-          argString = JSON.stringify(rawArgs);
-        }
-      }
-
-      let detail = argString;
-      try {
-        const parsed = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs;
-        if (toolName === 'read_file' || toolName === 'view_file') {
-          detail = parsed.AbsolutePath || parsed.path || parsed.TargetFile || argString;
-        } else if (toolName === 'list_dir') {
-          detail = parsed.DirectoryPath || argString;
-        } else if (toolName === 'glob') {
-          detail = parsed.pattern || parsed.Pattern || argString;
-        } else if (toolName === 'grep_search') {
-          detail = `搜索 "${parsed.Query || ''}"`;
-        } else if (toolName === 'write_to_file' || toolName === 'replace_file_content' || toolName === 'multi_replace_file_content') {
-          detail = parsed.TargetFile || argString;
-        } else if (toolName === 'run_command') {
-          detail = parsed.CommandLine || argString;
-        } else if (toolName === 'web_search') {
-          detail = parsed.query || argString;
-        } else if (toolName === 'web_fetch' || toolName === 'read_url_content') {
-          detail = parsed.url || parsed.Url || argString;
-        } else if (toolName === 'generate_image') {
-          detail = `生成 "${parsed.ImageName || ''}"`;
-        } else if (toolName === 'schedule') {
-          detail = parsed.Prompt || argString;
-        } else if (toolName === 'invoke_subagent') {
-          const sub = parsed.Subagents?.[0];
-          detail = sub ? `启动子智能体: ${sub.Role || sub.TypeName}` : argString;
-        } else if (toolName === 'send_message') {
-          detail = `发送消息至 ${parsed.Recipient || ''}`;
-        } else if (toolName === 'browser_subagent') {
-          detail = parsed.TaskName || parsed.Task || argString;
-        }
-      } catch {
-        // ignore
-      }
+    if (evt.type === 'TOOL_STARTED' || evt.type === 'TOOL_CALL_REQUESTED') {
+      const rawArgs = meta.arguments ?? meta.args ?? meta.input ?? meta.parameters;
+      const detail = summarizeStepDetail(toolName, rawArgs, meta, evt.content);
 
       if (!stepsMap[toolCallId]) {
         orderedIds.push(toolCallId);
@@ -94,58 +190,73 @@ const parseExecutionSteps = (events: DeerFlowEvent[]): ExecutionStep[] => {
         id: toolCallId,
         type: toolName,
         name: toolName,
-        detail: detail,
-        status: 'running',
+        detail,
+        status: meta.denied ? 'denied' : 'running',
       };
     } else if (evt.type === 'TOOL_COMPLETED') {
       const step = stepsMap[toolCallId];
       if (step) {
-        step.status = 'completed';
+        step.status = (meta.status === 'FAILED' || meta.error) ? 'failed' : 'completed';
         step.durationMs = Number(meta.durationMs) || undefined;
+        if (!step.detail || step.detail === '执行工具调用') {
+          step.detail = summarizeStepDetail(step.type || toolName, meta.arguments, meta, evt.content);
+        }
       }
     } else if (evt.type === 'TOOL_DENIED') {
       const step = stepsMap[toolCallId];
       if (step) {
         step.status = 'denied';
-        step.detail = `${step.detail} (Blocked: ${meta.deniedReason || ''})`;
+        const reason = firstText(meta, ['deniedReason', 'reason', 'error']);
+        step.detail = reason ? `${step.detail}；已阻止：${reason}` : step.detail;
       }
     }
   });
 
   return orderedIds.map((id) => stepsMap[id]);
 };
+const stepIconStyle = { marginRight: 0, verticalAlign: 'middle' };
 
 const getStepIcon = (type: string) => {
   switch (type) {
     case 'read_file':
     case 'view_file':
-      return <BookOpen size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--amber)' }} />;
+    case 'read_uploaded_file':
+      return <BookOpen size={14} style={{ ...stepIconStyle, color: 'var(--amber)' }} />;
     case 'list_dir':
+    case 'ls':
+    case 'list_uploaded_files':
     case 'glob':
-      return <FolderOpen size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--amber)' }} />;
+      return <FolderOpen size={14} style={{ ...stepIconStyle, color: 'var(--amber)' }} />;
+    case 'grep':
     case 'grep_search':
     case 'web_search':
-      return <Search size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--blue)' }} />;
+    case 'image_search':
+      return <Search size={14} style={{ ...stepIconStyle, color: 'var(--blue)' }} />;
     case 'web_fetch':
     case 'read_url_content':
     case 'browser_subagent':
-      return <Globe size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--green)' }} />;
+      return <Globe size={14} style={{ ...stepIconStyle, color: 'var(--green)' }} />;
     case 'run_script':
     case 'run_command':
-      return <Terminal size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--purple)' }} />;
+    case 'bash':
+      return <Terminal size={14} style={{ ...stepIconStyle, color: 'var(--purple)' }} />;
+    case 'write_file':
     case 'write_to_file':
+    case 'write_todos':
+    case 'str_replace':
     case 'replace_file_content':
     case 'multi_replace_file_content':
-      return <FileCode size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--purple)' }} />;
+      return <FileCode size={14} style={{ ...stepIconStyle, color: 'var(--purple)' }} />;
     case 'generate_image':
-      return <Image size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--pink)' }} />;
+      return <Image size={14} style={{ ...stepIconStyle, color: 'var(--pink)' }} />;
     case 'schedule':
-      return <Clock size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--blue)' }} />;
+      return <Clock size={14} style={{ ...stepIconStyle, color: 'var(--blue)' }} />;
+    case 'task':
     case 'invoke_subagent':
     case 'send_message':
-      return <Users size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--orange)' }} />;
+      return <Users size={14} style={{ ...stepIconStyle, color: 'var(--orange)' }} />;
     default:
-      return <Terminal size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--gray)' }} />;
+      return <Terminal size={14} style={{ ...stepIconStyle, color: 'var(--gray)' }} />;
   }
 };
 
@@ -153,43 +264,56 @@ const getStepName = (type: string) => {
   switch (type) {
     case 'read_file':
     case 'view_file':
+    case 'read_uploaded_file':
       return '读取文件';
+    case 'list_uploaded_files':
+      return '查看上传文件';
+    case 'ls':
     case 'list_dir':
       return '查看目录列表';
     case 'glob':
       return '检索文件通配符';
+    case 'grep':
     case 'grep_search':
-      return '代码库全局搜索';
+      return '搜索文件内容';
+    case 'write_todos':
+      return '更新 Todo';
+    case 'write_file':
     case 'write_to_file':
-      return '新建写入文件';
+      return '写入文件';
+    case 'str_replace':
     case 'replace_file_content':
     case 'multi_replace_file_content':
-      return '编辑修改文件';
+      return '修改文件';
+    case 'bash':
     case 'run_command':
       return '执行终端命令';
+    case 'run_script':
+      return '运行脚本';
     case 'web_search':
       return '进行网络检索';
     case 'web_fetch':
     case 'read_url_content':
       return '提取网页内容';
-    case 'run_script':
-      return '运行脚本';
+    case 'image_search':
+      return '搜索图片';
     case 'generate_image':
-      return '大模型生成配图';
+      return '生成图片';
     case 'schedule':
-      return '设置定时调度任务';
+      return '设置定时任务';
+    case 'task':
     case 'invoke_subagent':
-      return '委派子智能体处理';
+      return '委派子任务';
     case 'send_message':
-      return '与子智能体通信';
+      return '发送消息';
     case 'browser_subagent':
-      return '启动浏览器自动化';
+      return '浏览器自动化';
+    case 'ask_clarification':
+      return '请求澄清';
     default:
       return type || '执行步骤';
   }
 };
-
-
 
 export default function AnswerWorkspace({
   phase,
@@ -233,6 +357,9 @@ export default function AnswerWorkspace({
 
   useEffect(() => {
     wasRunning.current = false;
+    fetchedThreadId.current = null;
+    setRecommendations([]);
+    setLoadingRecommendations(false);
   }, [threadId]);
 
   useEffect(() => {
@@ -246,28 +373,33 @@ export default function AnswerWorkspace({
       if (!wasRunning.current) {
         return;
       }
-      if (fetchedThreadId.current === threadId && recommendations.length > 0) {
+      if (fetchedThreadId.current === threadId) {
         return;
       }
-      setLoadingRecommendations(true);
-      fetchedThreadId.current = threadId;
 
-      fetch(`/api/deerflow/threads/${threadId}/recommend-questions`, {
+      const requestedThreadId = threadId;
+      setLoadingRecommendations(true);
+      fetchedThreadId.current = requestedThreadId;
+
+      fetch(`/api/deerflow/threads/${encodeURIComponent(requestedThreadId)}/recommend-questions`, {
         method: 'POST',
       })
         .then((res) => res.json())
         .then((data) => {
-          if (Array.isArray(data)) {
-            setRecommendations(data);
-          } else {
+          if (fetchedThreadId.current !== requestedThreadId) {
+            return;
+          }
+          setRecommendations(Array.isArray(data) ? data : []);
+        })
+        .catch(() => {
+          if (fetchedThreadId.current === requestedThreadId) {
             setRecommendations([]);
           }
         })
-        .catch(() => {
-          setRecommendations([]);
-        })
         .finally(() => {
-          setLoadingRecommendations(false);
+          if (fetchedThreadId.current === requestedThreadId) {
+            setLoadingRecommendations(false);
+          }
         });
     } else {
       if (status === 'running') {
@@ -510,11 +642,13 @@ export default function AnswerWorkspace({
                           {parseExecutionSteps(events).map((step) => (
                             <div className="step-item" key={step.id}>
                               <span className="step-item-left">
-                                {getStepIcon(step.type)}
-                                <span style={{ fontWeight: 500 }}>{getStepName(step.type)}</span>
-                                <span style={{ color: 'var(--text-muted)', marginLeft: '4px', fontSize: '11.5px' }}>
-                                  {step.detail}
+                                <span className="step-item-title">
+                                  {getStepIcon(step.type)}
+                                  <span>{getStepName(step.type)}</span>
                                 </span>
+                                {step.detail && (
+                                  <span className="step-item-detail">{step.detail}</span>
+                                )}
                               </span>
                               {step.status === 'running' ? (
                                 <Loader2 className="animate-spin" size={12} style={{ color: 'var(--blue)' }} />
