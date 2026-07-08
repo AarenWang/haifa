@@ -114,6 +114,11 @@ public class SummarizationMiddleware implements AgentMiddleware {
 
             return compressHistory(threadId, runId, partition2.toSummarize(), config)
                     .flatMap(summaryRecord -> {
+                        boolean isGraphEnabled = properties.getGraph() != null && properties.getGraph().isEnabled();
+                        if (isGraphEnabled) {
+                            return next.next(context);
+                        }
+
                         List<MessageRecord> newActive = new ArrayList<>();
                         newActive.add(summaryRecord);
                         newActive.addAll(partition2.toKeep());
@@ -121,6 +126,11 @@ public class SummarizationMiddleware implements AgentMiddleware {
                         String historyBlock = buildHistoryBlock(newActive);
                         return next.next(context).map(prompt -> prependHistory(prompt, historyBlock));
                     });
+        }
+
+        boolean isGraphEnabled = properties.getGraph() != null && properties.getGraph().isEnabled();
+        if (isGraphEnabled) {
+            return next.next(context);
         }
 
         String historyBlock = buildHistoryBlock(activeMessages);

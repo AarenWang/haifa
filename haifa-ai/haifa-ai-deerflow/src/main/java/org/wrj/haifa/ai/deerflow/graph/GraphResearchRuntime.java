@@ -78,11 +78,15 @@ public class GraphResearchRuntime {
         this.reportNode = reportNode;
     }
 
+    @Autowired
+    private GraphExecutionManager graphExecutionManager;
+
     public Flux<AgentEvent> run(GraphResearchRuntimeRequest request) {
         Sinks.Many<AgentEvent> eventSink = Sinks.many().unicast().onBackpressureBuffer();
         String runId = request.runConfig().runId();
         GraphEventRegistry.register(runId, eventSink, request.eventSequence());
 
+        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         CompletableFuture.runAsync(() -> {
             try {
                 Map<String, Object> initialState = new HashMap<>(stateFactory.create(
@@ -110,6 +114,8 @@ public class GraphResearchRuntime {
                 RunnableConfig runnableConfig = RunnableConfig.builder()
                         .threadId(request.runConfig().threadId())
                         .build();
+                runnableConfig.context().put("runId", runId);
+                runnableConfig.context().put("graphName", GRAPH_NAME);
 
                 Optional<Checkpoint> resumeCheckpoint = Optional.empty();
                 if (saver != null) {
@@ -123,6 +129,8 @@ public class GraphResearchRuntime {
                                 .nextNode(checkpoint.getNextNodeId())
                                 .build())
                         .orElse(runnableConfig);
+                executionConfig.context().put("runId", runId);
+                executionConfig.context().put("graphName", GRAPH_NAME);
 
                 var streamResult = resumeCheckpoint.isPresent()
                         ? graph.stream(Map.of(
@@ -143,7 +151,7 @@ public class GraphResearchRuntime {
             finally {
                 GraphEventRegistry.deregister(runId);
             }
-        });
+        }, executor);
 
         return eventSink.asFlux();
     }

@@ -49,13 +49,15 @@ public class GraphChatRuntime {
     private final ChatParseModelOutputNode parseModelOutputNode;
     private final ChatExecuteToolsNode executeToolsNode;
     private final ChatFinalizeNode finalizeNode;
+    private final ApprovalGateNode approvalGateNode;
+    private final ClarificationGateNode clarificationGateNode;
 
     public GraphChatRuntime() {
-        this(new DeerFlowProperties(), null, new AgentGraphStateFactory(), null, null, null, null, null, null, null);
+        this(new DeerFlowProperties(), null, new AgentGraphStateFactory(), null, null, null, null, null, null, null, null, null);
     }
 
     public GraphChatRuntime(DeerFlowProperties properties, GraphCheckpointRecorder checkpointRecorder) {
-        this(properties, checkpointRecorder, new AgentGraphStateFactory(), null, null, null, null, null, null, null);
+        this(properties, checkpointRecorder, new AgentGraphStateFactory(), null, null, null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -68,7 +70,9 @@ public class GraphChatRuntime {
                             ChatCallModelNode callModelNode,
                             ChatParseModelOutputNode parseModelOutputNode,
                             ChatExecuteToolsNode executeToolsNode,
-                            ChatFinalizeNode finalizeNode) {
+                            ChatFinalizeNode finalizeNode,
+                            ApprovalGateNode approvalGateNode,
+                            ClarificationGateNode clarificationGateNode) {
         this.properties = properties == null ? new DeerFlowProperties() : properties;
         this.checkpointRecorder = checkpointRecorder;
         this.stateFactory = stateFactory == null ? new AgentGraphStateFactory() : stateFactory;
@@ -79,13 +83,19 @@ public class GraphChatRuntime {
         this.parseModelOutputNode = parseModelOutputNode;
         this.executeToolsNode = executeToolsNode;
         this.finalizeNode = finalizeNode;
+        this.approvalGateNode = approvalGateNode;
+        this.clarificationGateNode = clarificationGateNode;
     }
+
+    @Autowired
+    private GraphExecutionManager graphExecutionManager;
 
     public Flux<AgentEvent> run(GraphChatRuntimeRequest request) {
         Sinks.Many<AgentEvent> eventSink = Sinks.many().unicast().onBackpressureBuffer();
         String runId = request.runConfig().runId();
         GraphEventRegistry.register(runId, eventSink, request.eventSequence());
 
+        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         CompletableFuture.runAsync(() -> {
             try {
                 Map<String, Object> initialState = new HashMap<>(stateFactory.create(
@@ -109,6 +119,8 @@ public class GraphChatRuntime {
                 RunnableConfig runnableConfig = RunnableConfig.builder()
                         .threadId(request.runConfig().threadId())
                         .build();
+                runnableConfig.context().put("runId", runId);
+                runnableConfig.context().put("graphName", GRAPH_NAME);
 
                 boolean isResume = false;
                 if (saver != null) {
@@ -133,10 +145,13 @@ public class GraphChatRuntime {
             finally {
                 GraphEventRegistry.deregister(runId);
             }
-        });
+        }, executor);
 
         return eventSink.asFlux();
     }
+
+    private static final String APPROVAL_GATE = "approval_gate";
+    private static final String CLARIFICATION_GATE = "clarification_gate";
 
     private StateGraph chatGraph(int maxSteps) throws Exception {
         StateGraph graph = new StateGraph(GRAPH_NAME, AgentGraphStateStrategies.keyStrategyFactory());
@@ -146,6 +161,8 @@ public class GraphChatRuntime {
         graph.addNode(PARSE_MODEL_OUTPUT, parseModelOutputNode);
         graph.addNode(EXECUTE_TOOLS, executeToolsNode);
         graph.addNode(FINALIZE, finalizeNode);
+        graph.addNode(APPROVAL_GATE, approvalGateNode);
+        graph.addNode(CLARIFICATION_GATE, clarificationGateNode);
 
         graph.addEdge(StateGraph.START, LOAD_CONTEXT)
                 .addEdge(LOAD_CONTEXT, APPLY_PROMPT_MIDDLEWARES)
@@ -158,11 +175,31 @@ public class GraphChatRuntime {
             if (pending == null || pending.isEmpty() || steps >= maxSteps) {
                 return CompletableFuture.completedFuture(FINALIZE);
             } else {
+                return CompletableFuture.completedFuture(APPROVAL_GATE);
+            }
+        }, Map.of(FINALIZE, FINALIZE, APPROVAL_GATE, APPROVAL_GATE));
+
+        graph.addConditionalEdges(APPROVAL_GATE, state -> {
+            String status = (String) state.data().get("approval_gate_status");
+            if ("SUSPEND".equals(status)) {
+                return CompletableFuture.completedFuture(StateGraph.END);
+            } else if ("DENIED".equals(status)) {
+                return CompletableFuture.completedFuture(CALL_MODEL);
+            } else {
                 return CompletableFuture.completedFuture(EXECUTE_TOOLS);
             }
-        }, Map.of(FINALIZE, FINALIZE, EXECUTE_TOOLS, EXECUTE_TOOLS));
+        }, Map.of(StateGraph.END, StateGraph.END, CALL_MODEL, CALL_MODEL, EXECUTE_TOOLS, EXECUTE_TOOLS));
 
-        graph.addEdge(EXECUTE_TOOLS, CALL_MODEL);
+        graph.addConditionalEdges(EXECUTE_TOOLS, state -> {
+            Map<String, Object> clarMeta = (Map<String, Object>) state.data().get("clarification_metadata");
+            if (clarMeta != null && !clarMeta.isEmpty()) {
+                return CompletableFuture.completedFuture(CLARIFICATION_GATE);
+            } else {
+                return CompletableFuture.completedFuture(CALL_MODEL);
+            }
+        }, Map.of(CLARIFICATION_GATE, CLARIFICATION_GATE, CALL_MODEL, CALL_MODEL));
+
+        graph.addEdge(CLARIFICATION_GATE, StateGraph.END);
         graph.addEdge(FINALIZE, StateGraph.END);
 
         return graph;

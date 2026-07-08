@@ -7,6 +7,8 @@ import com.alibaba.cloud.ai.graph.checkpoint.Checkpoint;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentGraphCheckpointStore;
+import org.wrj.haifa.ai.deerflow.persistence.entity.AgentGraphCheckpointExternalRefEntity;
+import org.wrj.haifa.ai.deerflow.persistence.repository.AgentGraphCheckpointExternalRefRepository;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
 
@@ -23,6 +25,9 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
 
     private final AgentGraphCheckpointStore store;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AgentGraphCheckpointExternalRefRepository externalRefRepository;
+
     public SQLiteCheckpointSaver(AgentGraphCheckpointStore store) {
         this.store = store;
     }
@@ -33,7 +38,22 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
             return Optional.empty();
         }
         String threadId = config.threadId().orElse("");
-        List<AgentGraphCheckpointRecord> records = store.findByThreadId(threadId);
+        String runId = (String) config.context().get("runId");
+        String graphName = (String) config.context().get("graphName");
+
+        List<AgentGraphCheckpointRecord> records;
+        if (runId != null && !runId.isBlank()) {
+            records = store.findByRunId(runId);
+        } else {
+            records = store.findByThreadId(threadId);
+        }
+
+        if (graphName != null && !graphName.isBlank()) {
+            records = records.stream()
+                    .filter(r -> graphName.equals(r.graphName()))
+                    .toList();
+        }
+
         if (records.isEmpty()) {
             return Optional.empty();
         }
@@ -62,6 +82,9 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
         String graphName = graphName(view.mode());
         String nextNodeId = normalizeNextNodeId(checkpoint.getNextNodeId());
 
+        // Externalize large strings in the state map copy
+        Map<String, Object> externalizedState = externalizeState(checkpoint.getState());
+
         AgentGraphCheckpointRecord record = new AgentGraphCheckpointRecord(
                 UUID.randomUUID().toString(),
                 checkpoint.getId(),
@@ -71,7 +94,7 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
                 checkpoint.getNodeId(),
                 nextNodeId,
                 summarize(checkpoint.getState(), graphName, checkpoint.getNodeId(), nextNodeId),
-                checkpoint.getState(),
+                externalizedState,
                 Instant.now()
         );
         store.saveAll(List.of(record));
@@ -84,7 +107,21 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
             return List.of();
         }
         String threadId = config.threadId().orElse("");
-        List<AgentGraphCheckpointRecord> records = store.findByThreadId(threadId);
+        String runId = (String) config.context().get("runId");
+        String graphName = (String) config.context().get("graphName");
+
+        List<AgentGraphCheckpointRecord> records;
+        if (runId != null && !runId.isBlank()) {
+            records = store.findByRunId(runId);
+        } else {
+            records = store.findByThreadId(threadId);
+        }
+
+        if (graphName != null && !graphName.isBlank()) {
+            records = records.stream()
+                    .filter(r -> graphName.equals(r.graphName()))
+                    .toList();
+        }
         return records.stream().map(this::toCheckpoint).toList();
     }
 
@@ -94,11 +131,12 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
     }
 
     private Checkpoint toCheckpoint(AgentGraphCheckpointRecord record) {
+        Map<String, Object> restoredState = restoreState(record.fullState());
         return Checkpoint.builder()
                 .id(record.checkpointId())
                 .nodeId(record.nodeId())
                 .nextNodeId(record.nextNodeId())
-                .state(record.fullState() == null ? Map.of() : record.fullState())
+                .state(restoredState == null ? Map.of() : restoredState)
                 .build();
     }
 
@@ -163,5 +201,66 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
             return Boolean.parseBoolean(text);
         }
         return false;
+    }
+
+    private Map<String, Object> externalizeState(Map<String, Object> state) {
+        if (state == null) return Map.of();
+        return (Map<String, Object>) walkAndExternalize(state);
+    }
+
+    private Object walkAndExternalize(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry.getKey() instanceof String key) {
+                    copy.put(key, walkAndExternalize(entry.getValue()));
+                }
+            }
+            return copy;
+        } else if (value instanceof List<?> list) {
+            List<Object> copy = new java.util.ArrayList<>();
+            for (Object item : list) {
+                copy.add(walkAndExternalize(item));
+            }
+            return copy;
+        } else if (value instanceof String text) {
+            if (text.length() > 5000 && !text.startsWith("[EXTERNAL_REF:") && this.externalRefRepository != null) {
+                String uuid = UUID.randomUUID().toString();
+                this.externalRefRepository.save(new AgentGraphCheckpointExternalRefEntity(uuid, text, Instant.now()));
+                return "[EXTERNAL_REF:" + uuid + "]";
+            }
+        }
+        return value;
+    }
+
+    private Map<String, Object> restoreState(Map<String, Object> state) {
+        if (state == null) return Map.of();
+        return (Map<String, Object>) walkAndRestore(state);
+    }
+
+    private Object walkAndRestore(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry.getKey() instanceof String key) {
+                    copy.put(key, walkAndRestore(entry.getValue()));
+                }
+            }
+            return copy;
+        } else if (value instanceof List<?> list) {
+            List<Object> copy = new java.util.ArrayList<>();
+            for (Object item : list) {
+                copy.add(walkAndRestore(item));
+            }
+            return copy;
+        } else if (value instanceof String text) {
+            if (text.startsWith("[EXTERNAL_REF:") && text.endsWith("]") && this.externalRefRepository != null) {
+                String uuid = text.substring("[EXTERNAL_REF:".length(), text.length() - 1);
+                return this.externalRefRepository.findById(uuid)
+                        .map(AgentGraphCheckpointExternalRefEntity::getContent)
+                        .orElse(text);
+            }
+        }
+        return value;
     }
 }

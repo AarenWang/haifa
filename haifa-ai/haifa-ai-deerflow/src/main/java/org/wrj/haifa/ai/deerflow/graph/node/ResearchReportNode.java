@@ -2,13 +2,17 @@ package org.wrj.haifa.ai.deerflow.graph.node;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
 import org.wrj.haifa.ai.deerflow.artifact.ReportWriteResult;
 import org.wrj.haifa.ai.deerflow.artifact.ReportWriterService;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
+import org.wrj.haifa.ai.deerflow.graph.GraphLifecycleService;
+import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
@@ -33,19 +37,38 @@ public class ResearchReportNode implements AsyncNodeAction {
     private final AgentModelClient modelClient;
     private final ResearchPlanStore planStore;
     private final ResearchRuntimeSupport researchRuntimeSupport;
+    private final GraphLifecycleService graphLifecycleService;
+    private final DeerFlowProperties properties;
 
     public ResearchReportNode(ReportWriterService reportWriterService,
                               AgentModelClient modelClient,
                               ResearchPlanStore planStore,
-                              ResearchRuntimeSupport researchRuntimeSupport) {
+                              ResearchRuntimeSupport researchRuntimeSupport,
+                              GraphLifecycleService graphLifecycleService) {
+        this(reportWriterService, modelClient, planStore, researchRuntimeSupport, graphLifecycleService, null);
+    }
+
+    @Autowired
+    public ResearchReportNode(ReportWriterService reportWriterService,
+                              AgentModelClient modelClient,
+                              ResearchPlanStore planStore,
+                              ResearchRuntimeSupport researchRuntimeSupport,
+                              GraphLifecycleService graphLifecycleService,
+                              DeerFlowProperties properties) {
         this.reportWriterService = reportWriterService;
         this.modelClient = modelClient;
         this.planStore = planStore;
         this.researchRuntimeSupport = researchRuntimeSupport;
+        this.graphLifecycleService = graphLifecycleService;
+        this.properties = properties == null ? new DeerFlowProperties() : properties;
     }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private GraphExecutionManager graphExecutionManager;
 
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
+        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
@@ -83,7 +106,8 @@ public class ResearchReportNode implements AsyncNodeAction {
                     synthesisPrompt,
                     state.<String>value(AgentGraphStateKeys.MODEL_NAME).orElse(null)
             );
-            ModelResponse modelResponse = modelClient.generate(modelPrompt).block();
+            ModelResponse modelResponse = modelClient.generate(modelPrompt)
+                    .block(java.time.Duration.ofMillis(properties.getModelTimeout()));
             String synthesisResult = modelResponse != null ? modelResponse.content() : "No synthesis generated.";
 
             ReportWriteResult result = reportWriterService.writeReport(
@@ -113,6 +137,9 @@ public class ResearchReportNode implements AsyncNodeAction {
                            "filename", result.artifact().filename())
             ));
 
+            // Complete research lifecycle side effects using GraphLifecycleService
+            graphLifecycleService.completeResearch(runId, threadId, result, sources.size());
+
             Map<String, Object> update = new HashMap<>();
             update.put(AgentGraphStateKeys.FINAL_ANSWER, synthesisResult);
             update.put(AgentGraphStateKeys.ARTIFACTS, List.of(Map.of(
@@ -124,7 +151,7 @@ public class ResearchReportNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, evidenceItems.size());
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "write_report", "status", "completed")));
             return update;
-        });
+        }, executor);
     }
 
     private String buildSynthesisPrompt(String topic, List<ResearchSource> sources, List<EvidenceItem> evidenceItems) {

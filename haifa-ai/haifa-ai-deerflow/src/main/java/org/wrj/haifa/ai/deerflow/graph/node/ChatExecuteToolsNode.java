@@ -8,6 +8,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
+import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
 import org.wrj.haifa.ai.deerflow.agent.loop.ToolCall;
@@ -52,8 +53,12 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
         this.toolPolicyService = toolPolicyService;
     }
 
+    @Autowired
+    private GraphExecutionManager graphExecutionManager;
+
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
+        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
@@ -146,13 +151,27 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                 toolResultsList.add(resMap);
             }
 
+            Map<String, Object> clarificationMeta = null;
+            for (var res : toolResultsList) {
+                Map<String, Object> meta = (Map<String, Object>) res.get("metadata");
+                if (meta != null && Boolean.TRUE.equals(meta.get("clarificationRequired"))) {
+                    clarificationMeta = meta;
+                    break;
+                }
+            }
+
             Map<String, Object> update = new HashMap<>();
             update.put(AgentGraphStateKeys.MESSAGE_WINDOW, toolMessages);
             update.put(AgentGraphStateKeys.TOOL_RESULTS, toolResultsList);
             update.put(AgentGraphStateKeys.PENDING_TOOL_CALLS, List.of());
+            if (clarificationMeta != null) {
+                update.put("clarification_metadata", clarificationMeta);
+            } else {
+                update.put("clarification_metadata", Map.of());
+            }
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "execute_tools", "status", "completed")));
             return update;
-        });
+        }, executor);
     }
 
     private ToolExecution executeTool(AgentTool tool, String toolName, String arguments, String callId,

@@ -3,6 +3,7 @@ package org.wrj.haifa.ai.deerflow.graph.node;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
 import org.springframework.stereotype.Component;
+import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
@@ -26,8 +27,12 @@ public class ChatLoadContextNode implements AsyncNodeAction {
         this.messageStore = messageStore;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private GraphExecutionManager graphExecutionManager;
+
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
+        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
             List<MessageRecord> messages = messageStore.listByThread(threadId);
@@ -47,7 +52,7 @@ public class ChatLoadContextNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.MESSAGE_WINDOW, messageRefs);
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "load_context", "status", "completed")));
             return update;
-        });
+        }, executor);
     }
 
     private Map<String, Object> messageRef(MessageRecord message) {

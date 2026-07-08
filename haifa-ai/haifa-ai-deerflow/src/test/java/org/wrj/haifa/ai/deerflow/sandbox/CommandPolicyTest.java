@@ -40,6 +40,16 @@ class CommandPolicyTest {
     }
 
     @Test
+    void allowsAllCommandsWhenAllowListIsEmpty() {
+        DeerFlowProperties props = new DeerFlowProperties();
+        props.getSandbox().setAllowedCommands("");
+        CommandPolicy policy = new CommandPolicy(props);
+
+        assertThat(policy.evaluate("curl https://example.com", Path.of(".")).allowed()).isTrue();
+        assertThat(policy.evaluate("uname -a", Path.of(".")).allowed()).isTrue();
+    }
+
+    @Test
     void rejectsShellControlOperatorsOutsideQuotes() {
         CommandPolicy policy = new CommandPolicy(new DeerFlowProperties());
 

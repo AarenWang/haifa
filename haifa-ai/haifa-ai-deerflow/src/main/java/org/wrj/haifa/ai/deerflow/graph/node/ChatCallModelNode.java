@@ -8,6 +8,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
+import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
@@ -52,8 +53,12 @@ public class ChatCallModelNode implements AsyncNodeAction {
         this.promptAssembler = new PromptAssembler();
     }
 
+    @Autowired
+    private GraphExecutionManager graphExecutionManager;
+
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
+        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
@@ -151,7 +156,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
                         }
                     })
                     .then()
-                    .block();
+                    .block(java.time.Duration.ofMillis(properties.getModelTimeout()));
 
             long duration = System.currentTimeMillis() - startTime;
             String responseContent = fullContent.toString();
@@ -196,7 +201,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.PENDING_TOOL_CALLS, structuredToolCalls);
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "call_model", "status", "completed")));
             return update;
-        });
+        }, executor);
     }
 
     private static ModelMessage toModelMessage(Map<String, Object> map) {
@@ -211,6 +216,18 @@ public class ChatCallModelNode implements AsyncNodeAction {
         String toolCallId = stringValue(map.get("toolCallId"));
         String name = stringValue(map.get("name"));
         Map<String, Object> metadata = readMetadata(map.get("metadata"));
+        if (toolCallId.isBlank()) {
+            toolCallId = stringValue(metadata.get("toolCallId"));
+        }
+        if (toolCallId.isBlank()) {
+            toolCallId = stringValue(metadata.get("tool_call_id"));
+        }
+        if (name.isBlank()) {
+            name = stringValue(metadata.get("name"));
+        }
+        if (name.isBlank()) {
+            name = stringValue(metadata.get("toolName"));
+        }
         List<ModelToolCall> toolCalls = readToolCalls(map.get("toolCalls"));
         if (toolCalls.isEmpty()) {
             toolCalls = readToolCalls(metadata.get("tool_calls"));

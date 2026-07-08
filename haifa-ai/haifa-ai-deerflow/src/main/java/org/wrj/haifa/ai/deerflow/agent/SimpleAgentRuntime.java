@@ -416,6 +416,23 @@ public class SimpleAgentRuntime implements AgentRuntime {
                         });
 
                 if (request.isResearchMode()) {
+                    if (activeResearchGraph) {
+                        return wrappedLoopEvents
+                                .onErrorResume(ex -> {
+                                    String errorMessage = describeException(ex);
+                                    long totalDuration = System.currentTimeMillis() - runStartTime;
+                                    log.error("Research graph run failed. runId={}, totalDurationMs={}", run.runId(), totalDuration, ex);
+                                    this.runManager.markFailed(run.runId(), errorMessage);
+                                    this.threadManager.touch(threadId);
+                                    this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
+                                            Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "mode", "research"));
+                                    return Flux.fromIterable(List.of(
+                                            event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
+                                                    Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))
+                                    ));
+                                });
+                    }
+
                     final AtomicReference<String> lastModelContent = new AtomicReference<>("");
                     final AtomicReference<Map<String, Object>> lastModelMetadata = new AtomicReference<>(Map.of());
                     Flux<AgentEvent> mappedLoopEvents = wrappedLoopEvents.map(evt -> {
@@ -469,6 +486,24 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 this.threadManager.touch(threadId);
                                 this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
                                         Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "mode", "research"));
+                                return Flux.fromIterable(List.of(
+                                        event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
+                                                Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))
+                                ));
+                            });
+                }
+
+                if (activeChatGraph) {
+                    return wrappedLoopEvents
+                            .onErrorResume(ex -> {
+                                String errorMessage = describeException(ex);
+                                long totalDuration = System.currentTimeMillis() - runStartTime;
+                                log.error("Chat graph run failed during model generation. runId={}, threadId={}, model={}, totalDurationMs={}",
+                                        run.runId(), threadId, nullToEmpty(modelName), totalDuration, ex);
+                                this.runManager.markFailed(run.runId(), errorMessage);
+                                this.threadManager.touch(threadId);
+                                this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
+                                        Map.of("status", "FAILED", "errorType", ex.getClass().getName()));
                                 return Flux.fromIterable(List.of(
                                         event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
                                                 Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))

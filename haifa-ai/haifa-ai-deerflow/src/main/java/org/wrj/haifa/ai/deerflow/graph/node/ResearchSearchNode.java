@@ -8,6 +8,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
+import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.provider.WebSearchProvider;
 import org.wrj.haifa.ai.deerflow.provider.WebSearchProviderRegistry;
@@ -44,8 +45,12 @@ public class ResearchSearchNode implements AsyncNodeAction {
         this.researchRuntimeSupport = researchRuntimeSupport;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private GraphExecutionManager graphExecutionManager;
+
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
+        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
@@ -117,6 +122,6 @@ public class ResearchSearchNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, researchRuntimeSupport.listEvidenceByRun(runId).size());
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "search_sources", "status", "completed")));
             return update;
-        });
+        }, executor);
     }
 }

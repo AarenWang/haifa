@@ -27,7 +27,10 @@ public class AliyunFetchProvider implements WebFetchProvider {
     private final RestClient restClient;
 
     public AliyunFetchProvider() {
-        this.restClient = RestClient.builder().build();
+        org.springframework.http.client.SimpleClientHttpRequestFactory requestFactory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(10000);
+        requestFactory.setReadTimeout(30000);
+        this.restClient = RestClient.builder().requestFactory(requestFactory).build();
     }
 
     @Override

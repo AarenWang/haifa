@@ -7,6 +7,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
+import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.research.plan.PlanGenerationResult;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan;
@@ -30,8 +31,12 @@ public class ResearchPlanningNode implements AsyncNodeAction {
         this.planStore = planStore;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private GraphExecutionManager graphExecutionManager;
+
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
+        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
@@ -85,6 +90,6 @@ public class ResearchPlanningNode implements AsyncNodeAction {
                 update.put(AgentGraphStateKeys.ERRORS, List.of("Planning failed: " + result.error()));
                 return update;
             }
-        });
+        }, executor);
     }
 }

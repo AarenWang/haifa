@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
+import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.research.EvidenceItem;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
@@ -30,8 +31,12 @@ public class EvidenceExtractionNode implements AsyncNodeAction {
         this.progressTracker = progressTracker;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private GraphExecutionManager graphExecutionManager;
+
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
+        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
@@ -68,6 +73,6 @@ public class EvidenceExtractionNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, evidenceItems.size());
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "extract_evidence", "status", "completed")));
             return update;
-        });
+        }, executor);
     }
 }

@@ -53,12 +53,15 @@ public class CommandPolicy {
         if (executable.isBlank()) {
             return Decision.deny("command executable is required");
         }
-        Set<String> allowed = new java.util.HashSet<>(splitCsv(sandbox.getAllowedCommands()));
-        if (properties.isRunScriptEnabled()) {
-            allowed.addAll(splitCsv(sandbox.getAllowedScriptLanguages()));
-        }
-        if (!allowed.isEmpty() && !allowed.contains(normalizeExecutable(executable))) {
-            return Decision.deny("command is not in allowed command list: " + executable);
+        Set<String> configuredAllowed = splitCsv(sandbox.getAllowedCommands());
+        if (!configuredAllowed.isEmpty()) {
+            Set<String> allowed = new java.util.HashSet<>(configuredAllowed);
+            if (properties.isRunScriptEnabled()) {
+                allowed.addAll(splitCsv(sandbox.getAllowedScriptLanguages()));
+            }
+            if (!allowed.contains(normalizeExecutable(executable))) {
+                return Decision.deny("command is not in allowed command list: " + executable);
+            }
         }
         return Decision.allow();
     }

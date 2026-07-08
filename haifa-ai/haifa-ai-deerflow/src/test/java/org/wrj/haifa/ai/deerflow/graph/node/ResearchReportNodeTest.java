@@ -13,7 +13,7 @@ class ResearchReportNodeTest {
 
     @Test
     void reusesExistingArtifactWithoutAppendingItAgain() {
-        ResearchReportNode node = new ResearchReportNode(null, null, null, null);
+        ResearchReportNode node = new ResearchReportNode(null, null, null, null, null);
 
         Map<String, Object> update = node.apply(new OverAllState(Map.of(
                 AgentGraphStateKeys.RUN_ID, "run-1",

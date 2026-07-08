@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
+import org.wrj.haifa.ai.deerflow.graph.GraphLifecycleService;
+import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.thread.MessageRole;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
@@ -19,14 +21,18 @@ import java.util.concurrent.CompletableFuture;
 @Component
 public class ChatFinalizeNode implements AsyncNodeAction {
 
-    private final MessageStore messageStore;
+    private final GraphLifecycleService graphLifecycleService;
 
-    public ChatFinalizeNode(MessageStore messageStore) {
-        this.messageStore = messageStore;
+    public ChatFinalizeNode(GraphLifecycleService graphLifecycleService) {
+        this.graphLifecycleService = graphLifecycleService;
     }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private GraphExecutionManager graphExecutionManager;
 
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
+        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
@@ -35,7 +41,7 @@ public class ChatFinalizeNode implements AsyncNodeAction {
 
             String finalAnswer = content == null ? "" : content.trim();
 
-            messageStore.add(threadId, runId, MessageRole.ASSISTANT, finalAnswer, Map.of());
+            graphLifecycleService.completeChat(runId, threadId, finalAnswer, stepNum, 0);
 
             GraphEventRegistry.publish(runId, AgentEvent.of(
                     UUID.randomUUID().toString(),
@@ -50,6 +56,6 @@ public class ChatFinalizeNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.FINAL_ANSWER, finalAnswer);
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "finalize", "status", "completed")));
             return update;
-        });
+        }, executor);
     }
 }
