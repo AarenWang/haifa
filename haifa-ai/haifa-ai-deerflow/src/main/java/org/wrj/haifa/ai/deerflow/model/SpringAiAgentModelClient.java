@@ -26,6 +26,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.retry.Retry;
 
@@ -91,6 +92,94 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                 })
                 .onErrorMap(TimeoutException.class, ex ->
                         new IllegalStateException("Model API call timed out after " + timeoutMs + "ms", ex));
+    }
+
+    @Override
+    public Flux<ModelResponse> streamGenerate(ModelPrompt prompt) {
+        ChatClient.Builder builder = this.chatClientBuilderProvider.getIfAvailable();
+        if (builder == null) {
+            log.warn("Spring AI ChatClient.Builder is not available. Returning fallback answer.");
+            return Flux.just(fallbackAnswer());
+        }
+        long startTime = System.currentTimeMillis();
+        long timeoutMs = Math.max(1_000, this.properties.getModelTimeout());
+        log.info("Spring AI model streaming starting. model={}, timeoutMs={}, systemPromptChars={}, userPromptChars={}, messageCount={}",
+                safe(prompt.modelName()), timeoutMs, length(prompt.systemPrompt()), length(prompt.effectiveUserPrompt()),
+                prompt.messages().size());
+
+        return Flux.defer(() -> {
+            ChatClient.ChatClientRequestSpec request = builder.build()
+                    .prompt()
+                    .messages(toSpringAiMessages(prompt));
+
+            ChatOptions chatOptions = chatOptionsFor(prompt);
+            if (chatOptions != null) {
+                request = request.options(chatOptions);
+            }
+
+            return request.stream().chatResponse()
+                    .map(chatResponse -> {
+                        if (chatResponse == null) {
+                            return new ModelResponse("");
+                        }
+                        String content = "";
+                        List<ModelToolCall> modelToolCalls = new ArrayList<>();
+
+                        if (chatResponse.getResult() != null) {
+                            org.springframework.ai.chat.model.Generation generation = chatResponse.getResult();
+                            AssistantMessage assistantMessage = generation.getOutput();
+                            if (assistantMessage != null) {
+                                content = assistantMessage.getText();
+                                if (content == null) {
+                                    content = "";
+                                }
+                                if (assistantMessage.getToolCalls() != null) {
+                                    for (AssistantMessage.ToolCall tc : assistantMessage.getToolCalls()) {
+                                        modelToolCalls.add(new ModelToolCall(
+                                                tc.id(),
+                                                tc.name(),
+                                                tc.arguments(),
+                                                tc.type()
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+
+                        String finishReason = null;
+                        if (chatResponse.getResult() != null && chatResponse.getResult().getMetadata() != null) {
+                            finishReason = chatResponse.getResult().getMetadata().getFinishReason();
+                        }
+
+                        return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of());
+                    });
+        })
+        .subscribeOn(Schedulers.boundedElastic())
+        .timeout(Duration.ofMillis(timeoutMs))
+        .retryWhen(Retry.fixedDelay(3, Duration.ofSeconds(3))
+                .doBeforeRetry(retrySignal -> {
+                    log.warn("Spring AI model streaming failed. Retrying (attempt {}/3)... Error: {}",
+                            retrySignal.totalRetries() + 1,
+                            retrySignal.failure() != null ? retrySignal.failure().getMessage() : "unknown");
+                })
+                .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
+        .doOnComplete(() -> {
+            long duration = System.currentTimeMillis() - startTime;
+            log.info("Spring AI model streaming completed. model={}, durationMs={}",
+                    safe(prompt.modelName()), duration);
+        })
+        .doOnError(ex -> {
+            long duration = System.currentTimeMillis() - startTime;
+            log.error("Spring AI chat streaming failed. model={}, systemPromptChars={}, userPromptChars={}, messageCount={}, durationMs={}",
+                    safe(prompt.modelName()),
+                    length(prompt.systemPrompt()),
+                    length(prompt.effectiveUserPrompt()),
+                    prompt.messages().size(),
+                    duration,
+                    ex);
+        })
+        .onErrorMap(TimeoutException.class, ex ->
+                new IllegalStateException("Model API streaming call timed out after " + timeoutMs + "ms", ex));
     }
 
     private static ModelResponse callSpringAi(ChatClient.Builder builder, ModelPrompt prompt) {

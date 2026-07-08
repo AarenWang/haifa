@@ -96,6 +96,31 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       let nextTodoSnapshot = state.todoSnapshot;
       let nextTodoGateBlocked = state.todoGateBlocked;
       let nextTodoGateMessage = state.todoGateMessage;
+      let nextMessages = [...state.messages];
+      if (event.type === 'MODEL_DELTA') {
+        const chunk = event.content || '';
+        const runId = event.runId;
+        const existingAssistantIdx = nextMessages.findIndex(
+          (m) => m.role === 'ASSISTANT' && m.runId === runId
+        );
+        if (existingAssistantIdx >= 0) {
+          const existing = nextMessages[existingAssistantIdx];
+          nextMessages[existingAssistantIdx] = {
+            ...existing,
+            content: existing.content + chunk,
+          };
+        } else {
+          nextMessages.push({
+            messageId: 'temp-' + runId,
+            threadId: event.threadId || nextThreadId || '',
+            runId: runId,
+            role: 'ASSISTANT',
+            content: chunk,
+            metadata: {},
+            createdAt: new Date().toISOString(),
+          });
+        }
+      }
 
       if (event.type === 'RUN_COMPLETED') {
         nextStatus = 'completed';
@@ -158,6 +183,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         status: nextStatus,
         phase: nextPhase,
         events: nextEvents,
+        messages: nextMessages,
         runId: nextRunId,
         threadId: nextThreadId,
         finalAnswer: nextFinalAnswer,

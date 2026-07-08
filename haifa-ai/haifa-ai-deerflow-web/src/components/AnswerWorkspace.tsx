@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw, RefreshCw, Brain, BookOpen, Search, Globe, Terminal, Tag, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw, RefreshCw, Brain, BookOpen, Search, Globe, Terminal, Tag, Sparkles, ChevronDown, ChevronUp, FolderOpen, FileCode, Image, Clock, Users } from 'lucide-react';
 import type { AppPhase, AppStatus, ClarificationAnswer, MessageRecord, DeerFlowEvent } from '../types';
 import { renderMarkdown } from '../utils/markdownRenderer';
 import ApprovalCard from './ApprovalCard';
@@ -52,34 +52,38 @@ const parseExecutionSteps = (events: DeerFlowEvent[]): ExecutionStep[] => {
       }
 
       let detail = argString;
-      if (toolName === 'read_file' || toolName === 'view_file') {
-        try {
-          const parsed = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs;
-          detail = parsed.path || parsed.TargetFile || argString;
-        } catch {
-          // ignore
-        }
-      } else if (toolName === 'web_search') {
-        try {
-          const parsed = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs;
+      try {
+        const parsed = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs;
+        if (toolName === 'read_file' || toolName === 'view_file') {
+          detail = parsed.AbsolutePath || parsed.path || parsed.TargetFile || argString;
+        } else if (toolName === 'list_dir') {
+          detail = parsed.DirectoryPath || argString;
+        } else if (toolName === 'glob') {
+          detail = parsed.pattern || parsed.Pattern || argString;
+        } else if (toolName === 'grep_search') {
+          detail = `搜索 "${parsed.Query || ''}"`;
+        } else if (toolName === 'write_to_file' || toolName === 'replace_file_content' || toolName === 'multi_replace_file_content') {
+          detail = parsed.TargetFile || argString;
+        } else if (toolName === 'run_command') {
+          detail = parsed.CommandLine || argString;
+        } else if (toolName === 'web_search') {
           detail = parsed.query || argString;
-        } catch {
-          // ignore
+        } else if (toolName === 'web_fetch' || toolName === 'read_url_content') {
+          detail = parsed.url || parsed.Url || argString;
+        } else if (toolName === 'generate_image') {
+          detail = `生成 "${parsed.ImageName || ''}"`;
+        } else if (toolName === 'schedule') {
+          detail = parsed.Prompt || argString;
+        } else if (toolName === 'invoke_subagent') {
+          const sub = parsed.Subagents?.[0];
+          detail = sub ? `启动子智能体: ${sub.Role || sub.TypeName}` : argString;
+        } else if (toolName === 'send_message') {
+          detail = `发送消息至 ${parsed.Recipient || ''}`;
+        } else if (toolName === 'browser_subagent') {
+          detail = parsed.TaskName || parsed.Task || argString;
         }
-      } else if (toolName === 'web_fetch' || toolName === 'read_url_content') {
-        try {
-          const parsed = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs;
-          detail = parsed.url || argString;
-        } catch {
-          // ignore
-        }
-      } else if (toolName === 'run_script') {
-        try {
-          const parsed = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs;
-          detail = parsed.language ? `${parsed.language} script` : 'script';
-        } catch {
-          // ignore
-        }
+      } catch {
+        // ignore
       }
 
       if (!stepsMap[toolCallId]) {
@@ -116,13 +120,30 @@ const getStepIcon = (type: string) => {
     case 'read_file':
     case 'view_file':
       return <BookOpen size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--amber)' }} />;
+    case 'list_dir':
+    case 'glob':
+      return <FolderOpen size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--amber)' }} />;
+    case 'grep_search':
     case 'web_search':
       return <Search size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--blue)' }} />;
     case 'web_fetch':
     case 'read_url_content':
+    case 'browser_subagent':
       return <Globe size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--green)' }} />;
     case 'run_script':
+    case 'run_command':
       return <Terminal size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--purple)' }} />;
+    case 'write_to_file':
+    case 'replace_file_content':
+    case 'multi_replace_file_content':
+      return <FileCode size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--purple)' }} />;
+    case 'generate_image':
+      return <Image size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--pink)' }} />;
+    case 'schedule':
+      return <Clock size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--blue)' }} />;
+    case 'invoke_subagent':
+    case 'send_message':
+      return <Users size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--orange)' }} />;
     default:
       return <Terminal size={14} style={{ marginRight: 6, verticalAlign: 'middle', color: 'var(--gray)' }} />;
   }
@@ -133,13 +154,36 @@ const getStepName = (type: string) => {
     case 'read_file':
     case 'view_file':
       return '读取文件';
+    case 'list_dir':
+      return '查看目录列表';
+    case 'glob':
+      return '检索文件通配符';
+    case 'grep_search':
+      return '代码库全局搜索';
+    case 'write_to_file':
+      return '新建写入文件';
+    case 'replace_file_content':
+    case 'multi_replace_file_content':
+      return '编辑修改文件';
+    case 'run_command':
+      return '执行终端命令';
     case 'web_search':
-      return '在网络上搜索';
+      return '进行网络检索';
     case 'web_fetch':
     case 'read_url_content':
-      return '查看网页';
+      return '提取网页内容';
     case 'run_script':
       return '运行脚本';
+    case 'generate_image':
+      return '大模型生成配图';
+    case 'schedule':
+      return '设置定时调度任务';
+    case 'invoke_subagent':
+      return '委派子智能体处理';
+    case 'send_message':
+      return '与子智能体通信';
+    case 'browser_subagent':
+      return '启动浏览器自动化';
     default:
       return type || '执行步骤';
   }
@@ -185,9 +229,23 @@ export default function AnswerWorkspace({
   const [recommendations, setRecommendations] = useState<string[]>([]);
   const [loadingRecommendations, setLoadingRecommendations] = useState(false);
   const fetchedThreadId = useRef<string | null>(null);
+  const wasRunning = useRef(false);
+
+  useEffect(() => {
+    wasRunning.current = false;
+  }, [threadId]);
+
+  useEffect(() => {
+    if (status === 'running') {
+      wasRunning.current = true;
+    }
+  }, [status]);
 
   useEffect(() => {
     if ((status === 'completed' || phase === 'done') && threadId) {
+      if (!wasRunning.current) {
+        return;
+      }
       if (fetchedThreadId.current === threadId && recommendations.length > 0) {
         return;
       }

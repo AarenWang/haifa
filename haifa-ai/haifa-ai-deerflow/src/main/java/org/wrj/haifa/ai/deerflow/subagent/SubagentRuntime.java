@@ -381,7 +381,24 @@ public class SubagentRuntime implements ApplicationContextAware {
                 }
             }
         }
-        // Fallback: concatenate all MODEL_DELTA events
+        // Check if there is a final MODEL_DELTA event containing full accumulated response
+        for (int i = events.size() - 1; i >= 0; i--) {
+            AgentEvent evt = events.get(i);
+            if (evt.type() == AgentEventType.MODEL_DELTA && evt.metadata() != null && evt.metadata().containsKey("modelDurationMs")) {
+                if (evt.content() != null && !evt.content().isBlank()) {
+                    return evt.content();
+                }
+            }
+        }
+        // Fallback: concatenate all streaming MODEL_DELTA events (which do not contain modelDurationMs)
+        String joined = events.stream()
+                .filter(e -> e.type() == AgentEventType.MODEL_DELTA && (e.metadata() == null || !e.metadata().containsKey("modelDurationMs")))
+                .map(AgentEvent::content)
+                .collect(Collectors.joining(""));
+        if (!joined.isBlank()) {
+            return joined;
+        }
+        // Last fallback: concatenate all MODEL_DELTA events
         return events.stream()
                 .filter(e -> e.type() == AgentEventType.MODEL_DELTA)
                 .map(AgentEvent::content)

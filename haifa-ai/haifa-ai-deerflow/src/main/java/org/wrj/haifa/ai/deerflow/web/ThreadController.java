@@ -89,32 +89,116 @@ public class ThreadController {
                         return Mono.just(List.of());
                     }
 
-                    // Convert thread messages to ModelMessage format
-                    List<ModelMessage> modelMessages = records.stream()
-                            .map(r -> new ModelMessage(
-                                    ModelMessage.Role.valueOf(r.role().name()),
-                                    r.content()
-                            ))
+                    // Keep only the last 5 messages and truncate each message content to 1000 chars to control context window size
+                    int limit = 5;
+                    List<org.wrj.haifa.ai.deerflow.thread.MessageRecord> recentRecords = records.size() > limit
+                            ? records.subList(records.size() - limit, records.size())
+                            : records;
+
+                    List<ModelMessage> modelMessages = recentRecords.stream()
+                            .map(r -> {
+                                String content = r.content() != null ? r.content() : "";
+                                if (content.length() > 1000) {
+                                    content = content.substring(0, 1000) + "... [truncated]";
+                                }
+                                return new ModelMessage(
+                                        ModelMessage.Role.valueOf(r.role().name()),
+                                        content
+                                );
+                            })
                             .toList();
 
-                    String systemPrompt = "You are a helpful assistant. Based on the conversation history, generate exactly 3 relevant, interesting, and diverse follow-up questions that the user might want to ask next. Each question must be short and concise (under 25 words). The language of the generated questions MUST exactly match the language of the user's messages in the conversation history (e.g. if the user asked in Chinese, the questions must be in Chinese). Return the questions as a JSON array of strings, e.g. [\"question 1\", \"question 2\", \"question 3\"]. Respond ONLY with the raw JSON array, without any markdown formatting or code blocks.";
-                    String userPrompt = ModelPrompt.renderMessages(modelMessages);
+                    StringBuilder conversationBuilder = new StringBuilder();
+                    for (ModelMessage m : modelMessages) {
+                        String role = m.role().name().toLowerCase();
+                        String content = m.content() != null ? m.content().trim() : "";
+                        if ("user".equals(role)) {
+                            conversationBuilder.append("User: ").append(content).append("\n");
+                        } else if ("assistant".equals(role)) {
+                            conversationBuilder.append("Assistant: ").append(content).append("\n");
+                        } else {
+                            conversationBuilder.append(m.role().name()).append(": ").append(content).append("\n");
+                        }
+                    }
+                    String conversation = conversationBuilder.toString().trim();
+
+                    String systemPrompt = "You are generating follow-up questions to help the user continue the conversation.\n" +
+                            "Based on the conversation below, produce EXACTLY 3 short questions the user might ask next.\n" +
+                            "Requirements:\n" +
+                            "- Questions must be relevant to the preceding conversation.\n" +
+                            "- Questions must be written in the same language as the user.\n" +
+                            "- Keep each question concise (ideally <= 20 words / <= 40 Chinese characters).\n" +
+                            "- Do NOT include numbering, markdown, or any extra text.\n" +
+                            "- Output MUST be a JSON array of strings only.";
+                    String userPrompt = "Conversation Context:\n" + conversation + "\n\nGenerate 3 follow-up questions";
 
                     return this.modelClient.generate(new ModelPrompt(systemPrompt, userPrompt, null))
                             .map(response -> {
-                                String content = response.content().trim();
-                                if (content.startsWith("```")) {
-                                    content = content.replaceAll("^```json\\s*", "").replaceAll("^```\\s*", "").replaceAll("\\s*```$", "");
-                                }
-                                try {
-                                    ObjectMapper mapper = new ObjectMapper();
-                                    return mapper.readValue(content, new TypeReference<List<String>>() {});
-                                } catch (Exception e) {
+                                String content = response.content() != null ? response.content() : "";
+                                List<String> parsed = parseJsonStringList(content);
+                                if (parsed == null || parsed.isEmpty()) {
                                     return List.of("Tell me more about this", "What are the key points?", "What should we do next?");
                                 }
+                                return parsed;
                             })
                             .onErrorReturn(List.of("Tell me more about this", "What are the key points?", "What should we do next?"));
                 });
+    }
+
+    private static String stripThinkBlocks(String text) {
+        if (text == null) return "";
+        // Match <think>...</think> block spanning multiple lines
+        text = text.replaceAll("(?is)<think\\b[^>]*>.*?</think\\s*>", "");
+        // Match dangling, unclosed <think> and discard everything after it
+        int openThinkIdx = text.toLowerCase().indexOf("<think");
+        if (openThinkIdx >= 0) {
+            text = text.substring(0, openThinkIdx);
+        }
+        return text.trim();
+    }
+
+    private static String stripMarkdownCodeFence(String text) {
+        if (text == null) return "";
+        text = text.trim();
+        if (!text.startsWith("```")) {
+            return text;
+        }
+        String[] lines = text.split("\\r?\\n");
+        if (lines.length >= 3 && lines[0].startsWith("```") && lines[lines.length - 1].startsWith("```")) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 1; i < lines.length - 1; i++) {
+                sb.append(lines[i]).append("\n");
+            }
+            return sb.toString().trim();
+        }
+        return text;
+    }
+
+    private static List<String> parseJsonStringList(String text) {
+        String candidate = stripThinkBlocks(text);
+        candidate = stripMarkdownCodeFence(candidate);
+        int start = candidate.indexOf("[");
+        int end = candidate.lastIndexOf("]");
+        if (start == -1 || end == -1 || end <= start) {
+            return null;
+        }
+        candidate = candidate.substring(start, end + 1);
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            List<String> rawList = mapper.readValue(candidate, new TypeReference<List<String>>() {});
+            java.util.ArrayList<String> cleaned = new java.util.ArrayList<>();
+            for (String s : rawList) {
+                if (s != null) {
+                    String cleanStr = s.replace("\n", " ").trim();
+                    if (!cleanStr.isEmpty()) {
+                        cleaned.add(cleanStr);
+                    }
+                }
+            }
+            return cleaned;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static RunResponse toResponse(RunRecord record) {

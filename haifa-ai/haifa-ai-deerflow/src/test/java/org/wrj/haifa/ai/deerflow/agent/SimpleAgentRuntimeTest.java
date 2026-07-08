@@ -283,6 +283,7 @@ class SimpleAgentRuntimeTest {
                         AgentEventType.RUN_STARTED,
                         AgentEventType.MODEL_STARTED,
                         AgentEventType.MODEL_DELTA,
+                        AgentEventType.MODEL_DELTA,
                         AgentEventType.MODEL_COMPLETED,
                         AgentEventType.RUN_COMPLETED
                 );

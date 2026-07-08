@@ -346,7 +346,42 @@ public class AgentLoop {
                 }
                 ModelResponse modelResponse;
                 try {
-                    modelResponse = modelClient.generate(prompt).block();
+                    StringBuilder fullContent = new StringBuilder();
+                    List<ModelToolCall> accumulatedToolCalls = new ArrayList<>();
+                    java.util.concurrent.atomic.AtomicReference<String> finishReasonRef = new java.util.concurrent.atomic.AtomicReference<>();
+
+                    final int currentStep = step;
+                    reactor.core.publisher.Flux<ModelResponse> stream = this.modelClient.streamGenerate(prompt);
+                    if (stream == null) {
+                        stream = this.modelClient.generate(prompt).flux();
+                    }
+                    stream
+                            .doOnNext(response -> {
+                                String chunk = response.content();
+                                if (chunk != null && !chunk.isEmpty()) {
+                                    fullContent.append(chunk);
+                                    emitter.emit(event(seq, runConfig, AgentEventType.MODEL_DELTA,
+                                            chunk,
+                                            Map.of("step", currentStep + 1)
+                                    ));
+                                }
+                                if (response.toolCalls() != null && !response.toolCalls().isEmpty()) {
+                                    accumulatedToolCalls.addAll(response.toolCalls());
+                                }
+                                if (response.finishReason() != null) {
+                                    finishReasonRef.set(response.finishReason());
+                                }
+                            })
+                            .then()
+                            .block();
+
+                    modelResponse = new ModelResponse(
+                            fullContent.toString(),
+                            accumulatedToolCalls,
+                            List.of(),
+                            finishReasonRef.get(),
+                            Map.of()
+                    );
                 } catch (Exception ex) {
                     log.error("Model call failed at step {}. runId={}", step, runConfig.runId(), ex);
                     stopReason = "ERROR";

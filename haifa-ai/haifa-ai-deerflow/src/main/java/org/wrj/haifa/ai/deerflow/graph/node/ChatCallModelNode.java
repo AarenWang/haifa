@@ -121,21 +121,41 @@ public class ChatCallModelNode implements AsyncNodeAction {
             ModelPrompt prompt = assembly.prompt().withToolDefinitions(toolDefinitions);
 
             long startTime = System.currentTimeMillis();
-            ModelResponse response = modelClient.generate(prompt).block();
+            StringBuilder fullContent = new StringBuilder();
+            List<ModelToolCall> accumulatedToolCalls = new ArrayList<>();
+            java.util.concurrent.atomic.AtomicReference<String> finishReasonRef = new java.util.concurrent.atomic.AtomicReference<>();
+
+            reactor.core.publisher.Flux<ModelResponse> stream = modelClient.streamGenerate(prompt);
+            if (stream == null) {
+                stream = modelClient.generate(prompt).flux();
+            }
+            stream
+                    .doOnNext(response -> {
+                        String chunk = response.content();
+                        if (chunk != null && !chunk.isEmpty()) {
+                            fullContent.append(chunk);
+                            GraphEventRegistry.publish(runId, AgentEvent.of(
+                                    UUID.randomUUID().toString(),
+                                    runId,
+                                    threadId,
+                                    AgentEventType.MODEL_DELTA,
+                                    chunk,
+                                    Map.of("step", stepNum)
+                            ));
+                        }
+                        if (response.toolCalls() != null && !response.toolCalls().isEmpty()) {
+                            accumulatedToolCalls.addAll(response.toolCalls());
+                        }
+                        if (response.finishReason() != null) {
+                            finishReasonRef.set(response.finishReason());
+                        }
+                    })
+                    .then()
+                    .block();
+
             long duration = System.currentTimeMillis() - startTime;
-
-            String responseContent = response != null && response.content() != null ? response.content() : "";
-            List<Map<String, Object>> structuredToolCalls = serializeToolCalls(response == null ? List.of() : response.toolCalls());
-
-            // Emit MODEL_DELTA with full content
-            GraphEventRegistry.publish(runId, AgentEvent.of(
-                    UUID.randomUUID().toString(),
-                    runId,
-                    threadId,
-                    AgentEventType.MODEL_DELTA,
-                    responseContent,
-                    Map.of("step", stepNum, "modelDurationMs", duration)
-            ));
+            String responseContent = fullContent.toString();
+            List<Map<String, Object>> structuredToolCalls = serializeToolCalls(accumulatedToolCalls);
 
             // APPEND strategy expects only newly produced messages.
             Map<String, Object> assistantMsg = new LinkedHashMap<>();
