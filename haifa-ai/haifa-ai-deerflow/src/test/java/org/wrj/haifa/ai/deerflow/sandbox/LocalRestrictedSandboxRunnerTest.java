@@ -33,7 +33,7 @@ class LocalRestrictedSandboxRunnerTest {
         assertThat(result.metadata()).containsEntry("workspaceMounted", false);
         assertThat(result.metadata()).containsKey("isolationWarning");
         Path workdir = Path.of((String) result.metadata().get("sandboxWorkdir"));
-        assertThat(workdir).startsWith(tmp.resolve("outputs").resolve("sandbox").resolve("run-1"));
+        assertThat(workdir).startsWith(tmp.resolve("workspace").resolve("sandbox").resolve("run-1"));
         assertThat(Files.isDirectory(workdir)).isTrue();
     }
 
@@ -41,7 +41,7 @@ class LocalRestrictedSandboxRunnerTest {
     void usesCallerProvidedWorkdirWhenValid(@TempDir Path tmp) {
         DeerFlowProperties properties = properties(tmp);
         LocalRestrictedSandboxRunner runner = new LocalRestrictedSandboxRunner(properties);
-        Path sandboxRoot = tmp.resolve("outputs").resolve("sandbox");
+        Path sandboxRoot = tmp.resolve("workspace").resolve("sandbox");
         Path requested = sandboxRoot.resolve("caller-workdir-1");
 
         SandboxResult result = runner.run(new SandboxRequest(
@@ -119,6 +119,7 @@ class LocalRestrictedSandboxRunnerTest {
 
     private static DeerFlowProperties properties(Path tmp) {
         DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
         properties.setOutputsRoot(tmp.resolve("outputs").toString());
         properties.getSandbox().setWorkdirSubdir("sandbox");
         return properties;

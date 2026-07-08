@@ -1,4 +1,4 @@
-import type { AppState, AppAction, AppPhase } from '../types';
+import type { AppState, AppAction, AppPhase, DeerFlowEvent, TodoSnapshot, AgentTodoItem } from '../types';
 
 function getPhaseFromEvent(type: string): AppPhase {
   switch (type) {
@@ -30,6 +30,12 @@ function getPhaseFromEvent(type: string): AppPhase {
     case 'REPORT_COMPLETED':
     case 'ARTIFACT_CREATED':
       return 'answering';
+    case 'TODO_CREATED':
+    case 'TODO_UPDATED':
+      return 'gathering_context';
+    case 'TODO_GATE_BLOCKED':
+    case 'TODO_INCOMPLETE':
+      return 'thinking';
     case 'RUN_SUSPENDED':
       return 'idle';
     default:
@@ -87,6 +93,9 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       let nextError = state.error;
       let nextRunId = state.runId;
       let nextThreadId = state.threadId;
+      let nextTodoSnapshot = state.todoSnapshot;
+      let nextTodoGateBlocked = state.todoGateBlocked;
+      let nextTodoGateMessage = state.todoGateMessage;
 
       if (event.type === 'RUN_COMPLETED') {
         nextStatus = 'completed';
@@ -108,6 +117,18 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       }
       if (event.threadId) {
         nextThreadId = event.threadId;
+      }
+
+      const eventTodoSnapshot = snapshotFromEvent(event);
+      if (eventTodoSnapshot) {
+        nextTodoSnapshot = eventTodoSnapshot;
+      }
+      if (event.type === 'TODO_GATE_BLOCKED' || event.type === 'TODO_INCOMPLETE') {
+        nextTodoGateBlocked = true;
+        nextTodoGateMessage = event.content;
+      } else if (event.type === 'TODO_CREATED' || event.type === 'TODO_UPDATED') {
+        nextTodoGateBlocked = false;
+        nextTodoGateMessage = undefined;
       }
 
       // Update runHistory entry status if matching runId
@@ -141,6 +162,9 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         threadId: nextThreadId,
         finalAnswer: nextFinalAnswer,
         error: nextError,
+        todoSnapshot: nextTodoSnapshot,
+        todoGateBlocked: nextTodoGateBlocked,
+        todoGateMessage: nextTodoGateMessage,
         runHistory: nextRunHistory,
       };
     }
@@ -201,10 +225,28 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         ...state,
         messages: action.payload,
       };
-    case 'SET_EVENTS':
+    case 'SET_EVENTS': {
+      const replayedTodo = replayTodoState(action.payload);
       return {
         ...state,
         events: action.payload,
+        todoSnapshot: replayedTodo.snapshot,
+        todoGateBlocked: replayedTodo.gateBlocked,
+        todoGateMessage: replayedTodo.gateMessage,
+      };
+    }
+    case 'SET_TODO_SNAPSHOT':
+      return {
+        ...state,
+        todoSnapshot: action.payload,
+        todoGateBlocked: action.payload ? state.todoGateBlocked : false,
+        todoGateMessage: action.payload ? state.todoGateMessage : undefined,
+      };
+    case 'SET_TODO_GATE_BLOCKED':
+      return {
+        ...state,
+        todoGateBlocked: action.payload.blocked,
+        todoGateMessage: action.payload.message,
       };
     case 'SET_STATUS':
       return {
@@ -289,4 +331,106 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
     default:
       return state;
   }
+}
+
+function replayTodoState(events: DeerFlowEvent[]): {
+  snapshot?: TodoSnapshot;
+  gateBlocked?: boolean;
+  gateMessage?: string;
+} {
+  let snapshot: TodoSnapshot | undefined;
+  let gateBlocked = false;
+  let gateMessage: string | undefined;
+  for (const event of events) {
+    const eventSnapshot = snapshotFromEvent(event);
+    if (eventSnapshot) {
+      snapshot = eventSnapshot;
+    }
+    if (event.type === 'TODO_GATE_BLOCKED' || event.type === 'TODO_INCOMPLETE') {
+      gateBlocked = true;
+      gateMessage = event.content;
+    } else if (event.type === 'TODO_CREATED' || event.type === 'TODO_UPDATED') {
+      gateBlocked = false;
+      gateMessage = undefined;
+    }
+  }
+  return { snapshot, gateBlocked, gateMessage };
+}
+
+function snapshotFromEvent(event: DeerFlowEvent): TodoSnapshot | undefined {
+  if (
+    event.type !== 'TODO_CREATED' &&
+    event.type !== 'TODO_UPDATED' &&
+    event.type !== 'TODO_GATE_BLOCKED' &&
+    event.type !== 'TODO_INCOMPLETE'
+  ) {
+    return undefined;
+  }
+  return normalizeTodoSnapshot(event.metadata?.snapshot, event.threadId, event.runId);
+}
+
+function normalizeTodoSnapshot(value: unknown, fallbackThreadId?: string, fallbackRunId?: string): TodoSnapshot | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const todos = Array.isArray(record.todos)
+    ? record.todos.map(normalizeTodoItem).filter((todo): todo is AgentTodoItem => !!todo)
+    : [];
+  const summaryRecord = record.summary && typeof record.summary === 'object'
+    ? record.summary as Record<string, unknown>
+    : {};
+  return {
+    threadId: stringValue(record.threadId) || fallbackThreadId || '',
+    runId: stringValue(record.runId) || fallbackRunId || '',
+    revision: numberValue(record.revision),
+    operation: stringValue(record.operation),
+    todos,
+    summary: {
+      total: numberValue(summaryRecord.total, todos.length),
+      pending: numberValue(summaryRecord.pending, countStatus(todos, 'pending')),
+      inProgress: numberValue(summaryRecord.inProgress, countStatus(todos, 'in_progress')),
+      completed: numberValue(summaryRecord.completed, countStatus(todos, 'completed')),
+      cancelled: numberValue(summaryRecord.cancelled, countStatus(todos, 'cancelled')),
+    },
+    updatedAt: stringValue(record.updatedAt),
+  };
+}
+
+function normalizeTodoItem(value: unknown): AgentTodoItem | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const id = stringValue(record.id);
+  const content = stringValue(record.content);
+  const rawStatus = stringValue(record.status);
+  if (!id || !content || !rawStatus) {
+    return undefined;
+  }
+  const status = rawStatus === 'pending' || rawStatus === 'in_progress' || rawStatus === 'completed' || rawStatus === 'cancelled'
+    ? rawStatus
+    : 'pending';
+  return {
+    id,
+    content,
+    status,
+    priority: stringValue(record.priority) || null,
+    evidence: stringValue(record.evidence) || null,
+    orderIndex: numberValue(record.orderIndex),
+    createdAt: stringValue(record.createdAt) || null,
+    updatedAt: stringValue(record.updatedAt) || null,
+  };
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function countStatus(todos: AgentTodoItem[], status: AgentTodoItem['status']): number {
+  return todos.filter((todo) => todo.status === status).length;
 }

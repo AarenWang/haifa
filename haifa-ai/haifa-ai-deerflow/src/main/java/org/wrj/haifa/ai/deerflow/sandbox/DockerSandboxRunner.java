@@ -29,7 +29,7 @@ public class DockerSandboxRunner implements SandboxRunner {
         Path workdir;
         if (request.runWorkingDirectory() != null) {
             workdir = request.runWorkingDirectory().toAbsolutePath().normalize();
-            Path allowedRoot = Path.of(properties.getOutputsRoot(), properties.getSandbox().getWorkdirSubdir()).toAbsolutePath().normalize();
+            Path allowedRoot = Path.of(properties.getWorkspaceRoot(), properties.getSandbox().getWorkdirSubdir()).toAbsolutePath().normalize();
             if (!workdir.startsWith(allowedRoot)) {
                 throw new SecurityException("Access denied: runWorkingDirectory '" + workdir + "' is outside of allowed sandbox root '" + allowedRoot + "'");
             }
@@ -131,7 +131,7 @@ public class DockerSandboxRunner implements SandboxRunner {
 
     private Path prepareWorkdir(SandboxRequest request, String sandboxId) {
         String runId = request.runId() == null || request.runId().isBlank() ? "adhoc" : request.runId();
-        Path base = Path.of(properties.getOutputsRoot(), properties.getSandbox().getWorkdirSubdir(), runId, sandboxId);
+        Path base = Path.of(properties.getWorkspaceRoot(), properties.getSandbox().getWorkdirSubdir(), runId, sandboxId);
         Path normalized = base.toAbsolutePath().normalize();
         try {
             Files.createDirectories(normalized);

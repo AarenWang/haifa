@@ -2,7 +2,6 @@ package org.wrj.haifa.ai.deerflow.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,9 +13,11 @@ public class StrReplaceTool implements AgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final DeerFlowProperties properties;
+    private final UserDataPathResolver pathResolver;
 
     public StrReplaceTool(DeerFlowProperties properties) {
         this.properties = properties;
+        this.pathResolver = new UserDataPathResolver(properties);
     }
 
     @Override
@@ -26,7 +27,7 @@ public class StrReplaceTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Replace a string in a file. Arguments: {\"path\": \"relative/path\", \"old_str\": \"old content\", \"new_str\": \"new content\"}";
+        return "Replace a string in a writable file. Provide path, old_str, and new_str arguments. Writable roots are /mnt/user-data/workspace and /mnt/user-data/outputs.";
     }
 
     @Override
@@ -73,15 +74,7 @@ public class StrReplaceTool implements AgentTool {
                 return ToolResult.of(name(), "Error: new_str is required");
             }
 
-            Path workspacePath = request.workspaceRoot().toAbsolutePath().normalize();
-            Path resolved = workspacePath.resolve(requestedPath).normalize();
-            Path uploadsPath = Path.of(properties.getUploadsRoot()).toAbsolutePath().normalize();
-            Path outputsPath = Path.of(properties.getOutputsRoot()).toAbsolutePath().normalize();
-
-            Path absResolved = resolved.toAbsolutePath().normalize();
-            if (!absResolved.startsWith(workspacePath) && !absResolved.startsWith(uploadsPath) && !absResolved.startsWith(outputsPath)) {
-                return ToolResult.of(name(), "Security Exception: path is outside allowed directories.");
-            }
+            Path resolved = pathResolver.resolveWritable(requestedPath, request.workspaceRoot());
 
             if (!Files.isRegularFile(resolved)) {
                 return ToolResult.of(name(), "Error: file does not exist: " + requestedPath);
@@ -98,6 +91,8 @@ public class StrReplaceTool implements AgentTool {
             String updatedContent = content.replaceFirst(java.util.regex.Pattern.quote(oldStr), java.util.regex.Matcher.quoteReplacement(newStr));
             Files.writeString(resolved, updatedContent, StandardCharsets.UTF_8);
             return ToolResult.of(name(), "String replaced successfully in: " + requestedPath);
+        } catch (IllegalArgumentException e) {
+            return ToolResult.of(name(), "Security Exception: " + e.getMessage());
         } catch (Exception e) {
             return ToolResult.of(name(), "Error: " + e.getMessage());
         }

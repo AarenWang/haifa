@@ -100,7 +100,7 @@ class GraphResearchRuntimeTest {
         );
 
         AgentLoop loop = new AgentLoop(
-                prompt -> Mono.just(new ModelResponse("<final_answer>deepseek analysis synthesis</final_answer>")),
+                prompt -> Mono.just(new ModelResponse("deepseek analysis synthesis")),
                 new ToolRegistry(List.of())
         );
         when(modelClient.generate(any()))
@@ -289,7 +289,7 @@ class GraphResearchRuntimeTest {
 
         AgentRequest agentRequest = new AgentRequest(threadId, "deepseek technology software", "zhipu");
         AgentLoop loop = new AgentLoop(
-                prompt -> Mono.just(new ModelResponse("<final_answer>research done</final_answer>")),
+                prompt -> Mono.just(new ModelResponse("research done")),
                 new ToolRegistry(List.of())
         );
 

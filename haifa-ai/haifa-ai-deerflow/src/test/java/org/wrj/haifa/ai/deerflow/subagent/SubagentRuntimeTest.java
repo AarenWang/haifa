@@ -95,7 +95,7 @@ class SubagentRuntimeTest {
 
         // Mock model response
         when(modelClient.generate(any(org.wrj.haifa.ai.deerflow.model.ModelPrompt.class)))
-                .thenReturn(Mono.just(new ModelResponse("<final_answer>Task complete summary</final_answer>")));
+                .thenReturn(Mono.just(new ModelResponse("Task complete summary")));
 
         // Setup tools
         AgentTool tool1 = mock(AgentTool.class);
@@ -151,7 +151,7 @@ class SubagentRuntimeTest {
                 .thenReturn(Mono.just(new ModelResponse("", List.of(
                         new ModelToolCall("call-search", "web_search", "{\"query\":\"parent evidence\"}")
                 ))))
-                .thenReturn(Mono.just(new ModelResponse("<final_answer>Subagent summary</final_answer>")));
+                .thenReturn(Mono.just(new ModelResponse("Subagent summary")));
 
         AgentTool searchTool = new AgentTool() {
             @Override

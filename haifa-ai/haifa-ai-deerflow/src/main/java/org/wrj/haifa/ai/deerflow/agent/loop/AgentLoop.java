@@ -57,7 +57,6 @@ public class AgentLoop {
 
     private final AgentModelClient modelClient;
     private final ToolRegistry toolRegistry;
-    private final ToolCallParser toolCallParser;
     private final ModelStepStore modelStepStore;
     private final ToolCallStore toolCallStore;
     private final AgentLoopRunStore agentLoopRunStore;
@@ -103,7 +102,6 @@ public class AgentLoop {
             ApprovalStore approvalStore) {
         this.modelClient = modelClient;
         this.toolRegistry = toolRegistry;
-        this.toolCallParser = new ToolCallParser();
         this.modelStepStore = modelStepStore;
         this.toolCallStore = toolCallStore;
         this.agentLoopRunStore = agentLoopRunStore;
@@ -146,10 +144,7 @@ public class AgentLoop {
                 Optional<ApprovalRequestRecord> appOpt = approvalStore.find(approvalId);
                 if (appOpt.isPresent()) {
                     ApprovalRequestRecord appRecord = appOpt.get();
-                    
-                    // Reconstruct assistant message that requested tool call
-                    String assistantMsg = "Assistant: <tool_call name=\"" + appRecord.toolName() + "\">" + appRecord.argsJson() + "</tool_call>";
-                    history.add(assistantMsg);
+                    history.add("Assistant requested tool " + appRecord.toolName() + " with id " + appRecord.toolCallId());
                     typedHistory.add(new ModelMessage(
                             ModelMessage.Role.ASSISTANT,
                             "",
@@ -289,7 +284,7 @@ public class AgentLoop {
             String fullSystemPrompt = systemPrompt + "\n\nAvailable tools:\n" + toolDescriptions
                     + "\nWhen you need to use a tool, use the model provider's structured tool-call channel. "
                     + "Do not write tool calls manually as XML, JSON blocks, or prose.\n"
-                    + "When you have enough information, provide your final answer starting with <final_answer>."
+                    + "When no further tool call is needed, respond with the final answer directly in normal assistant text."
                     + promptReinforcement;
 
             boolean stopped = false;
@@ -382,62 +377,11 @@ public class AgentLoop {
                     }
                 }
 
-                // Check for final answer
-                if (toolCallParser.hasFinalAnswer(responseContent)) {
-                    lastModelContent = responseContent;
-                    history.add("Assistant: " + responseContent);
-                    typedHistory.add(new ModelMessage(ModelMessage.Role.ASSISTANT, responseContent,
-                            Map.of("step", step + 1, "modelDurationMs", modelDuration)));
-                    emitter.emit(event(seq, runConfig, AgentEventType.MODEL_DELTA,
-                            responseContent,
-                            Map.of("step", step + 1, "modelDurationMs", modelDuration)));
-
-                    String rawAnswer = toolCallParser.extractFinalAnswer(responseContent);
-                    FinalAnswerDecision decision = observer.onFinalAnswerProposed(
-                            runConfig, rawAnswer, events, seq, step + 1, totalToolCalls);
-                    emitter.flush();
-                    if (!decision.accepted()) {
-                        emitFinalAnswerRejected(seq, runConfig, emitter, history, decision, step + 1, totalToolCalls);
-                        typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM, retryInstruction(decision),
-                                Map.of("todoGateBlocked", true)));
-                        continue;
-                    }
-                    FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
-                            runConfig, decision.answer(), events, seq, step + 1, totalToolCalls);
-                    emitter.flush();
-                    stopReason = "FINAL_ANSWER";
-
-                    java.util.Map<String, Object> metadata = new java.util.HashMap<>();
-                    metadata.put("step", step + 1);
-                    metadata.put("modelDurationMs", modelDuration);
-                    metadata.put("stopReason", stopReason);
-                    if (finalResult.extraMetadata() != null) {
-                        metadata.putAll(finalResult.extraMetadata());
-                    }
-
-                    emitter.emit(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
-                            finalResult.finalAnswer(),
-                            metadata));
-                    emitter.emit(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
-                            "Run completed",
-                            Map.of("stopReason", stopReason, "steps", step + 1, "totalToolCalls", totalToolCalls)));
-                    if (agentLoopRunStore != null) {
-                        agentLoopRunStore.markCompleted(runConfig.runId(), stopReason);
-                    }
-                    stopped = true;
-                    break;
-                }
-
-                // Extract tool calls
+                // Extract structured tool calls. Assistant text is never parsed as an executable tool call.
                 List<ToolCall> loopToolCalls = new ArrayList<>();
                 if (modelResponse.toolCalls() != null && !modelResponse.toolCalls().isEmpty()) {
                     for (ModelToolCall mtc : modelResponse.toolCalls()) {
                         loopToolCalls.add(ToolCall.of(mtc.id(), mtc.name(), mtc.arguments()));
-                    }
-                } else if (!responseContent.isBlank()) {
-                    List<ToolCallParser.ParsedToolCall> parsed = toolCallParser.parse(responseContent);
-                    for (ToolCallParser.ParsedToolCall ptc : parsed) {
-                        loopToolCalls.add(ToolCall.of(ptc.toolName(), ptc.arguments()));
                     }
                 }
 
@@ -446,9 +390,7 @@ public class AgentLoop {
                 List<ToolCall> assistantToolCalls = filteredToolCalls.stream()
                         .map(AgentLoopObserver.FilteredToolCall::toolCall)
                         .toList();
-                String assistantContent = assistantToolCalls.isEmpty()
-                        ? responseContent
-                        : toolCallParser.cleanResponseText(responseContent);
+                String assistantContent = responseContent;
                 lastModelContent = assistantContent;
                 history.add("Assistant: " + assistantContent);
                 List<ModelToolCall> assistantModelToolCalls = toModelToolCalls(assistantToolCalls);
@@ -504,18 +446,18 @@ public class AgentLoop {
                 }
 
                 if (loopToolCalls.isEmpty()) {
-                    if (toolCallParser.hasToolCallIntent(responseContent)) {
-                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
-                                "Unparsed tool call format detected. Asking model to re-emit tool calls.",
-                                Map.of("step", step + 1, "unparsedToolCall", true)));
-                        history.add("System: Your previous response looked like a tool call but could not be parsed. "
-                                + "Re-emit each tool call through the structured tool-call channel. "
-                                + "Do not describe the tool call in prose, do not write XML, and do not answer yet.");
+                    if (responseContent.isBlank()) {
+                        history.add("System: The model returned no tool call and no assistant content. Continue with either a structured tool call or a normal final answer.");
                         typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM,
-                                "Your previous response looked like a tool call but could not be parsed. "
-                                        + "Re-emit each tool call through the structured tool-call channel. "
-                                        + "Do not describe the tool call in prose, do not write XML, and do not answer yet.",
-                                Map.of("toolCallFormatRetry", true)));
+                                "The model returned no tool call and no assistant content. Continue with either a structured tool call or a normal final answer.",
+                                Map.of("emptyModelResponse", true)));
+                        continue;
+                    }
+                    if (looksLikeProgressPlaceholder(responseContent)) {
+                        String instruction = "Do not stop on progress placeholder text. Continue with the needed structured tool call or provide the actual final answer.";
+                        history.add("System: " + instruction);
+                        typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM, instruction,
+                                Map.of("progressPlaceholderRejected", true)));
                         continue;
                     }
                     int historySizeBeforeContinueCheck = history.size();
@@ -1027,6 +969,32 @@ public class AgentLoop {
         return new ModelMessage(ModelMessage.Role.SYSTEM, entry, safeMetadata);
     }
 
+    private static boolean looksLikeProgressPlaceholder(String content) {
+        if (content == null) {
+            return false;
+        }
+        String normalized = content.trim().toLowerCase(java.util.Locale.ROOT);
+        if (normalized.length() > 120) {
+            return false;
+        }
+        return containsChars(normalized, 0x6b63, 0x5728, 0x542f, 0x52a8)
+                || containsChars(normalized, 0x6267, 0x884c, 0x4e2d)
+                || containsChars(normalized, 0x8bf7, 0x7a0d, 0x5019)
+                || normalized.contains("please wait")
+                || normalized.contains("working on it")
+                || normalized.contains("starting the visualization")
+                || normalized.contains("starting visualization")
+                || normalized.matches(".*\\bin progress\\b.*");
+    }
+
+    private static boolean containsChars(String text, int... chars) {
+        StringBuilder phrase = new StringBuilder();
+        for (int ch : chars) {
+            phrase.append((char) ch);
+        }
+        return text.contains(phrase);
+    }
+
     private static String retryInstruction(FinalAnswerDecision decision) {
         return decision.retryInstruction() == null || decision.retryInstruction().isBlank()
                 ? "Do not finish yet. Continue the pending todo work."
@@ -1059,6 +1027,9 @@ public class AgentLoop {
             return;
         }
         String operation = String.valueOf(toolResult.metadata().getOrDefault("todoOperation", "updated"));
+        if ("read".equals(operation) || "ignored".equals(operation)) {
+            return;
+        }
         AgentEventType type = "created".equals(operation) ? AgentEventType.TODO_CREATED : AgentEventType.TODO_UPDATED;
         Map<String, Object> metadata = new HashMap<>(toolResult.metadata());
         metadata.put("toolCallId", pending.toolCall().id());

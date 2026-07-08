@@ -19,7 +19,6 @@ import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
 import org.wrj.haifa.ai.deerflow.agent.loop.CompositeAgentLoopObserver;
 import org.wrj.haifa.ai.deerflow.agent.loop.DefaultAgentLoopObserver;
 import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
-import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallParser;
 import org.wrj.haifa.ai.deerflow.artifact.ReportWriteResult;
 import org.wrj.haifa.ai.deerflow.artifact.ReportWriterService;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
@@ -489,8 +488,6 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 this.runManager.markCompleted(run.runId());
                                 this.threadManager.touch(threadId);
                                 String assistantAnswer = lastContent.get();
-                                ToolCallParser parser = new ToolCallParser();
-                                assistantAnswer = parser.cleanResponseText(assistantAnswer);
                                 int toolCount = (int) lastMetadata.get().getOrDefault("totalToolCalls", 0);
                                 this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, assistantAnswer,
                                         Map.of("toolCount", toolCount, "mode", "chat"));
@@ -660,7 +657,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 .map(todo -> new ResearchDimension(
                         StringUtils.hasText(todo.getId()) ? todo.getId() : UUID.randomUUID().toString(),
                         StringUtils.hasText(todo.getContent()) ? todo.getContent() : "Research task",
-                        "由模型驱动 TodoList 生成的研究维度。",
+                        "Research dimension derived from TodoList item.",
                         toResearchTaskStatus(todo.getStatus()),
                         List.of(),
                         0,
@@ -682,7 +679,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 List.of(topic),
                 dimensions,
                 List.of(),
-                "模型通过 write_todos 维护研究计划。",
+                "Auto-generated from write_todos results.",
                 "Research report",
                 "TODO_DRIVEN",
                 now,
@@ -719,10 +716,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
     }
 
     private static String compactResearchAnswer(String synthesisResult, QualityGateResult qualityGateResult) {
-        String answer = synthesisResult == null ? "" : synthesisResult
-                .replace("<final_answer>", "")
-                .replace("</final_answer>", "")
-                .trim();
+        String answer = synthesisResult == null ? "" : synthesisResult.trim();
         if (answer.length() > 900) {
             answer = answer.substring(0, 900).trim() + "...";
         }
@@ -898,3 +892,5 @@ public class SimpleAgentRuntime implements AgentRuntime {
         return ex.getClass().getName();
     }
 }
+
+

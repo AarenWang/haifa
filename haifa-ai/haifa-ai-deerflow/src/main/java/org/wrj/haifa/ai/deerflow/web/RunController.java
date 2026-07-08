@@ -44,6 +44,8 @@ import java.util.Optional;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
+import org.wrj.haifa.ai.deerflow.todo.TodoSnapshot;
+import org.wrj.haifa.ai.deerflow.todo.TodoStore;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import java.time.format.DateTimeFormatter;
@@ -65,6 +67,7 @@ public class RunController {
     private final ClarificationStore clarificationStore;
     private final MessageStore messageStore;
     private final ApprovalStore approvalStore;
+    private final TodoStore todoStore;
     private static final java.time.format.DateTimeFormatter ISO = java.time.format.DateTimeFormatter.ISO_INSTANT;
 
     public RunController(AgentRuntime agentRuntime, RunManager runManager,
@@ -78,7 +81,7 @@ public class RunController {
             MessageStore messageStore) {
         this(agentRuntime, runManager, agentEventStore, toolExecutionStore, toolCallStore, modelStepStore,
              researchRuntimeSupport, researchPlanStore, researchProgressTracker, researchQualityGate,
-             clarificationStore, messageStore, null);
+             clarificationStore, messageStore, null, null);
     }
 
     @Autowired
@@ -91,7 +94,8 @@ public class RunController {
             ResearchQualityGate researchQualityGate,
             ClarificationStore clarificationStore,
             MessageStore messageStore,
-            @Autowired(required = false) ApprovalStore approvalStore) {
+            @Autowired(required = false) ApprovalStore approvalStore,
+            @Autowired(required = false) TodoStore todoStore) {
         this.agentRuntime = agentRuntime;
         this.runManager = runManager;
         this.agentEventStore = agentEventStore;
@@ -105,6 +109,7 @@ public class RunController {
         this.clarificationStore = clarificationStore;
         this.messageStore = messageStore;
         this.approvalStore = approvalStore;
+        this.todoStore = todoStore;
     }
 
     @PostMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -253,6 +258,16 @@ public class RunController {
     @GetMapping("/{runId}/events")
     public Mono<List<AgentEvent>> events(@PathVariable String runId) {
         return Mono.just(this.agentEventStore.findByRunId(runId));
+    }
+
+    @GetMapping("/{runId}/todos")
+    public Mono<TodoSnapshot> todos(@PathVariable String runId) {
+        RunRecord run = this.runManager.find(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+        if (this.todoStore == null) {
+            return Mono.just(TodoSnapshot.of(run.threadId(), run.runId(), 0, "read", List.of()));
+        }
+        return Mono.just(this.todoStore.snapshot(run.threadId(), run.runId()));
     }
 
     @GetMapping("/{runId}/approvals")

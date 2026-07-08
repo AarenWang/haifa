@@ -2,7 +2,6 @@ package org.wrj.haifa.ai.deerflow.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,10 +19,12 @@ public class WriteFileTool implements AgentTool {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final DeerFlowProperties properties;
     private final ArtifactService artifactService;
+    private final UserDataPathResolver pathResolver;
 
     public WriteFileTool(DeerFlowProperties properties, ArtifactService artifactService) {
         this.properties = properties;
         this.artifactService = artifactService;
+        this.pathResolver = new UserDataPathResolver(properties);
     }
 
     @Override
@@ -33,7 +34,7 @@ public class WriteFileTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Write content to a file. Arguments: {\"path\": \"relative/path/to/file\", \"content\": \"file content\"}. For user-facing deliverables, write under outputs/ so the file is registered as a downloadable artifact.";
+        return "Write content to a file. Provide path and content arguments. Relative paths write under /mnt/user-data/workspace. User-facing deliverables should use /mnt/user-data/outputs. Do not write to uploads.";
     }
 
     @Override
@@ -72,23 +73,17 @@ public class WriteFileTool implements AgentTool {
             if (requestedPath == null || requestedPath.isBlank()) {
                 return ToolResult.of(name(), "Error: path is required");
             }
-            Path workspacePath = request.workspaceRoot().toAbsolutePath().normalize();
-            Path resolved = workspacePath.resolve(requestedPath).normalize();
-            Path uploadsPath = Path.of(properties.getUploadsRoot()).toAbsolutePath().normalize();
-            Path outputsPath = Path.of(properties.getOutputsRoot()).toAbsolutePath().normalize();
-
-            Path absResolved = resolved.toAbsolutePath().normalize();
-            if (!absResolved.startsWith(workspacePath) && !absResolved.startsWith(uploadsPath) && !absResolved.startsWith(outputsPath)) {
-                return ToolResult.of(name(), "Security Exception: path is outside allowed directories.");
-            }
+            Path resolved = pathResolver.resolveWritable(requestedPath, request.workspaceRoot());
+            Path outputsPath = pathResolver.outputsRoot();
 
             Files.createDirectories(resolved.getParent());
             Files.writeString(resolved, content, StandardCharsets.UTF_8);
             Map<String, Object> metadata = new HashMap<>();
-            metadata.put("path", absResolved.toString());
+            metadata.put("path", resolved.toString());
+            metadata.put("virtualPath", pathResolver.toVirtualPath(resolved));
             if (StringUtils.hasText(request.threadId()) && StringUtils.hasText(request.runId())
-                    && absResolved.startsWith(outputsPath)) {
-                ArtifactRecord artifact = artifactService.register(request.threadId(), request.runId(), absResolved, null);
+                    && resolved.startsWith(outputsPath)) {
+                ArtifactRecord artifact = artifactService.register(request.threadId(), request.runId(), resolved, null);
                 String downloadUrl = "/api/deerflow/artifacts/" + artifact.artifactId() + "/download";
                 metadata.put("artifactId", artifact.artifactId());
                 metadata.put("filename", artifact.filename());
@@ -101,6 +96,8 @@ public class WriteFileTool implements AgentTool {
                         metadata);
             }
             return ToolResult.of(name(), "File written successfully: " + requestedPath, metadata);
+        } catch (IllegalArgumentException e) {
+            return ToolResult.of(name(), "Security Exception: " + e.getMessage());
         } catch (Exception e) {
             return ToolResult.of(name(), "Error: " + e.getMessage());
         }

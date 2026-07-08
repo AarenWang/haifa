@@ -1,15 +1,26 @@
 import { Activity, Inbox, X } from 'lucide-react';
 import { useRef, useEffect, useState } from 'react';
-import type { DeerFlowEvent } from '../types';
+import type { DeerFlowEvent, TodoSnapshot } from '../types';
 import EventCard from './EventCard';
+import TodoListPanel from './TodoListPanel';
 
 interface ActivityTraceProps {
   events: DeerFlowEvent[];
   isOpen?: boolean;
   onClose?: () => void;
+  todoSnapshot?: TodoSnapshot;
+  todoGateBlocked?: boolean;
+  todoGateMessage?: string;
 }
 
-export default function ActivityTrace({ events, isOpen = false, onClose }: ActivityTraceProps) {
+export default function ActivityTrace({
+  events,
+  isOpen = false,
+  onClose,
+  todoSnapshot,
+  todoGateBlocked,
+  todoGateMessage,
+}: ActivityTraceProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const prevLength = useRef(events.length);
@@ -31,6 +42,11 @@ export default function ActivityTrace({ events, isOpen = false, onClose }: Activ
 
   return (
     <aside className={`trace-panel ${isOpen ? 'open' : ''}`}>
+      <TodoListPanel
+        snapshot={todoSnapshot}
+        gateBlocked={todoGateBlocked}
+        gateMessage={todoGateMessage}
+      />
       <div className="trace-header">
         <div className="trace-header-title">
           <Activity size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} />

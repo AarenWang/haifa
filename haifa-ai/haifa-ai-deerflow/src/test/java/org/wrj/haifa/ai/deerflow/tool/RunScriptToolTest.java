@@ -147,6 +147,7 @@ class RunScriptToolTest {
         properties.getSandbox().setEnabled(true);
         properties.getSandbox().setAllowedScriptLanguages("python,powershell");
         properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
         properties.setOutputsRoot(tmp.resolve("outputs").toString());
 
         FakeSandboxRunner runner = new FakeSandboxRunner();
@@ -185,6 +186,7 @@ class RunScriptToolTest {
         properties.getSandbox().setEnabled(true);
         properties.getSandbox().setAllowedScriptLanguages("powershell");
         properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
         properties.setOutputsRoot(tmp.resolve("outputs").toString());
 
         FakeSandboxRunner runner = new FakeSandboxRunner();
@@ -211,6 +213,7 @@ class RunScriptToolTest {
         properties.getSandbox().setEnabled(true);
         properties.getSandbox().setAllowedScriptLanguages("bash");
         properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
         properties.setOutputsRoot(tmp.resolve("outputs").toString());
 
         FakeSandboxRunner runner = new FakeSandboxRunner();

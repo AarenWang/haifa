@@ -1,5 +1,6 @@
 package org.wrj.haifa.ai.deerflow.agent.loop;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -7,6 +8,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.todo.TodoItem;
+import org.wrj.haifa.ai.deerflow.todo.TodoSnapshot;
 import org.wrj.haifa.ai.deerflow.todo.TodoStore;
 
 /**
@@ -54,10 +56,11 @@ public class DefaultAgentLoopObserver implements AgentLoopObserver {
         }
 
         List<TodoItem> todos = todoStore.listTodos(runConfig.threadId(), runConfig.runId());
+        TodoSnapshot snapshot = todoStore.snapshot(runConfig.threadId(), runConfig.runId());
         if (todos.isEmpty() && runConfig.mode() == org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH) {
             return FinalAnswerDecision.reject(
                     "Do not finish yet. This research run has no TodoList. Call `write_todos` first to create a complete plan, then continue the work.",
-                    Map.of("reason", "missing_todos", "todoCount", 0));
+                    Map.of("reason", "missing_todos", "todoCount", 0, "snapshot", snapshot));
         }
 
         List<TodoItem> incomplete = todos.stream()
@@ -69,10 +72,13 @@ public class DefaultAgentLoopObserver implements AgentLoopObserver {
                             .map(todo -> "[" + todo.getStatus() + "] " + todo.getContent())
                             .toList())
                     + ". Continue working through the todo list and call `write_todos` after each status change.";
-            return FinalAnswerDecision.reject(instruction, Map.of(
-                    "reason", "incomplete_todos",
-                    "incompleteTodos", incomplete.stream().map(TodoItem::getId).toList(),
-                    "incompleteCount", incomplete.size()));
+            Map<String, Object> metadata = new HashMap<>();
+            metadata.put("reason", "incomplete_todos");
+            metadata.put("incompleteTodos", incomplete);
+            metadata.put("incompleteTodoIds", incomplete.stream().map(TodoItem::getId).toList());
+            metadata.put("incompleteCount", incomplete.size());
+            metadata.put("snapshot", snapshot);
+            return FinalAnswerDecision.reject(instruction, metadata);
         }
 
         return FinalAnswerDecision.accept(rawAnswer, Map.of("todoCount", todos.size()));

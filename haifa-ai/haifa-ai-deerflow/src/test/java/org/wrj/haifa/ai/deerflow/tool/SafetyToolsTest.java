@@ -46,12 +46,17 @@ class SafetyToolsTest {
         assertThat(artifactService.list("thread-1", "run-1")).hasSize(1);
         assertThat(Files.readString(outputs.resolve("bar.txt"))).isEqualTo("output");
 
-        // 3. Security block when writing outside allowed roots
+        // 3. Frontend uploads are readable but not writable by agent file tools
+        ToolRequest uploadsReq = new ToolRequest("{\"path\": \"/mnt/user-data/uploads/agent.txt\", \"content\": \"blocked\"}", workspace);
+        ToolResult uploadsRes = tool.execute(uploadsReq);
+        assertThat(uploadsRes.content()).contains("Security Exception", "uploads directory is written only by the frontend upload service");
+
+        // 4. Security block when writing outside allowed roots
         ToolRequest req3 = new ToolRequest("{\"path\": \"../../outside.txt\", \"content\": \"escaped\"}", workspace);
         ToolResult res3 = tool.execute(req3);
         assertThat(res3.content()).contains("Security Exception");
 
-        // 4. Toggle disabled block
+        // 5. Toggle disabled block
         properties.setWriteFileEnabled(false);
         ToolResult res4 = tool.execute(req1);
         assertThat(res4.content()).contains("disabled by security configuration");

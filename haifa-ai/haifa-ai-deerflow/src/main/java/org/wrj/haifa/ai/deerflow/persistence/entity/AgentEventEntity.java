@@ -40,7 +40,7 @@ public class AgentEventEntity {
     @Column(name = "content", length = 20000)
     private String content;
 
-    @Column(name = "metadata_json", length = 4000)
+    @Column(name = "metadata_json", columnDefinition = "TEXT")
     private String metadataJson;
 
     @Column(name = "created_at", nullable = false)

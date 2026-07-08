@@ -17,6 +17,7 @@ import {
   fetchRunProgress,
   fetchRunQualityGate,
   fetchRunSources,
+  fetchRunTodos,
   readDeerFlowResumeStream,
 } from './api/deerflowClient';
 import Header from './components/Header';
@@ -165,6 +166,12 @@ function App() {
         const latestRun = sorted[0];
         const events = await fetchRunEvents(latestRun.runId);
         dispatch({ type: 'SET_EVENTS', payload: events });
+        try {
+          const todos = await fetchRunTodos(latestRun.runId);
+          dispatch({ type: 'SET_TODO_SNAPSHOT', payload: todos });
+        } catch {
+          dispatch({ type: 'SET_TODO_SNAPSHOT' });
+        }
 
         // Sync latest run status to state
         let appStatus: AppStatus = 'idle';
@@ -192,6 +199,7 @@ function App() {
         refreshArtifactData(threadId, latestRun.runId);
       } else {
         dispatch({ type: 'SET_EVENTS', payload: [] });
+        dispatch({ type: 'SET_TODO_SNAPSHOT' });
         dispatch({ type: 'SET_STATUS', payload: 'idle' });
         refreshResearchData();
         refreshArtifactData(threadId);
@@ -199,6 +207,7 @@ function App() {
     } catch (err) {
       console.error('Failed to load historical events', err);
       dispatch({ type: 'SET_EVENTS', payload: [] });
+      dispatch({ type: 'SET_TODO_SNAPSHOT' });
       dispatch({ type: 'SET_STATUS', payload: 'idle' });
       refreshResearchData();
       refreshArtifactData(threadId);
@@ -643,6 +652,9 @@ function App() {
           events={state.events}
           isOpen={isTraceOpen}
           onClose={() => setIsTraceOpen(false)}
+          todoSnapshot={state.todoSnapshot}
+          todoGateBlocked={state.todoGateBlocked}
+          todoGateMessage={state.todoGateMessage}
         />
       </div>
       {/* Sidebar/Drawer Backdrop */}

@@ -4,6 +4,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.tool.UserDataPathResolver;
 import reactor.core.publisher.Mono;
 
 @Component
@@ -27,10 +28,15 @@ public class DynamicContextMiddleware implements AgentMiddleware {
         return """
                 [Dynamic context]
                 - Current date/time: %s
+                - User uploads: %s
                 - Workspace root: %s
+                - Output files: %s
+                - Use the workspace for temporary work. Save final deliverables under the output files directory. Do not write to uploads; uploads is written by the frontend upload service.
                 """.formatted(
                         ZonedDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-                        context.config().workspaceRoot().toAbsolutePath()
+                        UserDataPathResolver.VIRTUAL_UPLOADS_ROOT,
+                        UserDataPathResolver.VIRTUAL_WORKSPACE_ROOT,
+                        UserDataPathResolver.VIRTUAL_OUTPUTS_ROOT
                 );
     }
 }

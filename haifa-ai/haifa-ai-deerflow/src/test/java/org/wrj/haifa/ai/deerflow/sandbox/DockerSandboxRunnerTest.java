@@ -14,6 +14,7 @@ class DockerSandboxRunnerTest {
     @Test
     void rejectsOutOfBoundsCallerProvidedWorkdir(@TempDir Path tmp) {
         DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
         properties.setOutputsRoot(tmp.resolve("outputs").toString());
         properties.getSandbox().setWorkdirSubdir("sandbox");
 

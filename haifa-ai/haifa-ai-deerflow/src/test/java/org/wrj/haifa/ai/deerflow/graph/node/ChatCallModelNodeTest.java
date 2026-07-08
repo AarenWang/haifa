@@ -32,7 +32,7 @@ class ChatCallModelNodeTest {
         ChatCallModelNode node = new ChatCallModelNode(
                 prompt -> {
                     capturedPrompt.set(prompt);
-                    return Mono.just(new ModelResponse("<final_answer>ok</final_answer>"));
+                    return Mono.just(new ModelResponse("ok"));
                 },
                 new ToolRegistry(List.of()),
                 properties
@@ -59,7 +59,7 @@ class ChatCallModelNodeTest {
         assertThat(prompt).isNotNull();
         assertThat(prompt.systemPrompt())
                 .contains("middleware persona memory skill prompt")
-                .contains("<tool_call name=\"tool_name\">")
+                .contains("structured tool-call interface")
                 .doesNotContain("properties system prompt should not be used");
         assertThat(prompt.modelName()).isEqualTo("prompt-model");
         assertThat(prompt.messages()).extracting(ModelMessage::role)
@@ -76,7 +76,7 @@ class ChatCallModelNodeTest {
         ChatCallModelNode node = new ChatCallModelNode(
                 prompt -> {
                     capturedPrompt.set(prompt);
-                    return Mono.just(new ModelResponse("<final_answer>fallback ok</final_answer>"));
+                    return Mono.just(new ModelResponse("fallback ok"));
                 },
                 new ToolRegistry(List.of()),
                 new DeerFlowProperties()
@@ -94,7 +94,7 @@ class ChatCallModelNodeTest {
         assertThat(prompt).isNotNull();
         assertThat(prompt.systemPrompt())
                 .contains("You are a helpful assistant.")
-                .contains("<tool_call name=\"tool_name\">");
+                .contains("structured tool-call interface");
         assertThat(prompt.modelName()).isEqualTo("fallback-model");
 
         List<Map<String, Object>> messages = (List<Map<String, Object>>) update.get(AgentGraphStateKeys.MESSAGE_WINDOW);
@@ -116,7 +116,7 @@ class ChatCallModelNodeTest {
         ChatCallModelNode node = new ChatCallModelNode(
                 prompt -> {
                     capturedPrompt.set(prompt);
-                    return Mono.just(new ModelResponse("<final_answer>ok</final_answer>"));
+                    return Mono.just(new ModelResponse("ok"));
                 },
                 new ToolRegistry(List.of(runScript)),
                 properties
@@ -169,3 +169,5 @@ class ChatCallModelNodeTest {
         };
     }
 }
+
+

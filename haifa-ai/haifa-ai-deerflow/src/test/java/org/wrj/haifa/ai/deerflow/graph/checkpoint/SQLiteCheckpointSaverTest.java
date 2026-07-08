@@ -19,6 +19,7 @@ import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntime;
 import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntimeRequest;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import reactor.core.publisher.Mono;
@@ -106,13 +107,13 @@ class SQLiteCheckpointSaverTest {
 
             // Mock model response to request tool execution
             AgentLoop loop = new AgentLoop(
-                    prompt -> Mono.just(new ModelResponse("<tool_call name=\"list_workspace_files\">{}</tool_call>")),
+                    prompt -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-list-files", "list_workspace_files", "{}")))),
                     new ToolRegistry(List.of())
             );
             when(modelClient.generate(any()))
                     .thenReturn(
-                            Mono.just(new ModelResponse("<tool_call name=\"list_workspace_files\">{}</tool_call>")),
-                            Mono.just(new ModelResponse("<final_answer>done execution</final_answer>")));
+                            Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-list-files", "list_workspace_files", "{}")))),
+                            Mono.just(new ModelResponse("done execution")));
 
             GraphChatRuntimeRequest request = new GraphChatRuntimeRequest(
                     loop,

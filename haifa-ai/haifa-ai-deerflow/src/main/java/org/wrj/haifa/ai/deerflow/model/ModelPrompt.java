@@ -57,9 +57,9 @@ public record ModelPrompt(
                 case ASSISTANT -> {
                     sb.append("Assistant: ").append(message.content());
                     for (ModelToolCall toolCall : message.toolCalls()) {
-                        sb.append("\n<tool_call name=\"").append(escapeAttribute(toolCall.name())).append("\">")
-                                .append(toolCall.arguments() == null ? "{}" : toolCall.arguments())
-                                .append("</tool_call>");
+                        sb.append("\nStructured tool call requested")
+                                .append(" [id=").append(toolCall.id() == null ? "" : toolCall.id()).append("]")
+                                .append(" [name=").append(toolCall.name() == null ? "" : toolCall.name()).append("]");
                     }
                 }
                 case TOOL -> {
@@ -75,15 +75,5 @@ public record ModelPrompt(
             }
         }
         return sb.toString().trim();
-    }
-
-    private static String escapeAttribute(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.replace("&", "&amp;")
-                .replace("\"", "&quot;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;");
     }
 }

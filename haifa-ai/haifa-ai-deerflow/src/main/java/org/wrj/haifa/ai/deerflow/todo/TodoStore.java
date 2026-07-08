@@ -19,10 +19,10 @@ public interface TodoStore {
     /**
      * Saves or replaces the checklist of todos for a thread/run ID.
      */
-    void saveTodos(String threadId, String runId, List<TodoItem> todos);
+    TodoSnapshot saveTodos(String threadId, String runId, List<TodoItem> todos);
 
-    default void saveTodos(String threadId, List<TodoItem> todos) {
-        saveTodos(threadId, null, todos);
+    default TodoSnapshot saveTodos(String threadId, List<TodoItem> todos) {
+        return saveTodos(threadId, null, todos);
     }
 
     default boolean hasIncomplete(String threadId, String runId) {
@@ -33,9 +33,13 @@ public interface TodoStore {
     /**
      * Clears all todos associated with a thread/run ID.
      */
-    void clear(String threadId, String runId);
+    TodoSnapshot clear(String threadId, String runId);
 
-    default void clear(String threadId) {
-        clear(threadId, null);
+    default TodoSnapshot clear(String threadId) {
+        return clear(threadId, null);
+    }
+
+    default TodoSnapshot snapshot(String threadId, String runId) {
+        return TodoSnapshot.of(threadId, runId, 0, "read", listTodos(threadId, runId));
     }
 }

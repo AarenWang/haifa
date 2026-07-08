@@ -108,7 +108,7 @@ class SimpleAgentRuntimeTest {
                 } else if (callCount == 2) {
                     return Mono.just(new ModelResponse("", List.of(tc2)));
                 } else {
-                    return Mono.just(new ModelResponse("<final_answer>I read note.md: hello deerflow</final_answer>"));
+                    return Mono.just(new ModelResponse("I read note.md: hello deerflow"));
                 }
             }
         };
@@ -194,7 +194,7 @@ class SimpleAgentRuntimeTest {
                 if (callCount == 1) {
                     return Mono.just(new ModelResponse("", List.of(tc)));
                 } else {
-                    return Mono.just(new ModelResponse("<final_answer>handled gracefully</final_answer>"));
+                    return Mono.just(new ModelResponse("handled gracefully"));
                 }
             }
         };
@@ -263,7 +263,7 @@ class SimpleAgentRuntimeTest {
         properties.getGraph().setEnabled(true);
         properties.getGraph().setMode(GraphRuntimeMode.SHADOW);
 
-        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>legacy answer</final_answer>"));
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("legacy answer"));
         ToolRegistry tools = new ToolRegistry(List.of());
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager,
                 messageStore,
@@ -297,7 +297,7 @@ class SimpleAgentRuntimeTest {
         properties.getGraph().setEnabled(true);
         properties.getGraph().setMode(GraphRuntimeMode.ACTIVE_CHAT);
 
-        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>active graph answer</final_answer>"));
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("active graph answer"));
         ToolRegistry tools = new ToolRegistry(List.of());
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager,
                 messageStore,
@@ -330,7 +330,7 @@ class SimpleAgentRuntimeTest {
         properties.getGraph().setEnabled(true);
         properties.getGraph().setMode(GraphRuntimeMode.ACTIVE_RESEARCH);
 
-        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>active research answer</final_answer>"));
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("active research answer"));
         ToolRegistry tools = new ToolRegistry(List.of());
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager,
                 messageStore,
@@ -361,7 +361,7 @@ class SimpleAgentRuntimeTest {
         properties.setMaxIterations(2);
         properties.setMaxResearchSteps(2);
 
-        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>stub</final_answer>"));
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("stub"));
         ToolRegistry tools = new ToolRegistry(List.of());
         clarificationStore.clearAll();
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(
@@ -543,7 +543,7 @@ class SimpleAgentRuntimeTest {
                     .contains("<clarification_answer>")
                     .contains("Output format")
                     .contains("Markdown report");
-            return Mono.just(new ModelResponse("<final_answer>Skill generated after clarification.</final_answer>"));
+            return Mono.just(new ModelResponse("Skill generated after clarification."));
         };
         SimpleAgentRuntime resumedRuntime = new SimpleAgentRuntime(
                 properties,

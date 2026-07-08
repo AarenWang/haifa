@@ -2064,6 +2064,146 @@ body {
   gap: 10px;
 }
 
+/* TodoListPanel */
+.todo-panel {
+  flex: 0 0 auto;
+  margin: 12px 16px 0;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.todo-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 8px;
+}
+
+.todo-panel-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.todo-progress-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.todo-progress-track {
+  height: 4px;
+  margin: 0 12px 10px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.todo-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-blue);
+  transition: width 0.2s ease;
+}
+
+.todo-gate-warning {
+  margin: 0 12px 10px;
+  padding: 8px 9px;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  border: 1px solid var(--accent-amber-light);
+  border-radius: var(--radius);
+  background: var(--accent-amber-light);
+  color: var(--accent-amber);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.todo-gate-warning svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.todo-gate-warning span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 0 8px 8px;
+  gap: 4px;
+}
+
+.todo-row {
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 7px;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+}
+
+.todo-row.in-progress {
+  background: var(--accent-blue-light);
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+
+.todo-row.completed,
+.todo-row.cancelled {
+  color: var(--text-muted);
+}
+
+.todo-status-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.todo-content {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.todo-row.completed .todo-content,
+.todo-row.cancelled .todo-content {
+  text-decoration: line-through;
+}
+
+.todo-status-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.todo-row.in-progress .todo-status-label {
+  color: var(--accent-blue);
+}
 /* EventCard */
 .event-card {
   border: 1px solid var(--border-light);

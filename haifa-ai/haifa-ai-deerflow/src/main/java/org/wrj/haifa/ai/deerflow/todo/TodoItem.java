@@ -12,6 +12,8 @@ public class TodoItem {
     private String status; // pending, in_progress, completed, cancelled
     private String priority;
     private String evidence;
+    private Integer orderIndex;
+    private Instant createdAt;
     private Instant updatedAt;
 
     public TodoItem() {
@@ -61,6 +63,22 @@ public class TodoItem {
 
     public void setEvidence(String evidence) {
         this.evidence = evidence;
+    }
+
+    public Integer getOrderIndex() {
+        return orderIndex;
+    }
+
+    public void setOrderIndex(Integer orderIndex) {
+        this.orderIndex = orderIndex;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
     }
 
     public Instant getUpdatedAt() {

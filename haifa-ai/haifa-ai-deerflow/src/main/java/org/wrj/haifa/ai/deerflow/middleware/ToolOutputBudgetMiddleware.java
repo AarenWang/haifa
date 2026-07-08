@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.research.ResearchEvidenceCompressor;
+import org.wrj.haifa.ai.deerflow.tool.UserDataPathResolver;
 
 /**
  * Tool output budget middleware inspired by Python deer-flow ToolOutputBudgetMiddleware.
@@ -40,7 +41,6 @@ public class ToolOutputBudgetMiddleware {
 
     private static final Logger log = LoggerFactory.getLogger(ToolOutputBudgetMiddleware.class);
 
-    private static final String VIRTUAL_OUTPUTS_BASE = "/mnt/user-data/outputs";
 
     private final DeerFlowProperties properties;
     private final ResearchEvidenceCompressor evidenceCompressor;
@@ -192,7 +192,7 @@ public class ToolOutputBudgetMiddleware {
         }
 
         // Return virtual path that the model can reference (read_file tool can resolve)
-        return VIRTUAL_OUTPUTS_BASE + "/" + storageSubdir + "/" + filename;
+        return UserDataPathResolver.VIRTUAL_OUTPUTS_ROOT + "/" + storageSubdir + "/" + filename;
     }
 
     private String buildExternalizedFilename(String toolName) {

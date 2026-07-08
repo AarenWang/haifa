@@ -13,26 +13,19 @@ class ConversationReplaySanitizerTest {
     private final ConversationReplaySanitizer sanitizer = new ConversationReplaySanitizer();
 
     @Test
-    void parsesLegacyXmlToolCallAndPairsFollowingToolResult() {
+    void doesNotParseLegacyXmlToolCallText() {
         List<ModelMessage> sanitized = sanitizer.sanitize(List.of(
                 new ModelMessage(ModelMessage.Role.USER, "Search it"),
                 new ModelMessage(ModelMessage.Role.ASSISTANT,
-                        "<tool_call name=\"mock_search\">{\"query\":\"deerflow\"}</tool_call>"),
+                        "<" + "tool_call name=\"mock_search\">{\"query\":\"deerflow\"}</" + "tool_call>"),
                 new ModelMessage(ModelMessage.Role.TOOL, "result text", List.of(), null, "mock_search", Map.of())
         ));
 
-        assertThat(sanitized).hasSize(3);
+        assertThat(sanitized).hasSize(2);
         ModelMessage assistant = sanitized.get(1);
-        ModelMessage tool = sanitized.get(2);
-
         assertThat(assistant.role()).isEqualTo(ModelMessage.Role.ASSISTANT);
-        assertThat(assistant.toolCalls()).hasSize(1);
-        assertThat(assistant.toolCalls().getFirst().name()).isEqualTo("mock_search");
-        assertThat(tool.role()).isEqualTo(ModelMessage.Role.TOOL);
-        assertThat(tool.toolCallId()).isEqualTo(assistant.toolCalls().getFirst().id());
-        assertThat(tool.name()).isEqualTo("mock_search");
+        assertThat(assistant.toolCalls()).isEmpty();
     }
-
     @Test
     void insertsSyntheticToolResultForMissingAssistantToolCallResult() {
         List<ModelMessage> sanitized = sanitizer.sanitize(List.of(
@@ -67,3 +60,5 @@ class ConversationReplaySanitizerTest {
                 .containsExactly(ModelMessage.Role.USER, ModelMessage.Role.ASSISTANT);
     }
 }
+
+

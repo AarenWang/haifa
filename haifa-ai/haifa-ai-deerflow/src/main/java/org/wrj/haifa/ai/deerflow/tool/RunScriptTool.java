@@ -26,12 +26,14 @@ public class RunScriptTool implements AgentTool {
     private final DeerFlowProperties properties;
     private final SandboxRunner sandboxRunner;
     private final CommandPolicy commandPolicy;
+    private final UserDataPathResolver pathResolver;
 
     @Autowired
     public RunScriptTool(DeerFlowProperties properties, SandboxRunner sandboxRunner, CommandPolicy commandPolicy) {
         this.properties = properties;
         this.sandboxRunner = sandboxRunner;
         this.commandPolicy = commandPolicy;
+        this.pathResolver = new UserDataPathResolver(properties);
     }
 
     @Override
@@ -41,7 +43,7 @@ public class RunScriptTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Generate and execute short scripts for local observation, lightweight tasks, file inspection, environment checks, and output verification. "
+        return "Generate and execute short scripts for local observation, lightweight tasks, file inspection, environment checks, and output verification. Scripts run under /mnt/user-data/workspace; final deliverables should be written under /mnt/user-data/outputs. "
                 + "Arguments: {\"language\": \"python|powershell|node|bash\", \"code\": \"script code\", \"args\": [\"optional arguments\"], \"purpose\": \"short reason\"}";
     }
 
@@ -53,7 +55,8 @@ public class RunScriptTool implements AgentTool {
         String lower = userMessage.toLowerCase();
         return lower.contains("script") || lower.contains("run") || lower.contains("execute")
                 || lower.contains("cpu") || lower.contains("memory") || lower.contains("system")
-                || lower.contains("使用率") || lower.contains("电脑");
+                || lower.contains("computer") || lower.contains("environment")
+                || lower.contains("\u4f7f\u7528\u7387") || lower.contains("\u7535\u8111");
     }
 
     @Override
@@ -135,23 +138,22 @@ public class RunScriptTool implements AgentTool {
 
             String runId = request.runId() == null || request.runId().isBlank() ? "adhoc" : request.runId();
             String scriptFolderId = UUID.randomUUID().toString();
-            Path outputsRootPath = Path.of(properties.getOutputsRoot()).toAbsolutePath().normalize();
+            Path workspaceRootPath = pathResolver.workspaceRoot();
 
-            Path baseDir = Path.of(
-                    properties.getOutputsRoot(),
+            Path baseDir = workspaceRootPath.resolve(Path.of(
                     properties.getSandbox().getWorkdirSubdir(),
                     runId,
                     properties.getSandbox().getScriptWorkdirSubdir(),
                     scriptFolderId
-            );
+            ));
             Path normalizedDir = baseDir.toAbsolutePath().normalize();
-            if (!normalizedDir.startsWith(outputsRootPath)) {
-                return ToolResult.of(name(), "Error: destination directory is outside allowed outputs root");
+            if (!normalizedDir.startsWith(workspaceRootPath)) {
+                return ToolResult.of(name(), "Error: destination directory is outside allowed workspace root");
             }
 
             Path scriptFile = normalizedDir.resolve("script" + ext).normalize();
-            if (!scriptFile.startsWith(outputsRootPath)) {
-                return ToolResult.of(name(), "Error: script file path is outside allowed outputs root");
+            if (!scriptFile.startsWith(workspaceRootPath)) {
+                return ToolResult.of(name(), "Error: script file path is outside allowed workspace root");
             }
 
             try {
@@ -168,21 +170,24 @@ public class RunScriptTool implements AgentTool {
                 return ToolResult.of(name(), ex.getMessage());
             }
             String commandToRun = String.join(" ", cmdArgs);
-            CommandPolicy.Decision policyDecision = commandPolicy.evaluate(commandToRun, request.workspaceRoot());
+            CommandPolicy.Decision policyDecision = commandPolicy.evaluate(commandToRun, pathResolver.workspaceRoot());
             if (!policyDecision.allowed()) {
                 return ToolResult.of(name(), "Command denied by policy: " + policyDecision.reason(),
                         Map.of("denied", true, "reason", policyDecision.reason()));
             }
 
-            String relativeScriptPath = outputsRootPath.relativize(scriptFile.toAbsolutePath()).toString().replace('\\', '/');
+            String relativeScriptPath = workspaceRootPath.relativize(scriptFile.toAbsolutePath()).toString().replace('\\', '/');
 
             SandboxResult result = sandboxRunner.run(new SandboxRequest(
                     commandToRun,
                     cmdArgs,
-                    request.workspaceRoot(),
+                    pathResolver.workspaceRoot(),
                     normalizedDir,
                     Duration.ofMillis(properties.getSandbox().getTimeoutMs()),
-                    Map.of(),
+                    Map.of(
+                            "DEERFLOW_UPLOADS_DIR", pathResolver.uploadsRoot().toString(),
+                            "DEERFLOW_WORKSPACE_DIR", pathResolver.workspaceRoot().toString(),
+                            "DEERFLOW_OUTPUTS_DIR", pathResolver.outputsRoot().toString()),
                     properties.getSandbox().isNetworkEnabled(),
                     request.runId()
             ));

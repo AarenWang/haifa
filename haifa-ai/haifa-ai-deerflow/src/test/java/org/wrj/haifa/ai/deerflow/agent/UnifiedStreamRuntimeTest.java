@@ -77,7 +77,7 @@ class UnifiedStreamRuntimeTest {
         properties.setMaxIterations(4);
 
         AgentModelClient modelClient = prompt -> Mono.just(
-                new ModelResponse("<final_answer>Hello from unified stream</final_answer>"));
+                new ModelResponse("Hello from unified stream"));
         ToolRegistry tools = new ToolRegistry(List.of());
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(
                 properties, tools, modelClient, runManager, threadManager, messageStore,
@@ -113,7 +113,7 @@ class UnifiedStreamRuntimeTest {
         properties.setMaxResearchSteps(4);
 
         AgentModelClient modelClient = prompt -> Mono.just(
-                new ModelResponse("<final_answer>Research complete</final_answer>"));
+                new ModelResponse("Research complete"));
         ToolRegistry tools = new ToolRegistry(List.of());
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(
                 properties, tools, modelClient, runManager, threadManager, messageStore,
@@ -149,9 +149,9 @@ class UnifiedStreamRuntimeTest {
 
         // Model step sequence:
         // 1: write_todos with pending items
-        // 2: tries <final_answer> → intercepted by todo quality gate
+        // 2: tries to answer early and is intercepted by todo quality gate
         // 3: write_todos marking items completed
-        // 4: <final_answer> accepted
+        // 4: final answer accepted
         ModelToolCall tc1 = new ModelToolCall("tc-1", "write_todos",
                 "{\"todos\":[{\"id\":\"1\",\"content\":\"Search sources\",\"status\":\"pending\"},{\"id\":\"2\",\"content\":\"Analyze data\",\"status\":\"pending\"}]}");
         ModelToolCall tc3 = new ModelToolCall("tc-3", "write_todos",
@@ -165,11 +165,11 @@ class UnifiedStreamRuntimeTest {
                 if (callCount == 1) {
                     return Mono.just(new ModelResponse("", List.of(tc1)));
                 } else if (callCount == 2) {
-                    return Mono.just(new ModelResponse("<final_answer>Attempted early answer</final_answer>"));
+                    return Mono.just(new ModelResponse("Attempted early answer"));
                 } else if (callCount == 3) {
                     return Mono.just(new ModelResponse("", List.of(tc3)));
                 } else {
-                    return Mono.just(new ModelResponse("<final_answer>Final research report</final_answer>"));
+                    return Mono.just(new ModelResponse("Final research report"));
                 }
             }
         };
@@ -279,7 +279,7 @@ class UnifiedStreamRuntimeTest {
 
         // Resume with user clarification
         AgentModelClient resumedClient = prompt -> Mono.just(
-                new ModelResponse("<final_answer>Resumed answer</final_answer>"));
+                new ModelResponse("Resumed answer"));
         SimpleAgentRuntime resumedRuntime = new SimpleAgentRuntime(
                 properties,
                 new ToolRegistry(List.of(askTool)),

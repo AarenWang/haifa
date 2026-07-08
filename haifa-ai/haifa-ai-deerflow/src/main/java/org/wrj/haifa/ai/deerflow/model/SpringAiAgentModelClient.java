@@ -4,12 +4,16 @@ import java.util.ArrayList;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
@@ -20,7 +24,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallParser;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -91,11 +94,9 @@ public class SpringAiAgentModelClient implements AgentModelClient {
     }
 
     private static ModelResponse callSpringAi(ChatClient.Builder builder, ModelPrompt prompt) {
-        String effectiveUserPrompt = prompt.effectiveUserPrompt();
         ChatClient.ChatClientRequestSpec request = builder.build()
                 .prompt()
-                .system(prompt.systemPrompt())
-                .user(effectiveUserPrompt);
+                .messages(toSpringAiMessages(prompt));
 
         ChatOptions chatOptions = chatOptionsFor(prompt);
         if (chatOptions != null) {
@@ -112,44 +113,23 @@ public class SpringAiAgentModelClient implements AgentModelClient {
 
         if (chatResponse.getResult() != null) {
             org.springframework.ai.chat.model.Generation generation = chatResponse.getResult();
-            content = generation.getOutput().getText();
-            if (content == null) {
-                content = "";
-            }
-
-            // Check if there are tool calls in AssistantMessage
-            org.springframework.ai.chat.messages.AssistantMessage assistantMessage = generation.getOutput();
-            if (assistantMessage != null && assistantMessage.getToolCalls() != null) {
-                for (org.springframework.ai.chat.messages.AssistantMessage.ToolCall tc : assistantMessage.getToolCalls()) {
-                    modelToolCalls.add(new ModelToolCall(
-                        tc.id(),
-                        tc.name(),
-                        tc.arguments(),
-                        tc.type()
-                    ));
+            AssistantMessage assistantMessage = generation.getOutput();
+            if (assistantMessage != null) {
+                content = assistantMessage.getText();
+                if (content == null) {
+                    content = "";
+                }
+                if (assistantMessage.getToolCalls() != null) {
+                    for (AssistantMessage.ToolCall tc : assistantMessage.getToolCalls()) {
+                        modelToolCalls.add(new ModelToolCall(
+                                tc.id(),
+                                tc.name(),
+                                tc.arguments(),
+                                tc.type()
+                        ));
+                    }
                 }
             }
-        }
-
-        // If Spring AI model returned no structural tool calls, fallback to parsing content via ToolCallParser
-        if (modelToolCalls.isEmpty()) {
-            ToolCallParser parser = new ToolCallParser();
-            List<ToolCallParser.ParsedToolCall> parsed = parser.parse(content);
-            if (!parsed.isEmpty()) {
-                for (ToolCallParser.ParsedToolCall ptc : parsed) {
-                    modelToolCalls.add(new ModelToolCall(
-                        UUID.randomUUID().toString(),
-                        ptc.toolName(),
-                        ptc.arguments()
-                    ));
-                }
-                // Strip the XML/DSML tags from final response text
-                content = parser.cleanResponseText(content);
-            }
-        } else {
-            // Also clean any leftover xml/dsml tags from text if structural tool calls were returned
-            ToolCallParser parser = new ToolCallParser();
-            content = parser.cleanResponseText(content);
         }
 
         String finishReason = null;
@@ -158,6 +138,52 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         }
 
         return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of());
+    }
+
+    static List<Message> toSpringAiMessages(ModelPrompt prompt) {
+        List<Message> messages = new ArrayList<>();
+        if (StringUtils.hasText(prompt.systemPrompt())) {
+            messages.add(new SystemMessage(prompt.systemPrompt()));
+        }
+        if (prompt.hasMessages()) {
+            for (ModelMessage message : prompt.messages()) {
+                Message springMessage = toSpringAiMessage(message);
+                if (springMessage != null) {
+                    messages.add(springMessage);
+                }
+            }
+        } else if (StringUtils.hasText(prompt.userPrompt())) {
+            messages.add(new UserMessage(prompt.userPrompt()));
+        }
+        return messages;
+    }
+
+    private static Message toSpringAiMessage(ModelMessage message) {
+        if (message == null) {
+            return null;
+        }
+        return switch (message.role()) {
+            case SYSTEM -> new SystemMessage(message.content());
+            case USER -> new UserMessage(message.content());
+            case ASSISTANT -> AssistantMessage.builder()
+                    .content(message.content())
+                    .properties(message.metadata())
+                    .toolCalls(message.toolCalls().stream()
+                            .map(toolCall -> new AssistantMessage.ToolCall(
+                                    blankToDefault(toolCall.id(), ""),
+                                    blankToDefault(toolCall.type(), "tool_call"),
+                                    blankToDefault(toolCall.name(), ""),
+                                    blankToDefault(toolCall.arguments(), "{}")))
+                            .toList())
+                    .build();
+            case TOOL -> ToolResponseMessage.builder()
+                    .responses(List.of(new ToolResponseMessage.ToolResponse(
+                            blankToDefault(message.toolCallId(), ""),
+                            blankToDefault(message.name(), ""),
+                            message.content())))
+                    .metadata(message.metadata())
+                    .build();
+        };
     }
 
     static ChatOptions chatOptionsFor(ModelPrompt prompt) {
@@ -220,5 +246,9 @@ public class SpringAiAgentModelClient implements AgentModelClient {
 
     private static String safe(String value) {
         return StringUtils.hasText(value) ? value : "<backend-default>";
+    }
+
+    private static String blankToDefault(String value, String defaultValue) {
+        return StringUtils.hasText(value) ? value : defaultValue;
     }
 }

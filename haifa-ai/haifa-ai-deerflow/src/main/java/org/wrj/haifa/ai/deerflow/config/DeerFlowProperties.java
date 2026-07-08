@@ -2,9 +2,7 @@ package org.wrj.haifa.ai.deerflow.config;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Locale;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType;
@@ -15,7 +13,8 @@ public class DeerFlowProperties {
 
     private String model;
     private String systemPrompt;
-    private String workspaceRoot = ".";
+    private String userDataRoot = "${user.dir}/data/user-data";
+    private String workspaceRoot = "${user.dir}/data/user-data/workspace";
     private String skillsRoot = ".";
     private boolean skillsEnabled = true;
     private boolean mcpEnabled = false;
@@ -24,8 +23,8 @@ public class DeerFlowProperties {
     @Min(1_000)
     private long modelTimeout = 300_000; // 5 minutes in ms
 
-    private String uploadsRoot = "${user.dir}/uploads";
-    private String outputsRoot = "${user.dir}/outputs";
+    private String uploadsRoot = "${user.dir}/data/user-data/uploads";
+    private String outputsRoot = "${user.dir}/data/user-data/outputs";
     private boolean writeFileEnabled = true;
     private boolean strReplaceEnabled = true;
     private boolean bashEnabled = false;
@@ -360,16 +359,19 @@ public class DeerFlowProperties {
     }
 
     public String getWorkspaceRoot() {
-        Path configured = resolvePath(workspaceRoot, ".");
-        if (!StringUtils.hasText(System.getenv("HAIFA_DEERFLOW_WORKSPACE"))
-                && looksLikeDeerFlowModule(configured)) {
-            return discoverRepositoryRoot(configured).toString();
-        }
-        return configured.toString();
+        return resolvePath(workspaceRoot, Path.of(getUserDataRoot()).resolve("workspace").toString()).toString();
     }
 
     public void setWorkspaceRoot(String workspaceRoot) {
         this.workspaceRoot = workspaceRoot;
+    }
+
+    public String getUserDataRoot() {
+        return resolvePath(userDataRoot, "${user.dir}/data/user-data").toString();
+    }
+
+    public void setUserDataRoot(String userDataRoot) {
+        this.userDataRoot = userDataRoot;
     }
 
     public String getSkillsRoot() {
@@ -413,7 +415,7 @@ public class DeerFlowProperties {
     }
 
     public String getUploadsRoot() {
-        return uploadsRoot;
+        return resolvePath(uploadsRoot, Path.of(getUserDataRoot()).resolve("uploads").toString()).toString();
     }
 
     public void setUploadsRoot(String uploadsRoot) {
@@ -589,53 +591,17 @@ public class DeerFlowProperties {
     public void setSummarization(Summarization summarization) { this.summarization = summarization; }
 
     public String getOutputsRoot() {
-        if (usesDefaultOutputsRoot()) {
-            return Path.of(getWorkspaceRoot()).resolve("outputs").toAbsolutePath().normalize().toString();
-        }
-        return resolvePath(outputsRoot, "outputs").toString();
+        return resolvePath(outputsRoot, Path.of(getUserDataRoot()).resolve("outputs").toString()).toString();
     }
 
     public void setOutputsRoot(String outputsRoot) {
         this.outputsRoot = outputsRoot;
     }
 
-    private boolean usesDefaultOutputsRoot() {
-        if (StringUtils.hasText(System.getenv("HAIFA_DEERFLOW_OUTPUTS"))) {
-            return false;
-        }
-        if (!StringUtils.hasText(outputsRoot)) {
-            return true;
-        }
-        String normalized = outputsRoot.replace('\\', '/').toLowerCase(Locale.ROOT);
-        String userDirOutputs = Path.of(System.getProperty("user.dir"), "outputs")
-                .toAbsolutePath().normalize().toString().replace('\\', '/').toLowerCase(Locale.ROOT);
-        return normalized.equals("${user.dir}/outputs")
-                || resolvePath(outputsRoot, "outputs").toString().replace('\\', '/').toLowerCase(Locale.ROOT)
-                        .equals(userDirOutputs);
-    }
-
     private static Path resolvePath(String configured, String fallback) {
         String value = StringUtils.hasText(configured) ? configured : fallback;
         value = value.replace("${user.dir}", System.getProperty("user.dir"));
         return Path.of(value).toAbsolutePath().normalize();
-    }
-
-    private static boolean looksLikeDeerFlowModule(Path path) {
-        Path fileName = path.getFileName();
-        return fileName != null && "haifa-ai-deerflow".equalsIgnoreCase(fileName.toString())
-                && Files.isRegularFile(path.resolve("pom.xml"));
-    }
-
-    private static Path discoverRepositoryRoot(Path start) {
-        Path current = start.toAbsolutePath().normalize();
-        while (current != null) {
-            if (Files.isRegularFile(current.resolve("AGENTS.md"))
-                    && Files.isRegularFile(current.resolve("pom.xml"))) {
-                return current;
-            }
-            current = current.getParent();
-        }
-        return start.toAbsolutePath().normalize();
     }
 
     public boolean isWriteFileEnabled() {

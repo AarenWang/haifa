@@ -14,6 +14,7 @@ import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
 import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
 import org.wrj.haifa.ai.deerflow.thread.MessageRole;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
@@ -71,11 +72,11 @@ class GraphChatRuntimeTest {
         );
 
         AgentLoop loop = new AgentLoop(
-                prompt -> Mono.just(new ModelResponse("<final_answer>hello user from graph</final_answer>")),
+                prompt -> Mono.just(new ModelResponse("hello user from graph")),
                 new ToolRegistry(List.of())
         );
         when(modelClient.generate(any()))
-                .thenReturn(Mono.just(new ModelResponse("<final_answer>hello user from graph</final_answer>")));
+                .thenReturn(Mono.just(new ModelResponse("hello user from graph")));
 
         GraphChatRuntimeRequest request = new GraphChatRuntimeRequest(
                 loop,
@@ -133,11 +134,11 @@ class GraphChatRuntimeTest {
 
         when(modelClient.generate(any()))
                 .thenReturn(
-                        Mono.just(new ModelResponse("<tool_call name=\"unknown_tool\">{}</tool_call>")),
-                        Mono.just(new ModelResponse("<final_answer>Tool unknown_tool was not found.</final_answer>")));
+                        Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-unknown-tool", "unknown_tool", "{}")))),
+                        Mono.just(new ModelResponse("Tool unknown_tool was not found.")));
 
         AgentLoop loop = new AgentLoop(
-                prompt -> Mono.just(new ModelResponse("<final_answer>Tool unknown_tool was not found.</final_answer>")),
+                prompt -> Mono.just(new ModelResponse("Tool unknown_tool was not found.")),
                 new ToolRegistry(List.of())
         );
 

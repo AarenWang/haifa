@@ -5,7 +5,6 @@ import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
-import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallParser;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.thread.MessageRole;
@@ -21,11 +20,9 @@ import java.util.concurrent.CompletableFuture;
 public class ChatFinalizeNode implements AsyncNodeAction {
 
     private final MessageStore messageStore;
-    private final ToolCallParser parser;
 
     public ChatFinalizeNode(MessageStore messageStore) {
         this.messageStore = messageStore;
-        this.parser = new ToolCallParser();
     }
 
     @Override
@@ -36,12 +33,10 @@ public class ChatFinalizeNode implements AsyncNodeAction {
             String content = state.<String>value("last_assistant_content").orElse("");
             int stepNum = state.<Integer>value("chat_steps").orElse(0);
 
-            String finalAnswer = parser.extractFinalAnswer(content);
+            String finalAnswer = content == null ? "" : content.trim();
 
-            // Save to database
             messageStore.add(threadId, runId, MessageRole.ASSISTANT, finalAnswer, Map.of());
 
-            // Emit RUN_COMPLETED
             GraphEventRegistry.publish(runId, AgentEvent.of(
                     UUID.randomUUID().toString(),
                     runId,

@@ -15,6 +15,7 @@ import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntime;
 import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntimeRequest;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentGraphCheckpointStore;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import reactor.core.publisher.Mono;
@@ -48,14 +49,14 @@ class GraphCheckpointRecorderTest {
     void activeChatRecordsSQLiteCheckpointsWhenEnabled() {
         properties.getGraph().getCheckpoint().setEnabled(true);
         when(modelClient.generate(any()))
-                .thenReturn(Mono.just(new ModelResponse("<final_answer>done</final_answer>")));
+                .thenReturn(Mono.just(new ModelResponse("done")));
 
         String runId = "run-checkpoint-" + System.nanoTime();
         String threadId = "thread-checkpoint-" + System.nanoTime();
         AgentRunConfig runConfig = new AgentRunConfig(threadId, runId, "model", false, false,
                 4, Path.of("."), RunMode.CHAT, null, Map.of());
         AgentRequest agentRequest = new AgentRequest(threadId, "hello", "model");
-        AgentLoop loop = new AgentLoop(prompt -> Mono.just(new ModelResponse("<final_answer>done</final_answer>")),
+        AgentLoop loop = new AgentLoop(prompt -> Mono.just(new ModelResponse("done")),
                 new ToolRegistry(List.of()));
 
         runtime.run(new GraphChatRuntimeRequest(

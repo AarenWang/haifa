@@ -5,6 +5,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.wrj.haifa.ai.deerflow.todo.InMemoryTodoStore;
 import org.wrj.haifa.ai.deerflow.todo.TodoItem;
+import org.wrj.haifa.ai.deerflow.todo.TodoSnapshot;
 import org.wrj.haifa.ai.deerflow.todo.TodoStore;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,24 +29,26 @@ class WriteTodosToolTest {
         ToolRequest request1 = new ToolRequest(argumentsJson1, Path.of("."), List.of(), "thread-1", "run-1");
         ToolResult result1 = tool.execute(request1);
 
-        assertThat(result1.content()).contains("Gather requirements").contains("Write code");
+        assertThat(result1.content()).contains("Todo list created");
+        assertThat(result1.metadata()).containsEntry("todoOperation", "created");
         assertThat(result1.metadata()).containsEntry("todosCount", 2);
         assertThat(result1.metadata()).containsEntry("completedCount", 1L);
         assertThat(result1.metadata()).containsEntry("inProgressCount", 1L);
-        
+        assertThat(result1.metadata()).containsKey("snapshot");
+        TodoSnapshot snapshot = (TodoSnapshot) result1.metadata().get("snapshot");
+        assertThat(snapshot.todos()).extracting(TodoItem::getContent)
+                .containsExactly("Gather requirements", "Write code");
+        assertThat(snapshot.summary().completed()).isEqualTo(1);
+        assertThat(snapshot.summary().inProgress()).isEqualTo(1);
+
         List<TodoItem> todos1 = todoStore.listTodos("thread-1", "run-1");
         assertThat(todos1).hasSize(2);
         assertThat(todos1.get(0).getId()).isEqualTo("task-1");
         assertThat(todos1.get(0).getStatus()).isEqualTo("completed");
 
-        // Verify isolation by thread.
-        List<TodoItem> todos2 = todoStore.listTodos("thread-2", "run-1");
-        assertThat(todos2).isEmpty();
-
-        // Verify isolation by run within the same thread.
+        assertThat(todoStore.listTodos("thread-2", "run-1")).isEmpty();
         assertThat(todoStore.listTodos("thread-1", "run-2")).isEmpty();
 
-        // Write to thread 2
         String argumentsJson2 = """
                 {
                   "todos": [
@@ -58,6 +61,38 @@ class WriteTodosToolTest {
 
         assertThat(todoStore.listTodos("thread-1", "run-1")).hasSize(2);
         assertThat(todoStore.listTodos("thread-2", "run-1")).hasSize(1);
+    }
+
+    @Test
+    void writeTodosToolCanReadCurrentSnapshotWithoutMutation() {
+        TodoStore todoStore = new InMemoryTodoStore();
+        WriteTodosTool tool = new WriteTodosTool(todoStore);
+        todoStore.saveTodos("thread-1", "run-1", List.of(
+                new TodoItem("task-1", "Already planned", "pending")
+        ));
+
+        ToolResult result = tool.execute(new ToolRequest("{}", Path.of("."), List.of(), "thread-1", "run-1"));
+
+        assertThat(result.content()).contains("Todo list read");
+        assertThat(result.metadata()).containsEntry("todoOperation", "read");
+        TodoSnapshot snapshot = (TodoSnapshot) result.metadata().get("snapshot");
+        assertThat(snapshot.todos()).hasSize(1);
+        assertThat(snapshot.todos().get(0).getContent()).isEqualTo("Already planned");
+    }
+
+    @Test
+    void writeTodosToolCanClearTodosWithEmptyList() {
+        TodoStore todoStore = new InMemoryTodoStore();
+        WriteTodosTool tool = new WriteTodosTool(todoStore);
+        todoStore.saveTodos("thread-1", "run-1", List.of(
+                new TodoItem("task-1", "Already planned", "pending")
+        ));
+
+        ToolResult result = tool.execute(new ToolRequest("{\"todos\":[]}", Path.of("."), List.of(), "thread-1", "run-1"));
+
+        assertThat(result.content()).contains("Todo list cleared");
+        assertThat(result.metadata()).containsEntry("todoOperation", "cleared");
+        assertThat(todoStore.listTodos("thread-1", "run-1")).isEmpty();
     }
 
     @Test

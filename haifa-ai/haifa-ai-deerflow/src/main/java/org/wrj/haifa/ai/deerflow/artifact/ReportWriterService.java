@@ -215,7 +215,7 @@ public class ReportWriterService {
         if (!StringUtils.hasText(value)) {
             return "";
         }
-        String normalized = value.replace("<final_answer>", "").replace("</final_answer>", "").trim();
+        String normalized = value.trim();
         if (normalized.length() <= maxChars) {
             return normalized;
         }

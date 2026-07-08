@@ -79,7 +79,7 @@ class AgentLoopTest {
         List<ModelPrompt> prompts = new ArrayList<>();
         AgentModelClient model = prompt -> {
             prompts.add(prompt);
-            return Mono.just(new ModelResponse("<final_answer>Done</final_answer>"));
+            return Mono.just(new ModelResponse("Done"));
         };
 
         ToolRegistry registry = new ToolRegistry(List.of(new MockSearchTool(), new MockFetchTool()));
@@ -102,14 +102,14 @@ class AgentLoopTest {
                 .contains("web_search", "web_fetch");
         assertThat(prompts.getFirst().systemPrompt())
                 .contains("structured tool-call channel")
-                .doesNotContain("emit: <tool_call");
+                .doesNotContain("emit: " + "<" + "tool_call");
     }
 
     @Test
     void stepLimitPreventsInfiniteLoop() {
         // Mock model that always requests a tool call (never gives final answer)
         AgentModelClient infiniteModel = prompt -> Mono.just(
-                new ModelResponse("<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>"));
+                new ModelResponse("", List.of(new ModelToolCall("call-search-test", "mock_search", "{\"query\":\"test\"}"))));
 
         List<AgentTool> tools = List.of(new MockSearchTool());
         ToolRegistry registry = new ToolRegistry(tools);
@@ -156,9 +156,9 @@ class AgentLoopTest {
 
         AgentModelClient model = prompt -> {
             if (prompt.userPrompt().contains("exploding_tool")) {
-                return Mono.just(new ModelResponse("<final_answer>Recovered from tool failure</final_answer>"));
+                return Mono.just(new ModelResponse("Recovered from tool failure"));
             }
-            return Mono.just(new ModelResponse("<tool_call name=\"exploding_tool\">{}</tool_call>"));
+            return Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-exploding", "exploding_tool", "{}"))));
         };
 
         ToolRegistry registry = new ToolRegistry(List.of(explodingTool));
@@ -187,7 +187,7 @@ class AgentLoopTest {
     @Test
     void maxToolCallsLimitIsEnforced() {
         AgentModelClient model = prompt -> Mono.just(
-                new ModelResponse("<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>"));
+                new ModelResponse("", List.of(new ModelToolCall("call-search-test", "mock_search", "{\"query\":\"test\"}"))));
 
         List<AgentTool> tools = List.of(new MockSearchTool());
         ToolRegistry registry = new ToolRegistry(tools);
@@ -225,7 +225,7 @@ class AgentLoopTest {
                         new ModelToolCall("call-2", "slow_tool", "{\"value\":\"b\"}")
                 )));
             }
-            return Mono.just(new ModelResponse("<final_answer>Both slow tools finished</final_answer>"));
+            return Mono.just(new ModelResponse("Both slow tools finished"));
         };
 
         AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(slowTool)));
@@ -247,16 +247,15 @@ class AgentLoopTest {
     }
 
     @Test
-    void retriesWhenModelEmitsMalformedToolCallIntent() {
+    void textToolCallProtocolDoesNotExecuteTools() {
         AtomicInteger modelCalls = new AtomicInteger();
-        AgentModelClient model = prompt -> switch (modelCalls.incrementAndGet()) {
-            case 1 -> Mono.just(new ModelResponse("Tool call - mock_search({\"query\":\"lishui\"})"));
-            case 2 -> Mono.just(new ModelResponse("<tool_call name=\"mock_search\">{\"query\":\"lishui\"}</tool_call>"));
-            default -> Mono.just(new ModelResponse("<final_answer>Search completed after format correction.</final_answer>"));
+        AgentModelClient model = prompt -> {
+            modelCalls.incrementAndGet();
+            return Mono.just(new ModelResponse("Tool call - mock_search({\"query\":\"lishui\"})"));
         };
 
         AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(new MockSearchTool())));
-        AgentRunConfig config = new AgentRunConfig("thread-correct", "run-correct", "test-model",
+        AgentRunConfig config = new AgentRunConfig("thread-text-tool", "run-text-tool", "test-model",
                 false, false, 5, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT,
                 null, Map.of());
 
@@ -269,21 +268,12 @@ class AgentLoopTest {
                 null, List.of(), List.of()
         ).collectList().block();
 
-        assertThat(modelCalls.get()).isEqualTo(3);
-        assertThat(events).anySatisfy(e -> {
-            if (e.type() == AgentEventType.TOOL_CALL_REQUESTED
-                    && Boolean.TRUE.equals(e.metadata().get("unparsedToolCall"))) {
-                assertThat(e.content()).contains("Unparsed tool call format detected");
-            }
-        });
-        assertThat(events).anySatisfy(e -> {
-            if (e.type() == AgentEventType.TOOL_COMPLETED) {
-                assertThat(e.metadata().get("toolName")).isEqualTo("mock_search");
-            }
-        });
+        assertThat(modelCalls.get()).isEqualTo(1);
+        assertThat(events).extracting(AgentEvent::type)
+                .doesNotContain(AgentEventType.TOOL_CALL_REQUESTED, AgentEventType.TOOL_COMPLETED);
         assertThat(events).anySatisfy(e -> {
             if (e.type() == AgentEventType.MODEL_COMPLETED) {
-                assertThat(e.content()).contains("Search completed after format correction");
+                assertThat(e.content()).contains("Tool call - mock_search");
             }
         });
     }
@@ -296,7 +286,7 @@ class AgentLoopTest {
         AtomicReference<Throwable> error = new AtomicReference<>();
         AgentModelClient slowModel = prompt -> Mono.fromCallable(() -> {
             releaseModel.await(3, TimeUnit.SECONDS);
-            return new ModelResponse("<final_answer>Delayed answer</final_answer>");
+            return new ModelResponse("Delayed answer");
         });
 
         AgentLoop loop = new AgentLoop(slowModel, new ToolRegistry(List.of()));
@@ -343,7 +333,7 @@ class AgentLoopTest {
                         new ModelToolCall("call-typed-1", "mock_search", "{\"query\":\"typed\"}")
                 )));
             }
-            return Mono.just(new ModelResponse("<final_answer>Typed context observed.</final_answer>"));
+            return Mono.just(new ModelResponse("Typed context observed."));
         };
 
         AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(new MockSearchTool())));
@@ -377,7 +367,7 @@ class AgentLoopTest {
             assertThat(message.toolCallId()).isEqualTo("call-typed-1");
             assertThat(message.name()).isEqualTo("mock_search");
         });
-        assertThat(secondPrompt.userPrompt()).contains("<tool_call name=\"mock_search\">");
+        assertThat(secondPrompt.userPrompt()).contains("Structured tool call requested").contains("mock_search");
         assertThat(secondPrompt.userPrompt()).contains("Tool result (mock_search) [call-typed-1]");
 
         assertThat(events).anySatisfy(event -> {
@@ -399,7 +389,7 @@ class AgentLoopTest {
                         new ModelToolCall("call-observe-1", "mock_search", "{\"query\":\"observe\"}")
                 )));
             }
-            return Mono.just(new ModelResponse("<final_answer>Observation used.</final_answer>"));
+            return Mono.just(new ModelResponse("Observation used."));
         };
         AgentLoopObserver observer = new NoopAgentLoopObserver() {
             @Override
@@ -443,7 +433,7 @@ class AgentLoopTest {
             if (calls.incrementAndGet() == 1) {
                 return Mono.just(new ModelResponse("Preliminary answer without enough coverage."));
             }
-            return Mono.just(new ModelResponse("<final_answer>Continued after gate.</final_answer>"));
+            return Mono.just(new ModelResponse("Continued after gate."));
         };
         AgentLoopObserver observer = new NoopAgentLoopObserver() {
             private boolean continued;
@@ -498,10 +488,10 @@ class AgentLoopTest {
         public Mono<ModelResponse> generate(ModelPrompt prompt) {
             callCount++;
             return switch (callCount) {
-                case 1 -> Mono.just(new ModelResponse("<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>"));
-                case 2 -> Mono.just(new ModelResponse("<tool_call name=\"mock_fetch\">{\"url\":\"https://example.com/article-1\"}</tool_call>"));
-                case 3 -> Mono.just(new ModelResponse("<final_answer>Based on the search and fetch results, here is the answer.</final_answer>"));
-                default -> Mono.just(new ModelResponse("<final_answer>Default answer.</final_answer>"));
+                case 1 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-search-test", "mock_search", "{\"query\":\"test\"}"))));
+                case 2 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-fetch-1", "mock_fetch", "{\"url\":\"https://example.com/article-1\"}"))));
+                case 3 -> Mono.just(new ModelResponse("Based on the search and fetch results, here is the answer."));
+                default -> Mono.just(new ModelResponse("Default answer."));
             };
         }
     }
@@ -549,9 +539,9 @@ class AgentLoopTest {
             public Mono<ModelResponse> generate(ModelPrompt prompt) {
                 turns++;
                 if (turns == 1) {
-                    return Mono.just(new ModelResponse("<tool_call name=\"run_script\">{\"language\":\"python\",\"code\":\"import os\\nprint('CPU Usage: 10%')\"}</tool_call>"));
+                    return Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-run-script", "run_script", "{\"language\":\"python\",\"code\":\"import os\\nprint('CPU Usage: 10%')\"}"))));
                 } else {
-                    return Mono.just(new ModelResponse("<final_answer>The CPU usage is 10%.</final_answer>"));
+                    return Mono.just(new ModelResponse("The CPU usage is 10%."));
                 }
             }
         };
@@ -560,6 +550,7 @@ class AgentLoopTest {
         properties.setRunScriptEnabled(true);
         properties.getSandbox().setEnabled(true);
         properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
         properties.setOutputsRoot(tmp.resolve("outputs").toString());
 
         org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner fakeRunner = new org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner() {
@@ -607,13 +598,14 @@ class AgentLoopTest {
 
     @Test
     void policyDeniesRunScriptWhenConfigurationDisablesIt(@TempDir Path tmp) {
-        AgentModelClient mockModel = prompt -> Mono.just(new ModelResponse(
-                "<tool_call name=\"run_script\">{\"language\":\"python\",\"code\":\"print('nope')\"}</tool_call>"));
+        AgentModelClient mockModel = prompt -> Mono.just(new ModelResponse("", List.of(
+                new ModelToolCall("call-run-denied", "run_script", "{\"language\":\"python\",\"code\":\"print('nope')\"}"))));
 
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setRunScriptEnabled(true);
         properties.getSandbox().setEnabled(true);
         properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
         properties.setOutputsRoot(tmp.resolve("outputs").toString());
 
         class CountingRunner implements org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner {
@@ -657,3 +649,7 @@ class AgentLoopTest {
                 });
     }
 }
+
+
+
+

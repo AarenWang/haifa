@@ -1,6 +1,7 @@
 package org.wrj.haifa.ai.deerflow.middleware;
 
 import java.util.List;
+import org.wrj.haifa.ai.deerflow.tool.UserDataPathResolver;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import reactor.core.publisher.Mono;
 
@@ -27,9 +28,9 @@ public class MiddlewareChain {
 
     private static ModelPrompt terminalPrompt(AgentRuntimeContext context) {
         String customPrompt = context.properties().getSystemPrompt();
-        String uploadsPath = context.properties().getUploadsRoot();
-        String workspacePath = context.properties().getWorkspaceRoot();
-        String outputsPath = context.properties().getOutputsRoot();
+        String uploadsPath = UserDataPathResolver.VIRTUAL_UPLOADS_ROOT;
+        String workspacePath = UserDataPathResolver.VIRTUAL_WORKSPACE_ROOT;
+        String outputsPath = UserDataPathResolver.VIRTUAL_OUTPUTS_ROOT;
 
         String systemPrompt = org.wrj.haifa.ai.deerflow.prompt.LeadAgentPromptTemplate.build(
                 context.config().modelName(),

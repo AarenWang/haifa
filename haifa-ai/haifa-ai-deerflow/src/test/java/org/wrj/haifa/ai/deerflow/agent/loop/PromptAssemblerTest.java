@@ -25,9 +25,10 @@ class PromptAssemblerTest {
         assertThat(result.prompt().hasMessages()).isTrue();
         assertThat(result.prompt().messages()).hasSize(3);
         assertThat(result.prompt().userPrompt()).contains("User: Need data");
-        assertThat(result.prompt().userPrompt()).contains("<tool_call name=\"mock_search\">");
+        assertThat(result.prompt().userPrompt()).contains("Structured tool call requested").contains("mock_search");
         assertThat(result.prompt().userPrompt()).contains("Tool result (mock_search) [call-1]: found result");
         assertThat(result.trace().messageCount()).isEqualTo(3);
         assertThat(result.trace().estimatedTokens()).isGreaterThan(0);
     }
 }
+

@@ -12,6 +12,7 @@ import type {
   ThreadListResponse,
   ThreadRecord,
   ClarificationAnswer,
+  TodoSnapshot,
 } from '../types';
 
 
@@ -341,6 +342,13 @@ export async function fetchRunEvents(runId: string): Promise<DeerFlowEvent[]> {
   return res.json();
 }
 
+export async function fetchRunTodos(runId: string): Promise<TodoSnapshot> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/todos`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
 export async function fetchRunSources(runId: string): Promise<ResearchSource[]> {
   const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/sources`, { method: 'GET' });
   if (!res.ok) {

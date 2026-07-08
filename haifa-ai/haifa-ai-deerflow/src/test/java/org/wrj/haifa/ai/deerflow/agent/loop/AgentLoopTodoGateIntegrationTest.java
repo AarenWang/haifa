@@ -31,21 +31,21 @@ class AgentLoopTodoGateIntegrationTest {
             @Override
             public Mono<ModelResponse> generate(ModelPrompt prompt) {
                 return switch (modelCalls.incrementAndGet()) {
-                    case 1 -> Mono.just(new ModelResponse("<final_answer>Too early</final_answer>"));
+                    case 1 -> Mono.just(new ModelResponse("Too early"));
                     case 2 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("todo-1", "write_todos", """
                             {"todos":[
                               {"id":"t1","content":"Gather sources","status":"in_progress"},
                               {"id":"t2","content":"Write synthesis","status":"pending"}
                             ]}
                             """))));
-                    case 3 -> Mono.just(new ModelResponse("<final_answer>Still too early</final_answer>"));
+                    case 3 -> Mono.just(new ModelResponse("Still too early"));
                     case 4 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("todo-2", "write_todos", """
                             {"todos":[
                               {"id":"t1","content":"Gather sources","status":"completed"},
                               {"id":"t2","content":"Write synthesis","status":"completed"}
                             ]}
                             """))));
-                    default -> Mono.just(new ModelResponse("<final_answer>Finished with completed todos</final_answer>"));
+                    default -> Mono.just(new ModelResponse("Finished with completed todos"));
                 };
             }
         };
@@ -94,3 +94,4 @@ class AgentLoopTodoGateIntegrationTest {
         });
     }
 }
+

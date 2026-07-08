@@ -14,6 +14,8 @@ import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
+import org.wrj.haifa.ai.deerflow.model.ModelToolDefinition;
 import org.wrj.haifa.ai.deerflow.agent.loop.PromptAssembler;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
@@ -70,31 +72,19 @@ public class ChatCallModelNode implements AsyncNodeAction {
             String systemPromptBase = promptFallback ? DEFAULT_FALLBACK_SYSTEM_PROMPT : stateSystemPrompt;
 
             List<Map<String, Object>> windowMaps = view.messageWindow();
-
             List<ModelMessage> typedHistory = new ArrayList<>(windowMaps.stream()
-                    .map(map -> {
-                        String roleStr = (String) map.get("role");
-                        ModelMessage.Role role = ModelMessage.Role.USER;
-                        try {
-                            role = ModelMessage.Role.valueOf(roleStr);
-                        } catch (Exception ex) {
-                            // ignore
-                        }
-                        String content = (String) map.get("content");
-                        return new ModelMessage(role, content);
-                    })
+                    .map(ChatCallModelNode::toModelMessage)
                     .toList());
             applyStateUserPrompt(typedHistory, stateUserPrompt);
-
-            // Keep middleware prompt as the source of truth. These are small graph-specific
-            // instructions needed by the XML tool-call parser.
             StringBuilder toolDescriptions = new StringBuilder();
+            List<ModelToolDefinition> toolDefinitions = new ArrayList<>();
             for (AgentTool tool : toolRegistry.tools()) {
                 String toolName = tool.name();
                 if (toolPolicyService != null && !toolPolicyService.evaluateTool(toolName, activeSkills, view.mode()).allowed()) {
                     continue;
                 }
                 toolDescriptions.append("- ").append(toolName).append(": ").append(tool.description()).append("\n");
+                toolDefinitions.add(new ModelToolDefinition(toolName, tool.description(), tool.inputSchema()));
             }
 
             String promptReinforcement = "\nIf a user asks for information that can be measured from the local runtime or workspace, and a sandbox execution tool is available, do not claim you lack access. Use the smallest appropriate script, inspect the tool result, then answer from observed output. If the tool is disabled or denied, explain the configuration limitation.";
@@ -102,9 +92,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
             if (!toolDescriptions.isEmpty()) {
                 graphInstruction.append("\n\nAvailable tools:\n").append(toolDescriptions);
             }
-            graphInstruction.append("\nWhen you need to use a tool, emit: <tool_call name=\"tool_name\">{\"arg\":\"value\"}</tool_call>\n")
-                    .append("Do not write tool calls as prose such as `Tool call: name({...})`; use only the XML tag format above.\n")
-                    .append("When you have enough information, provide your final answer starting with <final_answer>.")
+            graphInstruction.append("\nWhen external information or actions are needed, call the available tools through the model provider's structured tool-call interface.\n")
+                    .append("Do not write tool calls manually in XML, JSON code blocks, markdown, or prose.\n")
+                    .append("When no further tool call is needed, respond with the final answer directly in normal assistant text.")
                     .append(promptReinforcement);
             String fullSystemPrompt = systemPromptBase + graphInstruction;
 
@@ -128,13 +118,14 @@ public class ChatCallModelNode implements AsyncNodeAction {
             ));
 
             PromptAssembler.Result assembly = promptAssembler.assemble(fullSystemPrompt, modelName, typedHistory);
-            ModelPrompt prompt = assembly.prompt();
+            ModelPrompt prompt = assembly.prompt().withToolDefinitions(toolDefinitions);
 
             long startTime = System.currentTimeMillis();
             ModelResponse response = modelClient.generate(prompt).block();
             long duration = System.currentTimeMillis() - startTime;
 
             String responseContent = response != null && response.content() != null ? response.content() : "";
+            List<Map<String, Object>> structuredToolCalls = serializeToolCalls(response == null ? List.of() : response.toolCalls());
 
             // Emit MODEL_DELTA with full content
             GraphEventRegistry.publish(runId, AgentEvent.of(
@@ -156,6 +147,11 @@ public class ChatCallModelNode implements AsyncNodeAction {
             Map<String, Object> assistantMetadata = new LinkedHashMap<>();
             assistantMetadata.put("step", stepNum);
             assistantMetadata.put("modelDurationMs", duration);
+            if (!structuredToolCalls.isEmpty()) {
+                assistantMetadata.put("tool_calls", structuredToolCalls);
+                assistantMetadata.put("persistAssistantToolCalls", true);
+                assistantMsg.put("toolCalls", structuredToolCalls);
+            }
             if (promptFallback) {
                 assistantMetadata.put("promptFallback", true);
                 assistantMetadata.put("fallbackReason", PROMPT_FALLBACK_REASON);
@@ -167,9 +163,76 @@ public class ChatCallModelNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.MESSAGE_WINDOW, List.of(assistantMsg));
             update.put("chat_steps", stepNum);
             update.put("last_assistant_content", responseContent);
+            update.put(AgentGraphStateKeys.PENDING_TOOL_CALLS, structuredToolCalls);
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "call_model", "status", "completed")));
             return update;
         });
+    }
+
+    private static ModelMessage toModelMessage(Map<String, Object> map) {
+        String roleStr = stringValue(map.get("role"));
+        ModelMessage.Role role = ModelMessage.Role.USER;
+        try {
+            role = ModelMessage.Role.valueOf(roleStr);
+        } catch (Exception ex) {
+            // Keep the default role for malformed persisted records.
+        }
+        String content = stringValue(map.get("content"));
+        String toolCallId = stringValue(map.get("toolCallId"));
+        String name = stringValue(map.get("name"));
+        Map<String, Object> metadata = readMetadata(map.get("metadata"));
+        List<ModelToolCall> toolCalls = readToolCalls(map.get("toolCalls"));
+        if (toolCalls.isEmpty()) {
+            toolCalls = readToolCalls(metadata.get("tool_calls"));
+        }
+        return new ModelMessage(role, content, toolCalls, toolCallId.isBlank() ? null : toolCallId,
+                name.isBlank() ? null : name, metadata);
+    }
+
+    private static Map<String, Object> readMetadata(Object value) {
+        if (!(value instanceof Map<?, ?> raw)) {
+            return Map.of();
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        raw.forEach((key, item) -> {
+            if (key instanceof String name) {
+                metadata.put(name, item);
+            }
+        });
+        return metadata;
+    }
+
+    private static List<ModelToolCall> readToolCalls(Object value) {
+        if (!(value instanceof List<?> items)) {
+            return List.of();
+        }
+        List<ModelToolCall> calls = new ArrayList<>();
+        for (Object item : items) {
+            if (item instanceof Map<?, ?> map) {
+                calls.add(new ModelToolCall(
+                        stringValue(map.get("id")),
+                        stringValue(map.get("name")),
+                        firstNonBlank(stringValue(map.get("arguments")), "{}"),
+                        firstNonBlank(stringValue(map.get("type")), "tool_call")));
+            }
+        }
+        return calls;
+    }
+
+    private static List<Map<String, Object>> serializeToolCalls(List<ModelToolCall> toolCalls) {
+        if (toolCalls == null || toolCalls.isEmpty()) {
+            return List.of();
+        }
+        return toolCalls.stream()
+                .map(toolCall -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("id", toolCall.id() == null ? "" : toolCall.id());
+                    item.put("name", toolCall.name() == null ? "" : toolCall.name());
+                    item.put("arguments", toolCall.arguments() == null ? "{}" : toolCall.arguments());
+                    item.put("type", toolCall.type() == null ? "tool_call" : toolCall.type());
+                    return item;
+                })
+                .collect(java.util.stream.Collectors.toList());
     }
 
     private static String stringValue(Object value) {

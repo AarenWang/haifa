@@ -24,6 +24,7 @@ import {
   FileText,
   Package,
   Users,
+  ListTodo,
 } from 'lucide-react';
 
 const eventTitles: Record<string, string> = {
@@ -56,6 +57,10 @@ const eventTitles: Record<string, string> = {
   RESEARCH_STEP_COMPLETED: 'Research step completed',
   CONTEXT_COMPRESSED: 'Context compressed',
   TOOL_OUTPUT_BUDGET_EXCEEDED: 'Tool output budget exceeded',
+  TODO_CREATED: 'Todo list created',
+  TODO_UPDATED: 'Todo list updated',
+  TODO_INCOMPLETE: 'Todo incomplete',
+  TODO_GATE_BLOCKED: 'Todo gate blocked',
 };
 
 const eventIcons: Record<string, React.ReactNode> = {
@@ -88,6 +93,10 @@ const eventIcons: Record<string, React.ReactNode> = {
   RESEARCH_STEP_COMPLETED: <CheckCircle2 size={16} />,
   CONTEXT_COMPRESSED: <Layers size={16} />,
   TOOL_OUTPUT_BUDGET_EXCEEDED: <AlertTriangle size={16} />,
+  TODO_CREATED: <ListTodo size={16} />,
+  TODO_UPDATED: <ListTodo size={16} />,
+  TODO_INCOMPLETE: <AlertTriangle size={16} />,
+  TODO_GATE_BLOCKED: <AlertTriangle size={16} />,
 };
 
 const eventIconColors: Record<string, string> = {
@@ -120,6 +129,10 @@ const eventIconColors: Record<string, string> = {
   RESEARCH_STEP_COMPLETED: 'blue',
   CONTEXT_COMPRESSED: 'teal',
   TOOL_OUTPUT_BUDGET_EXCEEDED: 'orange',
+  TODO_CREATED: 'blue',
+  TODO_UPDATED: 'blue',
+  TODO_INCOMPLETE: 'orange',
+  TODO_GATE_BLOCKED: 'orange',
 };
 
 interface EventCardProps {

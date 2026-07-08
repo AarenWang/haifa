@@ -30,6 +30,10 @@ export type DeerFlowEventType =
   | 'APPROVAL_REQUIRED'
   | 'APPROVAL_RESOLVED'
   | 'APPROVAL_EXPIRED'
+  | 'TODO_CREATED'
+  | 'TODO_UPDATED'
+  | 'TODO_INCOMPLETE'
+  | 'TODO_GATE_BLOCKED'
   | 'RUN_SUSPENDED';
 
 export interface ResearchPlan {
@@ -97,6 +101,36 @@ export interface ArtifactRecord {
   preview?: string;
 }
 
+export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface AgentTodoItem {
+  id: string;
+  content: string;
+  status: TodoStatus;
+  priority?: string | null;
+  evidence?: string | null;
+  orderIndex?: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface TodoSummary {
+  total: number;
+  pending: number;
+  inProgress: number;
+  completed: number;
+  cancelled: number;
+}
+
+export interface TodoSnapshot {
+  threadId: string;
+  runId: string;
+  revision: number;
+  operation?: string;
+  todos: AgentTodoItem[];
+  summary: TodoSummary;
+  updatedAt?: string | null;
+}
 export interface DeerFlowEvent {
   eventId: string;
   runId: string;
@@ -274,6 +308,9 @@ export interface AppState {
   threads: ThreadRecord[];
   messages: MessageRecord[];
   events: DeerFlowEvent[];
+  todoSnapshot?: TodoSnapshot;
+  todoGateBlocked?: boolean;
+  todoGateMessage?: string;
   finalAnswer?: string;
   error?: string;
   lastRequest?: RunRequest;
@@ -312,6 +349,8 @@ export type AppAction =
   | { type: 'ADD_RUN_HISTORY'; payload: RunHistoryEntry }
   | { type: 'SET_EVENTS'; payload: DeerFlowEvent[] }
   | { type: 'SET_STATUS'; payload: AppStatus }
+  | { type: 'SET_TODO_SNAPSHOT'; payload?: TodoSnapshot }
+  | { type: 'SET_TODO_GATE_BLOCKED'; payload: { blocked: boolean; message?: string } }
   | { type: 'SET_LAST_REQUEST'; payload?: RunRequest };
 
 export interface AgentPersona {

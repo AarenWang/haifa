@@ -15,28 +15,13 @@ public class ConversationReplaySanitizer {
             return new ArrayList<>();
         }
 
-        // Phase 1: Parse old XML tool calls in ASSISTANT messages to toolCalls in-memory for backward compatibility
         List<ModelMessage> parsedMessages = new ArrayList<>();
-        ToolCallParser xmlParser = new ToolCallParser();
-        for (ModelMessage m : messages) {
-            if (m == null) {
-                continue;
+        for (ModelMessage message : messages) {
+            if (message != null) {
+                parsedMessages.add(message);
             }
-            if (m.role() == ModelMessage.Role.ASSISTANT && (m.toolCalls() == null || m.toolCalls().isEmpty())) {
-                List<ToolCallParser.ParsedToolCall> parsed = xmlParser.parse(m.content());
-                if (!parsed.isEmpty()) {
-                    List<ModelToolCall> tcs = new ArrayList<>();
-                    for (ToolCallParser.ParsedToolCall ptc : parsed) {
-                        String tcId = UUID.randomUUID().toString();
-                        tcs.add(new ModelToolCall(tcId, ptc.toolName(), ptc.arguments()));
-                    }
-                    m = new ModelMessage(m.role(), m.content(), tcs, m.toolCallId(), m.name(), m.metadata());
-                }
-            }
-            parsedMessages.add(m);
         }
-
-        // Phase 2: Strict pairing logic
+        // Strict pairing logic
         List<ModelMessage> sanitized = new ArrayList<>();
         Set<ModelMessage> consumedToolMessages = new HashSet<>();
 
@@ -123,7 +108,7 @@ public class ConversationReplaySanitizer {
             }
         }
 
-        // Phase 3: Assistant-First repair
+        // Assistant-First repair
         if (!sanitized.isEmpty() && sanitized.get(0).role() == ModelMessage.Role.ASSISTANT) {
             sanitized.add(0, new ModelMessage(ModelMessage.Role.USER, "Initialize context."));
         }
@@ -131,3 +116,4 @@ public class ConversationReplaySanitizer {
         return sanitized;
     }
 }
+

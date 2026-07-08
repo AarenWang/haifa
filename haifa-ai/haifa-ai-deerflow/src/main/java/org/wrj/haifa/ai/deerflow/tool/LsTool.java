@@ -2,7 +2,6 @@ package org.wrj.haifa.ai.deerflow.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -16,10 +15,10 @@ public class LsTool implements AgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int MAX_FILES = 100;
-    private final DeerFlowProperties properties;
+    private final UserDataPathResolver pathResolver;
 
     public LsTool(DeerFlowProperties properties) {
-        this.properties = properties;
+        this.pathResolver = new UserDataPathResolver(properties);
     }
 
     @Override
@@ -29,7 +28,7 @@ public class LsTool implements AgentTool {
 
     @Override
     public String description() {
-        return "List files and directories. Arguments: {\"path\": \"relative/path\"} (path is optional)";
+        return "List files and directories. Optional path supports relative workspace paths and /mnt/user-data virtual roots.";
     }
 
     @Override
@@ -53,19 +52,9 @@ public class LsTool implements AgentTool {
                 }
             }
 
-            Path workspacePath = request.workspaceRoot().toAbsolutePath().normalize();
-            Path resolved = workspacePath.resolve(requestedPath).normalize();
-            Path uploadsPath = Path.of(properties.getUploadsRoot()).toAbsolutePath().normalize();
-            Path outputsPath = Path.of(properties.getOutputsRoot()).toAbsolutePath().normalize();
-            Path skillsPath = Path.of(properties.getSkillsRoot()).toAbsolutePath().normalize();
-
-            Path absResolved = resolved.toAbsolutePath().normalize();
-            if (!absResolved.startsWith(workspacePath)
-                    && !absResolved.startsWith(uploadsPath)
-                    && !absResolved.startsWith(outputsPath)
-                    && !absResolved.startsWith(skillsPath)) {
-                return ToolResult.of(name(), "Security Exception: path is outside allowed directories.");
-            }
+            Path resolved = requestedPath == null || requestedPath.isBlank()
+                    ? pathResolver.workspaceRoot()
+                    : pathResolver.resolveReadable(requestedPath, request.workspaceRoot());
 
             if (!Files.exists(resolved)) {
                 return ToolResult.of(name(), "Error: path does not exist: " + requestedPath);
@@ -86,6 +75,8 @@ public class LsTool implements AgentTool {
                         .collect(Collectors.joining("\n"));
                 return ToolResult.of(name(), content.isBlank() ? "(directory is empty)" : content);
             }
+        } catch (IllegalArgumentException e) {
+            return ToolResult.of(name(), "Security Exception: " + e.getMessage());
         } catch (Exception e) {
             return ToolResult.of(name(), "Error: " + e.getMessage());
         }
