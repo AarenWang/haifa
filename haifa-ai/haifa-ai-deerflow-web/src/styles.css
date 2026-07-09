@@ -1948,6 +1948,23 @@ body {
   overflow: hidden;
 }
 
+.code-block-wrapper pre {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  background: #1e1e1e;
+  color: #d4d4d4;
+}
+
+.code-block-wrapper code {
+  color: inherit;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre;
+}
+
 .code-block-header {
   display: flex;
   align-items: center;
