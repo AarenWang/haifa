@@ -2400,15 +2400,26 @@ body {
   white-space: nowrap;
 }
 
-.event-card-id {
-  font-size: 11px;
+.event-card-id-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   color: var(--text-muted);
-  font-family: var(--font-mono);
   background: var(--bg-secondary);
-  padding: 2px 6px;
-  border-radius: 4px;
   border: 1px solid var(--border-light);
+  border-radius: 4px;
+  cursor: pointer;
   flex-shrink: 0;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.event-card-id-btn:hover {
+  color: var(--text-primary);
+  background: var(--border-light);
+  border-color: var(--border);
 }
 
 .event-card-content {

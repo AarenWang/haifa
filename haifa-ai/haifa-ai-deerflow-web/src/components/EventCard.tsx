@@ -142,10 +142,23 @@ interface EventCardProps {
 export default function EventCard({ event }: EventCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [idCopied, setIdCopied] = useState(false);
+
   const title = eventTitles[event.type] || event.type;
   const icon = eventIcons[event.type] || <Flag size={16} />;
   const colorClass = eventIconColors[event.type] || 'gray';
   const hasContent = event.content && event.content.length > 0;
+
+  const handleCopyId = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(event.eventId);
+      setIdCopied(true);
+      setTimeout(() => setIdCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy ID', err);
+    }
+  };
 
   return (
     <div className="event-card">
@@ -154,7 +167,14 @@ export default function EventCard({ event }: EventCardProps) {
         <span className="event-card-title" title={title}>
           {title}
         </span>
-        <span className="event-card-id">#{event.eventId}</span>
+        <button
+          type="button"
+          className="event-card-id-btn"
+          onClick={handleCopyId}
+          title={`Copy Event ID: ${event.eventId}`}
+        >
+          {idCopied ? <Check size={12} /> : <Copy size={12} />}
+        </button>
       </div>
       {hasContent && (
         <div className={`event-card-content ${expanded ? 'expanded' : ''}`}>
