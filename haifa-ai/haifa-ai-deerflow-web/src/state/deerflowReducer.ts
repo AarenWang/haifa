@@ -78,6 +78,7 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         messages: state.messages,
         researchSources: action.payload.mode === 'research' ? state.researchSources : [],
         evidenceItems: action.payload.mode === 'research' ? state.evidenceItems : [],
+        runObservability: undefined,
         artifacts: state.artifacts,
         uploads: state.uploads,
         selectedUploadIds: state.selectedUploadIds,
@@ -234,6 +235,11 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         qualityGate: action.payload,
+      };
+    case 'SET_RUN_OBSERVABILITY':
+      return {
+        ...state,
+        runObservability: action.payload,
       };
     case 'SET_ARTIFACTS':
       return {

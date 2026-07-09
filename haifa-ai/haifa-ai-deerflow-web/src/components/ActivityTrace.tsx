@@ -1,6 +1,6 @@
-import { Activity, Inbox, X } from 'lucide-react';
+import { Activity, Database, GitBranch, Inbox, Link2, X } from 'lucide-react';
 import { useRef, useEffect, useState } from 'react';
-import type { DeerFlowEvent, TodoSnapshot } from '../types';
+import type { DeerFlowEvent, RunObservability, TodoSnapshot } from '../types';
 import EventCard from './EventCard';
 import TodoListPanel from './TodoListPanel';
 
@@ -11,6 +11,7 @@ interface ActivityTraceProps {
   todoSnapshot?: TodoSnapshot;
   todoGateBlocked?: boolean;
   todoGateMessage?: string;
+  observability?: RunObservability;
 }
 
 export default function ActivityTrace({
@@ -20,6 +21,7 @@ export default function ActivityTrace({
   todoSnapshot,
   todoGateBlocked,
   todoGateMessage,
+  observability,
 }: ActivityTraceProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -47,6 +49,7 @@ export default function ActivityTrace({
         gateBlocked={todoGateBlocked}
         gateMessage={todoGateMessage}
       />
+      <GraphReplayPanel observability={observability} />
       <div className="trace-header">
         <div className="trace-header-title">
           <Activity size={14} style={{ marginRight: 6, verticalAlign: 'middle' }} />
@@ -85,5 +88,62 @@ export default function ActivityTrace({
         )}
       </div>
     </aside>
+  );
+}
+
+function GraphReplayPanel({ observability }: { observability?: RunObservability }) {
+  if (!observability) {
+    return null;
+  }
+  const latestCheckpoints = observability.checkpointTimeline.slice(-4).reverse();
+  const coverage = Math.round((observability.citationCoverage || 0) * 100);
+  return (
+    <div className="graph-replay-panel">
+      <div className="graph-replay-header">
+        <div className="graph-replay-title">
+          <GitBranch size={14} />
+          <span>{observability.graphName || 'Graph run'}</span>
+        </div>
+        <span className="graph-replay-status">{observability.status}</span>
+      </div>
+      <div className="graph-replay-metrics">
+        <div>
+          <Database size={13} />
+          <span>{observability.checkpointCount}</span>
+          <small>checkpoints</small>
+        </div>
+        <div>
+          <Link2 size={13} />
+          <span>{observability.sourceCount}</span>
+          <small>sources</small>
+        </div>
+        <div>
+          <Activity size={13} />
+          <span>{observability.evidenceCount}</span>
+          <small>evidence</small>
+        </div>
+      </div>
+      {observability.mode === 'research' && (
+        <div className="graph-replay-coverage">
+          <span>Citation coverage</span>
+          <strong>{coverage}%</strong>
+        </div>
+      )}
+      {latestCheckpoints.length > 0 && (
+        <div className="graph-checkpoint-strip">
+          {latestCheckpoints.map((checkpoint) => (
+            <div key={checkpoint.checkpointId} className="graph-checkpoint-chip" title={checkpoint.checkpointId}>
+              <span>{checkpoint.nodeId || 'unknown'}</span>
+              {checkpoint.nextNodeId && <small>{'->'} {checkpoint.nextNodeId}</small>}
+            </div>
+          ))}
+        </div>
+      )}
+      {observability.orphanEvidenceCount > 0 && (
+        <div className="graph-replay-warning">
+          {observability.orphanEvidenceCount} evidence item{observability.orphanEvidenceCount === 1 ? '' : 's'} without source trace
+        </div>
+      )}
+    </div>
   );
 }

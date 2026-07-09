@@ -18,6 +18,7 @@ import {
   fetchRunQualityGate,
   fetchRunSources,
   fetchRunTodos,
+  fetchRunObservability,
   readDeerFlowResumeStream,
 } from './api/deerflowClient';
 import Header from './components/Header';
@@ -124,6 +125,19 @@ function App() {
       dispatch({ type: 'SET_MESSAGES', payload: data.messages });
     } catch {
       dispatch({ type: 'SET_MESSAGES', payload: [] });
+    }
+  }, []);
+
+  const refreshObservabilityData = useCallback(async (runId?: string) => {
+    if (!runId) {
+      dispatch({ type: 'SET_RUN_OBSERVABILITY' });
+      return;
+    }
+    try {
+      const observability = await fetchRunObservability(runId);
+      dispatch({ type: 'SET_RUN_OBSERVABILITY', payload: observability });
+    } catch {
+      dispatch({ type: 'SET_RUN_OBSERVABILITY' });
     }
   }, []);
 
@@ -235,12 +249,14 @@ function App() {
           refreshResearchData();
         }
         refreshArtifactData(threadId, latestRun.runId);
+        refreshObservabilityData(latestRun.runId);
       } else {
         dispatch({ type: 'SET_EVENTS', payload: [] });
         dispatch({ type: 'SET_TODO_SNAPSHOT' });
         dispatch({ type: 'SET_STATUS', payload: 'idle' });
         refreshResearchData();
         refreshArtifactData(threadId);
+        refreshObservabilityData();
       }
     } catch (err) {
       console.error('Failed to load historical events', err);
@@ -249,8 +265,9 @@ function App() {
       dispatch({ type: 'SET_STATUS', payload: 'idle' });
       refreshResearchData();
       refreshArtifactData(threadId);
+      refreshObservabilityData();
     }
-  }, [refreshArtifactData, refreshResearchData]);
+  }, [refreshArtifactData, refreshObservabilityData, refreshResearchData]);
 
   // Poll backend health
   useEffect(() => {
@@ -373,6 +390,7 @@ function App() {
               hasArtifactMetadata(evt)
             ) {
               refreshArtifactData(evt.threadId, evt.runId);
+              refreshObservabilityData(evt.runId);
             }
           },
           onError: (err) => {
@@ -394,7 +412,7 @@ function App() {
         abortRef.current = null;
       });
     },
-    [refreshArtifactData, refreshMessages, refreshResearchData, refreshThreads, state.selectedUploadIds, state.threadId]
+    [refreshArtifactData, refreshMessages, refreshObservabilityData, refreshResearchData, refreshThreads, state.selectedUploadIds, state.threadId]
   );
 
   const handleResumeRun = useCallback((runId: string) => {
@@ -474,7 +492,7 @@ function App() {
       }
       abortRef.current = null;
     });
-  }, [refreshArtifactData, refreshMessages, refreshResearchData, refreshThreads, state.lastRequest, state.threadId]);
+  }, [refreshArtifactData, refreshMessages, refreshObservabilityData, refreshResearchData, refreshThreads, state.lastRequest, state.threadId]);
 
   const handleAnswerClarification = useCallback((answer: string, clarification: PendingClarification, answers?: ClarificationAnswer[]) => {
     answerClarification({
@@ -573,6 +591,7 @@ function App() {
     dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
     dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
     dispatch({ type: 'SET_ARTIFACTS', payload: [] });
+    dispatch({ type: 'SET_RUN_OBSERVABILITY' });
     dispatch({ type: 'SET_THREAD_ID', payload: threadId });
     dispatch({ type: 'SET_LAST_REQUEST' });
     setIsSidebarOpen(false);
@@ -589,6 +608,7 @@ function App() {
     dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
     dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
     dispatch({ type: 'SET_ARTIFACTS', payload: [] });
+    dispatch({ type: 'SET_RUN_OBSERVABILITY' });
     dispatch({ type: 'SET_THREAD_ID' });
     dispatch({ type: 'SET_LAST_REQUEST' });
     setIsSidebarOpen(false);
@@ -696,6 +716,7 @@ function App() {
           todoSnapshot={state.todoSnapshot}
           todoGateBlocked={state.todoGateBlocked}
           todoGateMessage={state.todoGateMessage}
+          observability={state.runObservability}
         />
       </div>
       {/* Sidebar/Drawer Backdrop */}
@@ -776,7 +797,7 @@ function parseClarificationQuestions(value: unknown): ClarificationQuestion[] | 
         : [];
       return {
         id: stringValue(record.id) || `q${index + 1}`,
-        title: stringValue(record.title) || stringValue(record.prompt) || `问题 ${index + 1}`,
+        title: stringValue(record.title) || stringValue(record.prompt) || `闂 ${index + 1}`,
         prompt: stringValue(record.prompt) || stringValue(record.title) || '',
         answerType: stringValue(record.answerType) || stringValue(record.answer_type) || (choices.length ? 'SINGLE_CHOICE_WITH_CUSTOM' : 'TEXT'),
         choices,

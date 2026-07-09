@@ -199,6 +199,61 @@ export interface EvidenceItem {
   extractedAt?: string | null;
 }
 
+
+export interface RunObservabilityTimelineItem {
+  sequence: number;
+  type: string;
+  content: string;
+  nodeId: string;
+  checkpointId: string;
+  metadata: Record<string, unknown>;
+  createdAt?: string | null;
+}
+
+export interface RunCheckpointTimelineItem {
+  checkpointId: string;
+  graphName: string;
+  nodeId: string;
+  nextNodeId: string;
+  stateSummary: Record<string, unknown>;
+  createdAt?: string | null;
+}
+
+export interface RunSourceTrace {
+  sourceId: string;
+  title: string;
+  url: string;
+  domain: string;
+  fetched: boolean;
+  credibility: number;
+  citationCount: number;
+  evidenceIds: string[];
+}
+
+export interface RunResearchTraceability {
+  sources: RunSourceTrace[];
+  orphanEvidenceCount: number;
+}
+
+export interface RunObservability {
+  runId: string;
+  threadId: string;
+  mode: string;
+  status: string;
+  graphName: string;
+  eventCount: number;
+  checkpointCount: number;
+  sourceCount: number;
+  fetchedSourceCount: number;
+  evidenceCount: number;
+  orphanEvidenceCount: number;
+  citedSourceCount: number;
+  citationCoverage: number;
+  timeline: RunObservabilityTimelineItem[];
+  checkpointTimeline: RunCheckpointTimelineItem[];
+  researchTraceability: RunResearchTraceability;
+}
+
 export type ThreadStatus = 'ACTIVE' | 'ARCHIVED';
 export type MessageRole = 'USER' | 'ASSISTANT' | 'TOOL' | 'SYSTEM';
 
@@ -324,6 +379,7 @@ export interface AppState {
   researchPlan?: ResearchPlan;
   researchProgress?: ResearchProgress;
   qualityGate?: QualityGateResult;
+  runObservability?: RunObservability;
   artifacts: ArtifactRecord[];
   uploads: UploadRecord[];
   selectedUploadIds: string[];
@@ -340,6 +396,7 @@ export type AppAction =
   | { type: 'SET_RESEARCH_PLAN'; payload?: ResearchPlan }
   | { type: 'SET_RESEARCH_PROGRESS'; payload?: ResearchProgress }
   | { type: 'SET_QUALITY_GATE'; payload?: QualityGateResult }
+  | { type: 'SET_RUN_OBSERVABILITY'; payload?: RunObservability }
   | { type: 'SET_ARTIFACTS'; payload: ArtifactRecord[] }
   | { type: 'SET_THREAD_ID'; payload?: string }
   | { type: 'SET_THREADS'; payload: ThreadRecord[] }

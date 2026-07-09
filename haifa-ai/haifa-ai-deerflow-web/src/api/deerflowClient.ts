@@ -9,6 +9,7 @@ import type {
   ResearchSource,
   RunRequest,
   RunResponse,
+  RunObservability,
   ThreadListResponse,
   ThreadRecord,
   ClarificationAnswer,
@@ -342,6 +343,14 @@ export async function fetchRunEvents(runId: string): Promise<DeerFlowEvent[]> {
   return res.json();
 }
 
+
+export async function fetchRunObservability(runId: string): Promise<RunObservability> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/observability`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
 export async function fetchRunTodos(runId: string): Promise<TodoSnapshot> {
   const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/todos`, { method: 'GET' });
   if (!res.ok) {
