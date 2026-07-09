@@ -100,7 +100,7 @@ public class TaskTool implements AgentTool {
 
             // Extract optional parameters
             List<String> allowedTools = parseStringList(node, "allowed_tools");
-            String modelOverride = node.has("model") ? node.get("model").asText() : null;
+            String modelOverride = normalizeModelOverride(node.has("model") ? node.get("model").asText() : null);
             Integer timeout = node.has("timeout") ? node.get("timeout").asInt() : null;
             Integer maxTurns = node.has("max_turns") ? node.get("max_turns").asInt() : null;
 
@@ -108,7 +108,7 @@ public class TaskTool implements AgentTool {
             if (subagentRuntime != null) {
                 SubagentResult result = subagentRuntime.execute(
                         description, prompt, subagentType,
-                        request.threadId(), request.runId(),
+                        request.threadId(), request.runId(), request.modelName(),
                         allowedTools, modelOverride, timeout, maxTurns,
                         request.mode(), request.activeSkills()
                 );
@@ -155,6 +155,13 @@ public class TaskTool implements AgentTool {
                 "evidenceIds", result.evidenceIds(),
                 "durationMs", result.durationMs()
         ));
+    }
+
+    private String normalizeModelOverride(String modelOverride) {
+        if (modelOverride == null || modelOverride.isBlank() || "inherit".equalsIgnoreCase(modelOverride.trim())) {
+            return null;
+        }
+        return modelOverride.trim();
     }
 
     private List<String> parseStringList(JsonNode node, String fieldName) {

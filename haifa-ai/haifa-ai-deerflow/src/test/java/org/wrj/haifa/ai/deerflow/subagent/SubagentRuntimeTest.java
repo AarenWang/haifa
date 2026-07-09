@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.context.ApplicationContext;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
@@ -13,6 +14,7 @@ import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.middleware.ToolOutputBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
+import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
@@ -79,7 +81,7 @@ class SubagentRuntimeTest {
 
         SubagentResult result = subagentRuntime.execute(
                 "test desc", "test prompt", "unknown",
-                "thread-1", "run-1", null, null, null, null,
+                "thread-1", "run-1", "parent-model", null, null, null, null,
                 RunMode.RESEARCH, List.of()
         );
 
@@ -111,7 +113,7 @@ class SubagentRuntimeTest {
 
         SubagentResult result = subagentRuntime.execute(
                 "Run unit tests", "Find failing tests", "general-purpose",
-                "thread-123", "run-456", null, null, null, null,
+                "thread-123", "run-456", "qwen-plus", null, null, null, null,
                 RunMode.RESEARCH, List.of()
         );
 
@@ -123,6 +125,10 @@ class SubagentRuntimeTest {
 
         // Verify active tasks tracking
         assertThat(subagentRuntime.activeCount("run-456")).isEqualTo(0);
+
+        ArgumentCaptor<ModelPrompt> promptCaptor = ArgumentCaptor.forClass(ModelPrompt.class);
+        verify(modelClient).generate(promptCaptor.capture());
+        assertThat(promptCaptor.getValue().modelName()).isEqualTo("qwen-plus");
     }
 
     @Test
@@ -135,7 +141,7 @@ class SubagentRuntimeTest {
 
         SubagentResult result = subagentRuntime.execute(
                 "desc", "prompt", "general-purpose",
-                "thread-1", "run-1", null, null, null, null,
+                "thread-1", "run-1", "parent-model", null, null, null, null,
                 RunMode.RESEARCH, List.of()
         );
 
@@ -182,7 +188,7 @@ class SubagentRuntimeTest {
 
         SubagentResult result = subagentRuntime.execute(
                 "desc", "prompt", "general-purpose",
-                "thread-parent", "run-parent", null, null, null, null,
+                "thread-parent", "run-parent", "qwen-plus", null, null, null, null,
                 RunMode.RESEARCH, List.of()
         );
 

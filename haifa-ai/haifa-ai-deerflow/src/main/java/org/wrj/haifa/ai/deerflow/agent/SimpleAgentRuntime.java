@@ -817,7 +817,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private List<ToolResult> executePlannedTools(AgentRequest request, AgentRunConfig config, AtomicInteger seq,
             List<AgentEvent> events, List<Skill> activeSkills) {
         ToolRequest toolRequest = new ToolRequest(request.message(), config.workspaceRoot(), request.uploadedFileIds(),
-                config.threadId(), config.runId());
+                config.threadId(), config.runId(), config.mode(), activeSkills, config.modelName());
         List<ToolResult> results = new ArrayList<>();
 
         List<AgentTool> plannedTools = new ArrayList<>(this.toolRegistry.plan(request.message(), config.maxIterations()));

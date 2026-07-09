@@ -194,7 +194,8 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                     threadId,
                     runId,
                     view.mode(),
-                    view.activeSkills()
+                    view.activeSkills(),
+                    view.modelName()
             );
             ToolResult result = tool.execute(toolRequest);
             return new ToolExecution("SUCCESS", result.content(), "");

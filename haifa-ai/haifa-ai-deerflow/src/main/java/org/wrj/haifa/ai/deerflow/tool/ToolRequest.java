@@ -6,7 +6,7 @@ import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 
 public record ToolRequest(String userMessage, Path workspaceRoot, List<String> uploadedFileIds, String threadId,
-        String runId, RunMode mode, List<Skill> activeSkills) {
+        String runId, RunMode mode, List<Skill> activeSkills, String modelName) {
 
     public ToolRequest(String userMessage, Path workspaceRoot) {
         this(userMessage, workspaceRoot, List.of(), null, null);
@@ -27,12 +27,13 @@ public record ToolRequest(String userMessage, Path workspaceRoot, List<String> u
 
     public ToolRequest(String userMessage, Path workspaceRoot, List<String> uploadedFileIds, String threadId,
             String runId, RunMode mode, List<Skill> activeSkills) {
-        this.userMessage = userMessage;
-        this.workspaceRoot = workspaceRoot;
-        this.uploadedFileIds = uploadedFileIds == null ? List.of() : uploadedFileIds;
-        this.threadId = threadId;
-        this.runId = runId;
-        this.mode = mode == null ? RunMode.RESEARCH : mode;
-        this.activeSkills = activeSkills == null ? List.of() : List.copyOf(activeSkills);
+        this(userMessage, workspaceRoot, uploadedFileIds, threadId, runId, mode, activeSkills, null);
+    }
+
+    public ToolRequest {
+        uploadedFileIds = uploadedFileIds == null ? List.of() : uploadedFileIds;
+        mode = mode == null ? RunMode.RESEARCH : mode;
+        activeSkills = activeSkills == null ? List.of() : List.copyOf(activeSkills);
+        modelName = modelName == null ? "" : modelName;
     }
 }

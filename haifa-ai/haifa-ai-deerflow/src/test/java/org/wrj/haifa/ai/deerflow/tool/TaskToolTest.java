@@ -14,7 +14,6 @@ import org.wrj.haifa.ai.deerflow.subagent.SubagentRuntime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
@@ -75,13 +74,14 @@ class TaskToolTest {
 
         when(subagentRuntime.execute(
                 eq("test-desc"), eq("do research prompt"), eq("general-purpose"),
-                eq("thread-1"), eq("run-1"),
+                eq("thread-1"), eq("run-1"), eq("qwen-plus"),
                 isNull(), isNull(), isNull(), isNull(),
                 eq(RunMode.RESEARCH), any()
         )).thenReturn(subResult);
 
         String arguments = "{\"description\": \"test-desc\", \"prompt\": \"do research prompt\", \"subagent_type\": \"general-purpose\"}";
-        ToolRequest request = new ToolRequest(arguments, Path.of("."), List.of(), "thread-1", "run-1");
+        ToolRequest request = new ToolRequest(arguments, Path.of("."), List.of(), "thread-1", "run-1",
+                RunMode.RESEARCH, List.of(), "qwen-plus");
         ToolResult result = taskTool.execute(request);
 
         assertThat(result.content()).contains("Summary findings")
@@ -97,30 +97,58 @@ class TaskToolTest {
     }
 
     @Test
-    void executePassesParentModeAndActiveSkillsToSubagentRuntime() {
+    void executePassesParentModeModelAndActiveSkillsToSubagentRuntime() {
         when(subagentRegistry.isAvailable("general-purpose")).thenReturn(true);
         Skill skill = new Skill("shell", "Shell access", "custom", "md", Map.of(), Set.of("bash"));
         SubagentResult subResult = SubagentResult.success("sub-chat", "run-chat", "done",
                 List.of(), List.of(), Map.of(), 10);
         when(subagentRuntime.execute(
                 eq("chat-desc"), eq("chat prompt"), eq("general-purpose"),
-                eq("thread-chat"), eq("run-chat"),
+                eq("thread-chat"), eq("run-chat"), eq("qwen-plus"),
                 isNull(), isNull(), isNull(), isNull(),
                 eq(RunMode.CHAT), eq(List.of(skill))
         )).thenReturn(subResult);
 
         String arguments = "{\"description\": \"chat-desc\", \"prompt\": \"chat prompt\", \"subagent_type\": \"general-purpose\"}";
         ToolRequest request = new ToolRequest(arguments, Path.of("."), List.of(), "thread-chat", "run-chat",
-                RunMode.CHAT, List.of(skill));
+                RunMode.CHAT, List.of(skill), "qwen-plus");
 
         ToolResult result = taskTool.execute(request);
 
         assertThat(result.content()).contains("done");
         verify(subagentRuntime).execute(
                 eq("chat-desc"), eq("chat prompt"), eq("general-purpose"),
-                eq("thread-chat"), eq("run-chat"),
+                eq("thread-chat"), eq("run-chat"), eq("qwen-plus"),
                 isNull(), isNull(), isNull(), isNull(),
                 eq(RunMode.CHAT), eq(List.of(skill))
+        );
+    }
+
+    @Test
+    void executeTreatsInheritModelAsParentModelRequestMetadata() {
+        when(subagentRegistry.isAvailable("general-purpose")).thenReturn(true);
+        SubagentResult subResult = SubagentResult.success("sub-inherit", "run-1", "done",
+                List.of(), List.of(), Map.of(), 10);
+        when(subagentRuntime.execute(
+                eq("inherit-desc"), eq("inherit prompt"), eq("general-purpose"),
+                eq("thread-1"), eq("run-1"), eq("qwen-plus"),
+                isNull(), isNull(), isNull(), isNull(),
+                eq(RunMode.RESEARCH), any()
+        )).thenReturn(subResult);
+
+        String arguments = "{\"description\": \"inherit-desc\", \"prompt\": \"inherit prompt\", "
+                + "\"subagent_type\": \"general-purpose\", \"model\": \"inherit\"}";
+        ToolRequest request = new ToolRequest(arguments, Path.of("."), List.of(), "thread-1", "run-1",
+                RunMode.RESEARCH, List.of(), "qwen-plus");
+
+        ToolResult result = taskTool.execute(request);
+
+        assertThat(result.content()).contains("done");
+        verify(subagentRuntime).execute(
+                eq("inherit-desc"), eq("inherit prompt"), eq("general-purpose"),
+                eq("thread-1"), eq("run-1"), eq("qwen-plus"),
+                isNull(), isNull(), isNull(), isNull(),
+                eq(RunMode.RESEARCH), any()
         );
     }
 }

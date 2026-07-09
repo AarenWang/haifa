@@ -9,6 +9,10 @@ spring:
   datasource:
     url: jdbc:sqlite:${deerflow.persistence.sqlite.path}?journal_mode=WAL&busy_timeout=5000
     driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+      minimum-idle: 1
+      connection-timeout: 30000    
   jpa:
     hibernate:
       ddl-auto: update

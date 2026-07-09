@@ -93,6 +93,7 @@ public class SubagentRuntime implements ApplicationContextAware {
      * @param subagentType    type of subagent (e.g. "general-purpose", "bash")
      * @param parentThreadId  parent thread id (inherited)
      * @param parentRunId     parent run id (for tracking)
+     * @param parentModelName parent model name to inherit when subagent model is inherit/default
      * @param allowedTools    optional explicit allowed tools (intersected with parent policy)
      * @param modelOverride   optional model override (default inherits parent model)
      * @param timeoutOverride optional timeout override in seconds
@@ -102,7 +103,7 @@ public class SubagentRuntime implements ApplicationContextAware {
      * @return structured subagent result
      */
     public SubagentResult execute(String description, String prompt, String subagentType,
-                                   String parentThreadId, String parentRunId,
+                                   String parentThreadId, String parentRunId, String parentModelName,
                                    List<String> allowedTools, String modelOverride,
                                    Integer timeoutOverride, Integer maxTurnsOverride,
                                    RunMode parentMode, List<org.wrj.haifa.ai.deerflow.skill.Skill> activeSkills) {
@@ -122,9 +123,7 @@ public class SubagentRuntime implements ApplicationContextAware {
             }
 
             // 2. Resolve effective model
-            String effectiveModel = modelOverride != null && !modelOverride.isBlank()
-                    ? modelOverride
-                    : ("inherit".equals(config.model()) ? properties.getModel() : config.model());
+            String effectiveModel = resolveEffectiveModel(modelOverride, parentModelName, config.model());
 
             // 3. Build filtered tool set
             List<AgentTool> filteredTools = buildFilteredTools(config, allowedTools, parentMode, activeSkills);
@@ -251,6 +250,23 @@ public class SubagentRuntime implements ApplicationContextAware {
     // ---------------------------------------------------------------------------
     // Internal helpers
     // ---------------------------------------------------------------------------
+
+    private String resolveEffectiveModel(String modelOverride, String parentModelName, String configModel) {
+        if (hasExplicitModel(modelOverride)) {
+            return modelOverride.trim();
+        }
+        if (hasExplicitModel(configModel)) {
+            return configModel.trim();
+        }
+        if (hasExplicitModel(parentModelName)) {
+            return parentModelName.trim();
+        }
+        return properties.getModel();
+    }
+
+    private boolean hasExplicitModel(String modelName) {
+        return modelName != null && !modelName.isBlank() && !"inherit".equalsIgnoreCase(modelName.trim());
+    }
 
     private List<AgentTool> buildFilteredTools(SubagentConfig config, List<String> allowedTools,
                                                 RunMode parentMode, List<org.wrj.haifa.ai.deerflow.skill.Skill> activeSkills) {

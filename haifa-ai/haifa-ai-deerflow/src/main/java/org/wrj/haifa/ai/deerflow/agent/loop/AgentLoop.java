@@ -874,7 +874,7 @@ public class AgentLoop {
 
         ToolRequest request = new ToolRequest(toolCall.arguments(), runConfig.workspaceRoot(),
                 uploadedFileIds == null ? List.of() : uploadedFileIds, runConfig.threadId(), runConfig.runId(),
-                runConfig.mode(), activeSkills);
+                runConfig.mode(), activeSkills, runConfig.modelName());
         long startTime = System.currentTimeMillis();
         try {
             ToolResult result = tool.execute(request);
