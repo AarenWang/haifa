@@ -140,7 +140,7 @@ class GraphResearchRuntimeTest {
         });
 
         assertThat(events).anySatisfy(event -> {
-            assertThat(event.type()).isEqualTo(AgentEventType.SUBAGENT_STARTED);
+            assertThat(event.type()).isEqualTo(AgentEventType.RESEARCH_STEP_COMPLETED);
             assertThat(event.metadata()).containsEntry("dispatchMode", "dimension_graph");
         });
 

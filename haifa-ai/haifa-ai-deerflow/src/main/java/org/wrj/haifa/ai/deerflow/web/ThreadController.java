@@ -23,9 +23,16 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import java.util.List;
 import reactor.core.publisher.Mono;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.wrj.haifa.ai.deerflow.threadfile.ThreadFile;
+import org.wrj.haifa.ai.deerflow.threadfile.ThreadFileStore;
+
 @RestController
 @RequestMapping("/api/deerflow/threads")
 public class ThreadController {
+
+    @Autowired
+    private ThreadFileStore threadFileStore;
 
     private final ThreadManager threadManager;
     private final RunManager runManager;
@@ -79,6 +86,13 @@ public class ThreadController {
     public Mono<MessageListResponse> messages(@PathVariable String threadId) {
         return Mono.justOrEmpty(this.threadManager.find(threadId))
                 .map(ignored -> new MessageListResponse(this.messageStore.listByThread(threadId)))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Thread not found")));
+    }
+
+    @GetMapping("/{threadId}/files")
+    public Mono<List<ThreadFile>> files(@PathVariable String threadId) {
+        return Mono.justOrEmpty(this.threadManager.find(threadId))
+                .map(ignored -> this.threadFileStore.findByThreadId(threadId))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Thread not found")));
     }
 

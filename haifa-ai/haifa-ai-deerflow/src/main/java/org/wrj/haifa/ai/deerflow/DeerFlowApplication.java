@@ -8,7 +8,17 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 
 @SpringBootApplication
 @EnableConfigurationProperties(DeerFlowProperties.class)
-@EnableJpaRepositories(basePackages = "org.wrj.haifa.ai.deerflow.persistence.repository")
+@EnableJpaRepositories(basePackages = {
+    "org.wrj.haifa.ai.deerflow.persistence.repository",
+    "org.wrj.haifa.ai.deerflow.runstate",
+    "org.wrj.haifa.ai.deerflow.work",
+    "org.wrj.haifa.ai.deerflow.source",
+    "org.wrj.haifa.ai.deerflow.evidence",
+    "org.wrj.haifa.ai.deerflow.claim",
+    "org.wrj.haifa.ai.deerflow.budget",
+    "org.wrj.haifa.ai.deerflow.quality",
+    "org.wrj.haifa.ai.deerflow.threadfile"
+})
 public class DeerFlowApplication {
 
     public static void main(String[] args) {

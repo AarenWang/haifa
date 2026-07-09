@@ -322,7 +322,7 @@ class SimpleAgentRuntimeTest {
     }
 
     @Test
-    void activeResearchGraphModeRunsThroughGraphAdapterAndCompletesLegacyResearchLoop() {
+    void activeResearchModeRoutesResearchThroughUnifiedChatGraph() {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setWorkspaceRoot(".");
         properties.setSystemPrompt("test system");
@@ -338,8 +338,8 @@ class SimpleAgentRuntimeTest {
                 List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
                 agentEventStore, toolExecutionStore,
                 modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
-        RecordingGraphResearchRuntime graphRuntime = new RecordingGraphResearchRuntime();
-        runtime.setGraphResearchRuntime(graphRuntime);
+        RecordingGraphChatRuntime graphRuntime = new RecordingGraphChatRuntime();
+        runtime.setGraphChatRuntime(graphRuntime);
 
         List<AgentEvent> events = runtime.stream(new AgentRequest("thread-active-research-graph", "research topic", null,
                         List.of(), RunMode.RESEARCH, ResearchOptions.defaults()))

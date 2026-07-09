@@ -55,6 +55,16 @@ export const initialState: AppState = {
   uploads: [],
   selectedUploadIds: [],
   runHistory: [],
+  
+  // New unified tracking states
+  workItems: [],
+  claims: [],
+  citations: [],
+  budgetLedger: null,
+  qualityAssessment: null,
+  skillActivations: [],
+  threadFiles: [],
+  sources: [],
 };
 
 export function deerflowReducer(state: AppState, action: AppAction): AppState {
@@ -76,8 +86,8 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
         threadId: action.payload.threadId,
         threads: state.threads,
         messages: state.messages,
-        researchSources: action.payload.mode === 'research' ? state.researchSources : [],
-        evidenceItems: action.payload.mode === 'research' ? state.evidenceItems : [],
+        researchSources: [],
+        evidenceItems: [],
         runObservability: undefined,
         artifacts: state.artifacts,
         uploads: state.uploads,
@@ -220,6 +230,46 @@ export function deerflowReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         evidenceItems: action.payload,
+      };
+    case 'SET_WORK_ITEMS':
+      return {
+        ...state,
+        workItems: action.payload,
+      };
+    case 'SET_CLAIMS':
+      return {
+        ...state,
+        claims: action.payload,
+      };
+    case 'SET_CITATIONS':
+      return {
+        ...state,
+        citations: action.payload,
+      };
+    case 'SET_BUDGET_LEDGER':
+      return {
+        ...state,
+        budgetLedger: action.payload,
+      };
+    case 'SET_QUALITY_ASSESSMENT':
+      return {
+        ...state,
+        qualityAssessment: action.payload,
+      };
+    case 'SET_SKILL_ACTIVATIONS':
+      return {
+        ...state,
+        skillActivations: action.payload,
+      };
+    case 'SET_THREAD_FILES':
+      return {
+        ...state,
+        threadFiles: action.payload,
+      };
+    case 'SET_UNIFIED_SOURCES':
+      return {
+        ...state,
+        sources: action.payload,
       };
     case 'SET_RESEARCH_PLAN':
       return {

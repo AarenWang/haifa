@@ -14,6 +14,14 @@ import type {
   ThreadRecord,
   ClarificationAnswer,
   TodoSnapshot,
+  SkillActivation,
+  WorkItem,
+  Source,
+  Claim,
+  Citation,
+  BudgetLedger,
+  QualityAssessment,
+  ThreadFile,
 } from '../types';
 
 
@@ -682,6 +690,84 @@ export async function rejectMemoryCandidate(id: string): Promise<MemoryCandidate
   const res = await fetchWithUser(`/api/deerflow/memory/candidates/${encodeURIComponent(id)}/reject`, {
     method: 'POST',
   });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunSkillActivations(runId: string): Promise<SkillActivation[]> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/skill-activations`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunWorkItems(runId: string): Promise<WorkItem[]> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/work-items`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunUnifiedSources(runId: string): Promise<Source[]> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/sources`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunUnifiedEvidence(runId: string): Promise<EvidenceItem[]> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/evidence`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunClaims(runId: string): Promise<Claim[]> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/claims`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunCitations(runId: string): Promise<Citation[]> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/citations`, { method: 'GET' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunQuality(runId: string): Promise<QualityAssessment | null> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/quality`, { method: 'GET' });
+  if (res.status === 404) {
+    return null;
+  }
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRunBudget(runId: string): Promise<BudgetLedger | null> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/budget`, { method: 'GET' });
+  if (res.status === 404) {
+    return null;
+  }
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchThreadFiles(threadId: string): Promise<ThreadFile[]> {
+  const res = await fetchWithUser(`/api/deerflow/threads/${encodeURIComponent(threadId)}/files`, { method: 'GET' });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }

@@ -182,7 +182,7 @@ class AgentLoopResearchIntegrationTest {
     }
 
     @Test
-    void researchWithoutPlanDoesNotAcceptImmediateFinalAnswer() {
+    void researchWithoutLegacyPlanAcceptsSkillFinalAnswer() {
         AgentLoop loop = new AgentLoop(prompt -> Mono.just(new ModelResponse("premature report")),
                 new ToolRegistry(List.of()), null, null, null,
                 new org.wrj.haifa.ai.deerflow.research.ResearchLoopObserver(null, null, null, null, null));
@@ -211,8 +211,8 @@ class AgentLoopResearchIntegrationTest {
                 List.of()
         ).collectList().block();
 
-        assertThat(events).extracting(AgentEvent::type).contains(AgentEventType.RUN_COMPLETED);
-        assertThat(events).extracting(AgentEvent::type).doesNotContain(AgentEventType.MODEL_COMPLETED);
+        assertThat(events).extracting(AgentEvent::type).contains(AgentEventType.MODEL_COMPLETED, AgentEventType.RUN_COMPLETED);
+        assertThat(events).extracting(AgentEvent::content).contains("premature report");
     }
 
     private static final class FixedSearchTool implements AgentTool {

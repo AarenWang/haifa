@@ -41,7 +41,10 @@ public class ChatFinalizeNode implements AsyncNodeAction {
 
             String finalAnswer = content == null ? "" : content.trim();
 
-            graphLifecycleService.completeChat(runId, threadId, finalAnswer, stepNum, 0);
+            String mode = state.<String>value(AgentGraphStateKeys.MODE).orElse("CHAT");
+            if (!"RESEARCH".equalsIgnoreCase(mode)) {
+                graphLifecycleService.completeChat(runId, threadId, finalAnswer, stepNum, 0);
+            }
 
             GraphEventRegistry.publish(runId, AgentEvent.of(
                     UUID.randomUUID().toString(),

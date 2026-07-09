@@ -100,6 +100,46 @@ public class SimpleAgentRuntime implements AgentRuntime {
     @Autowired(required = false)
     private ToolPolicyService toolPolicyService;
 
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.runstate.SkillActivationStore skillActivationStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.budget.BudgetLedgerStore budgetLedgerStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.quality.QualityAssessmentStore qualityAssessmentStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.threadfile.ThreadFileStore threadFileStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.work.WorkItemStore workItemStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.source.SourceStore sourceStore;
+
+    @Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("EvidenceItemStoreV2")
+    private org.wrj.haifa.ai.deerflow.evidence.EvidenceItemStore newEvidenceItemStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.claim.ClaimStore claimStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.claim.CitationStore citationStore;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanner researchPlanner;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanStore researchPlanStore;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker researchProgressTracker;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.research.plan.ResearchQualityGate researchQualityGate;
+
     @Autowired(required = false)
     private SlashSkillResolver slashSkillResolver;
 
@@ -125,7 +165,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage) {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
                 agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
@@ -142,7 +183,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
                 agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
                 todoStore, toolOutputBudgetMiddleware, researchRuntimeSupport, clarificationStore, reportWriterService,
-                subagentLimitMiddleware, null, null);
+                subagentLimitMiddleware, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -158,7 +200,21 @@ public class SimpleAgentRuntime implements AgentRuntime {
             @Autowired(required = false) ReportWriterService reportWriterService,
             @Autowired(required = false) SubagentLimitMiddleware subagentLimitMiddleware,
             @Autowired(required = false) ApprovalPolicyService approvalPolicyService,
-            @Autowired(required = false) ApprovalStore approvalStore) {
+            @Autowired(required = false) ApprovalStore approvalStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.artifact.ArtifactService artifactService,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanner researchPlanner,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanStore researchPlanStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker researchProgressTracker,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.research.plan.ResearchQualityGate researchQualityGate,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.runstate.SkillActivationStore skillActivationStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.work.WorkItemStore workItemStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.source.SourceStore sourceStore,
+            @Autowired(required = false) @org.springframework.beans.factory.annotation.Qualifier("EvidenceItemStoreV2") org.wrj.haifa.ai.deerflow.evidence.EvidenceItemStore newEvidenceItemStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.claim.ClaimStore claimStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.claim.CitationStore citationStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.budget.BudgetLedgerStore budgetLedgerStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.quality.QualityAssessmentStore qualityAssessmentStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.threadfile.ThreadFileStore threadFileStore) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
@@ -171,19 +227,6 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     return order == null ? Integer.MAX_VALUE : order.value();
                 }))
                 .toList();
-
-        List<org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver> observers = new ArrayList<>();
-        observers.add(new DefaultAgentLoopObserver(todoStore, artifactService));
-        if (subagentLimitMiddleware != null) {
-            observers.add(subagentLimitMiddleware);
-        }
-
-        this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
-                new CompositeAgentLoopObserver(observers),
-                toolOutputBudgetMiddleware,
-                clarificationStore,
-                approvalPolicyService,
-                approvalStore);
         this.agentEventStore = agentEventStore;
         this.toolExecutionStore = toolExecutionStore;
         this.modelStepStore = modelStepStore;
@@ -196,6 +239,50 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this.todoStore = todoStore;
         this.approvalPolicyService = approvalPolicyService;
         this.approvalStore = approvalStore;
+        this.artifactService = artifactService;
+        this.researchPlanner = researchPlanner;
+        this.researchPlanStore = researchPlanStore;
+        this.researchProgressTracker = researchProgressTracker;
+        this.researchQualityGate = researchQualityGate;
+        this.skillActivationStore = skillActivationStore;
+        this.workItemStore = workItemStore;
+        this.sourceStore = sourceStore;
+        this.newEvidenceItemStore = newEvidenceItemStore;
+        this.claimStore = claimStore;
+        this.citationStore = citationStore;
+        this.budgetLedgerStore = budgetLedgerStore;
+        this.qualityAssessmentStore = qualityAssessmentStore;
+        this.threadFileStore = threadFileStore;
+
+        List<org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver> observers = new ArrayList<>();
+        observers.add(new DefaultAgentLoopObserver(todoStore, artifactService));
+        if (subagentLimitMiddleware != null) {
+            observers.add(subagentLimitMiddleware);
+        }
+        observers.add(new org.wrj.haifa.ai.deerflow.research.ResearchLoopObserver(
+                todoStore,
+                researchRuntimeSupport,
+                researchPlanner,
+                researchPlanStore,
+                researchProgressTracker,
+                researchQualityGate,
+                skillActivationStore,
+                workItemStore,
+                sourceStore,
+                newEvidenceItemStore,
+                claimStore,
+                citationStore,
+                budgetLedgerStore,
+                qualityAssessmentStore,
+                threadFileStore
+        ));
+
+        this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
+                new CompositeAgentLoopObserver(observers),
+                toolOutputBudgetMiddleware,
+                clarificationStore,
+                approvalPolicyService,
+                approvalStore);
     }
 
     @Override
@@ -273,7 +360,40 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 if (!hasDeepResearch) {
                     this.skillStorage.findAny("deep-research").ifPresent(activeSkills::add);
                 }
-            }
+                try {
+                    if (this.skillActivationStore != null) {
+                        this.skillActivationStore.activate(run.runId(), "deep-research", "Research preset activated", "user_explicit", "{}");
+                    }
+                    if (this.budgetLedgerStore != null) {
+                        this.budgetLedgerStore.init(
+                                run.runId(),
+                                this.properties.getResearchTimeout(),
+                                this.properties.getMaxResearchSteps(),
+                                this.properties.getMaxFetchesPerRun(),
+                                this.properties.getMaxResearchSources(),
+                                this.properties.getMaxResearchSources(),
+                                5,
+                                5
+                        );
+                    }
+                    if (this.qualityAssessmentStore != null) {
+                        this.qualityAssessmentStore.save(
+                                run.runId(),
+                                0.0,
+                                false,
+                                new ArrayList<>(List.of("initial_exploration")),
+                                new ArrayList<>(),
+                                "continue",
+                                "Research initiated. Awaiting initial sources and analysis."
+                        );
+                    }
+                    if (this.workItemStore != null) {
+                        this.workItemStore.create(run.runId(), threadId, null, "research_question",
+                                ThreadManager.titleFromMessage(request.message()), request.message(), "high", "parent_agent");
+                    }
+                } catch (Exception ex) {
+                    log.error("Failed to initialize unified research state: {}", ex.getMessage());
+                }}
 
             List<ToolResult> toolResults = List.of();
             AgentRuntimeContext runtimeContext = AgentRuntimeContext.of(config, effectiveRequest, toolResults, this.properties, activeSkills);
@@ -303,7 +423,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
                         maxSteps, maxToolCalls, this.properties.getResearchTimeout(), researchOptions);
 
                 boolean activeChatGraph = shouldUseActiveChatGraph(this.properties, this.graphChatRuntime, effectiveRequest);
-                boolean activeResearchGraph = shouldUseActiveResearchGraph(this.properties, this.graphResearchRuntime, effectiveRequest);
+                boolean activeResearchGraph = false;
                 if (!activeChatGraph && !activeResearchGraph) {
                     triggerGraphShadow(config, effectiveRequest, prompt);
                 }
@@ -593,20 +713,15 @@ public class SimpleAgentRuntime implements AgentRuntime {
         return graphChatRuntime != null
                 && properties.getGraph() != null
                 && properties.getGraph().isEnabled()
-                && (properties.getGraph().getMode() == GraphRuntimeMode.GRAPH_FIRST
-                    || properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_CHAT)
                 && request != null
-                && request.isChatMode();
+                && (properties.getGraph().getMode() == GraphRuntimeMode.GRAPH_FIRST
+                    || properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_CHAT
+                    || (properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_RESEARCH && request.isResearchMode()))
+                && (request.isChatMode() || request.isResearchMode());
     }
 
     public static boolean shouldUseActiveResearchGraph(DeerFlowProperties properties, GraphResearchRuntime graphResearchRuntime, AgentRequest request) {
-        return graphResearchRuntime != null
-                && properties.getGraph() != null
-                && properties.getGraph().isEnabled()
-                && (properties.getGraph().getMode() == GraphRuntimeMode.GRAPH_FIRST
-                    || properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_RESEARCH)
-                && request != null
-                && request.isResearchMode();
+        return false;
     }
 
     private void triggerGraphShadow(AgentRunConfig config, AgentRequest request, ModelPrompt prompt) {
@@ -670,7 +785,24 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     Map.of("mode", "research", "artifactId", result.artifact().artifactId(),
                             "filename", result.artifact().filename(),
                             "toolCount", modelMetadata == null ? 0 : modelMetadata.getOrDefault("totalToolCalls", 0)));
-        } else {
+            if (this.threadFileStore != null) {
+                try {
+                    this.threadFileStore.register(
+                            threadId,
+                            run.runId(),
+                            result.artifact().artifactId(),
+                            result.artifact().path(),
+                            result.artifact().path(),
+                            "report",
+                            "presented",
+                            1,
+                            new ArrayList<>(),
+                            new ArrayList<>()
+                    );
+                } catch (Exception ex) {
+                    log.error("Failed to register report ThreadFile: {}", ex.getMessage());
+                }
+            }} else {
             this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
                     compactResearchAnswer(synthesisResult, null),
                     Map.of("mode", "research", "artifactUnavailable", true));

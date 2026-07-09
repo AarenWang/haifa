@@ -11,15 +11,19 @@ import {
   listThreads,
   listThreadMessages,
   listThreadRuns,
-  fetchRunEvidence,
+  fetchRunUnifiedEvidence,
   fetchRunEvents,
-  fetchRunPlan,
-  fetchRunProgress,
-  fetchRunQualityGate,
-  fetchRunSources,
+  fetchRunUnifiedSources,
   fetchRunTodos,
   fetchRunObservability,
   readDeerFlowResumeStream,
+  fetchRunSkillActivations,
+  fetchRunWorkItems,
+  fetchRunClaims,
+  fetchRunCitations,
+  fetchRunQuality,
+  fetchRunBudget,
+  fetchThreadFiles,
 } from './api/deerflowClient';
 import Header from './components/Header';
 import TaskComposer, { type PendingClarification } from './components/TaskComposer';
@@ -28,7 +32,6 @@ import ActivityTrace from './components/ActivityTrace';
 import ArtifactPanel from './components/ArtifactPanel';
 import ArtifactCanvas from './components/ArtifactCanvas';
 import ResearchInspector from './components/ResearchInspector';
-import ResearchPlanView from './components/ResearchPlanView';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
 import MemorySettingsModal from './components/MemorySettingsModal';
 import { Activity, Menu } from 'lucide-react';
@@ -58,6 +61,15 @@ function App() {
     state.status,
     state.threadId
   );
+  const hasResearchPanelData =
+    state.lastRequest?.mode === 'research' ||
+    (state.skillActivations || []).some((skill) => skill.skillName === 'deep-research') ||
+    (state.workItems || []).length > 0 ||
+    (state.sources || []).length > 0 ||
+    (state.evidenceItems || []).length > 0 ||
+    (state.claims || []).length > 0 ||
+    !!state.budgetLedger ||
+    !!state.qualityAssessment;
   const handleOpenCanvas = useCallback((artifactId?: string) => {
     const target = artifactId || state.artifacts[0]?.artifactId;
     if (target) {
@@ -141,51 +153,90 @@ function App() {
     }
   }, []);
 
-  const refreshResearchData = useCallback(async (runId?: string) => {
+  const refreshResearchData = useCallback(async (runId?: string, threadId?: string) => {
     if (!runId) {
-      dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
+      dispatch({ type: 'SET_UNIFIED_SOURCES', payload: [] });
       dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
-      dispatch({ type: 'SET_RESEARCH_PLAN' });
-      dispatch({ type: 'SET_RESEARCH_PROGRESS' });
-      dispatch({ type: 'SET_QUALITY_GATE' });
+      dispatch({ type: 'SET_WORK_ITEMS', payload: [] });
+      dispatch({ type: 'SET_CLAIMS', payload: [] });
+      dispatch({ type: 'SET_CITATIONS', payload: [] });
+      dispatch({ type: 'SET_BUDGET_LEDGER', payload: null });
+      dispatch({ type: 'SET_QUALITY_ASSESSMENT', payload: null });
+      dispatch({ type: 'SET_SKILL_ACTIVATIONS', payload: [] });
+      dispatch({ type: 'SET_THREAD_FILES', payload: [] });
       return;
     }
     try {
-      const [sources, evidenceItems, planResult, progressResult, qualityResult] = await Promise.allSettled([
-        fetchRunSources(runId),
-        fetchRunEvidence(runId),
-        fetchRunPlan(runId),
-        fetchRunProgress(runId),
-        fetchRunQualityGate(runId),
+      const [
+        sourcesRes,
+        evidenceRes,
+        workItemsRes,
+        claimsRes,
+        citationsRes,
+        budgetRes,
+        qualityRes,
+        activityRes,
+        filesRes
+      ] = await Promise.allSettled([
+        fetchRunUnifiedSources(runId),
+        fetchRunUnifiedEvidence(runId),
+        fetchRunWorkItems(runId),
+        fetchRunClaims(runId),
+        fetchRunCitations(runId),
+        fetchRunBudget(runId),
+        fetchRunQuality(runId),
+        fetchRunSkillActivations(runId),
+        threadId ? fetchThreadFiles(threadId) : Promise.resolve([])
       ]);
-      if (sources.status === 'fulfilled') {
-        dispatch({ type: 'SET_RESEARCH_SOURCES', payload: sources.value });
+
+      if (sourcesRes.status === 'fulfilled') {
+        dispatch({ type: 'SET_UNIFIED_SOURCES', payload: sourcesRes.value });
       } else {
-        dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
+        dispatch({ type: 'SET_UNIFIED_SOURCES', payload: [] });
       }
-      if (evidenceItems.status === 'fulfilled') {
-        dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: evidenceItems.value });
+      if (evidenceRes.status === 'fulfilled') {
+        dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: evidenceRes.value });
       } else {
         dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
       }
-      if (planResult.status === 'fulfilled') {
-        dispatch({ type: 'SET_RESEARCH_PLAN', payload: planResult.value });
+      if (workItemsRes.status === 'fulfilled') {
+        dispatch({ type: 'SET_WORK_ITEMS', payload: workItemsRes.value });
       } else {
-        dispatch({ type: 'SET_RESEARCH_PLAN' });
+        dispatch({ type: 'SET_WORK_ITEMS', payload: [] });
       }
-      if (progressResult.status === 'fulfilled') {
-        dispatch({ type: 'SET_RESEARCH_PROGRESS', payload: progressResult.value });
+      if (claimsRes.status === 'fulfilled') {
+        dispatch({ type: 'SET_CLAIMS', payload: claimsRes.value });
       } else {
-        dispatch({ type: 'SET_RESEARCH_PROGRESS' });
+        dispatch({ type: 'SET_CLAIMS', payload: [] });
       }
-      if (qualityResult.status === 'fulfilled') {
-        dispatch({ type: 'SET_QUALITY_GATE', payload: qualityResult.value });
+      if (citationsRes.status === 'fulfilled') {
+        dispatch({ type: 'SET_CITATIONS', payload: citationsRes.value });
       } else {
-        dispatch({ type: 'SET_QUALITY_GATE' });
+        dispatch({ type: 'SET_CITATIONS', payload: [] });
+      }
+      if (budgetRes.status === 'fulfilled') {
+        dispatch({ type: 'SET_BUDGET_LEDGER', payload: budgetRes.value });
+      } else {
+        dispatch({ type: 'SET_BUDGET_LEDGER', payload: null });
+      }
+      if (qualityRes.status === 'fulfilled') {
+        dispatch({ type: 'SET_QUALITY_ASSESSMENT', payload: qualityRes.value });
+      } else {
+        dispatch({ type: 'SET_QUALITY_ASSESSMENT', payload: null });
+      }
+      if (activityRes.status === 'fulfilled') {
+        dispatch({ type: 'SET_SKILL_ACTIVATIONS', payload: activityRes.value });
+      } else {
+        dispatch({ type: 'SET_SKILL_ACTIVATIONS', payload: [] });
+      }
+      if (filesRes.status === 'fulfilled') {
+        dispatch({ type: 'SET_THREAD_FILES', payload: filesRes.value });
+      } else {
+        dispatch({ type: 'SET_THREAD_FILES', payload: [] });
       }
     } catch (err) {
       console.error('Failed to load research artifacts', err);
-      dispatch({ type: 'SET_RESEARCH_SOURCES', payload: [] });
+      dispatch({ type: 'SET_UNIFIED_SOURCES', payload: [] });
       dispatch({ type: 'SET_EVIDENCE_ITEMS', payload: [] });
     }
   }, []);
@@ -243,11 +294,7 @@ function App() {
         }
         dispatch({ type: 'SET_STATUS', payload: appStatus });
 
-        if (latestRun.mode === 'research') {
-          refreshResearchData(latestRun.runId);
-        } else {
-          refreshResearchData();
-        }
+        refreshResearchData(latestRun.runId, threadId);
         refreshArtifactData(threadId, latestRun.runId);
         refreshObservabilityData(latestRun.runId);
       } else {
@@ -355,7 +402,6 @@ function App() {
               streamThreadId = evt.threadId;
             }
             dispatch({ type: 'ADD_EVENT', payload: evt });
-            const isResearchRun = fullReq.mode === 'research';
             const isResearchEvent =
               evt.type === 'RESEARCH_PLAN_CREATED' ||
               evt.type === 'RESEARCH_DIMENSION_STARTED' ||
@@ -369,8 +415,10 @@ function App() {
               evt.type === 'REPORT_STARTED' ||
               evt.type === 'REPORT_COMPLETED' ||
               evt.type === 'ARTIFACT_CREATED' ||
+              evt.type === 'TOOL_COMPLETED' ||
               evt.type === 'MODEL_COMPLETED' ||
-              evt.type === 'RUN_COMPLETED';
+              evt.type === 'RUN_COMPLETED' ||
+              evt.type === 'RUN_FAILED';
             if (
               evt.type === 'RUN_STARTED' ||
               evt.type === 'MODEL_COMPLETED' ||
@@ -380,8 +428,8 @@ function App() {
               refreshThreads();
               refreshMessages(evt.threadId);
             }
-            if (isResearchRun && isResearchEvent) {
-              refreshResearchData(evt.runId);
+            if (isResearchEvent) {
+              refreshResearchData(evt.runId, evt.threadId);
             }
             if (
               evt.type === 'ARTIFACT_CREATED' ||
@@ -437,7 +485,6 @@ function App() {
             streamThreadId = evt.threadId;
           }
           dispatch({ type: 'ADD_EVENT', payload: evt });
-          const isResearchRun = state.lastRequest?.mode === 'research';
           const isResearchEvent =
             evt.type === 'RESEARCH_PLAN_CREATED' ||
             evt.type === 'RESEARCH_DIMENSION_STARTED' ||
@@ -451,8 +498,10 @@ function App() {
             evt.type === 'REPORT_STARTED' ||
             evt.type === 'REPORT_COMPLETED' ||
             evt.type === 'ARTIFACT_CREATED' ||
-            evt.type === 'MODEL_COMPLETED' ||
-            evt.type === 'RUN_COMPLETED';
+            evt.type === 'TOOL_COMPLETED' ||
+              evt.type === 'MODEL_COMPLETED' ||
+              evt.type === 'RUN_COMPLETED' ||
+              evt.type === 'RUN_FAILED';
           if (
             evt.type === 'RUN_STARTED' ||
             evt.type === 'MODEL_COMPLETED' ||
@@ -462,8 +511,8 @@ function App() {
             refreshThreads();
             refreshMessages(evt.threadId);
           }
-          if (isResearchRun && isResearchEvent) {
-            refreshResearchData(evt.runId);
+          if (isResearchEvent) {
+            refreshResearchData(evt.runId, evt.threadId);
           }
           if (
             evt.type === 'ARTIFACT_CREATED' ||
@@ -681,20 +730,19 @@ function App() {
             onSubmitQuestion={handleSubmitQuestion}
             onOpenCanvas={handleOpenCanvas}
           />
-          {state.lastRequest?.mode === 'research' && (
-            <ResearchPlanView
-              plan={state.researchPlan}
-              progress={state.researchProgress}
-              qualityGate={state.qualityGate}
+          {hasResearchPanelData && (
+            <ResearchInspector
+              sources={state.sources || []}
+              evidenceItems={state.evidenceItems || []}
+              workItems={state.workItems || []}
+              claims={state.claims || []}
+              citations={state.citations || []}
+              budgetLedger={state.budgetLedger || null}
+              qualityAssessment={state.qualityAssessment || null}
+              skillActivations={state.skillActivations || []}
             />
           )}
           <ArtifactPanel artifacts={state.artifacts} onOpenCanvas={handleOpenCanvas} />
-          {state.lastRequest?.mode === 'research' && (
-            <ResearchInspector
-              sources={state.researchSources}
-              evidenceItems={state.evidenceItems}
-            />
-          )}
           <TaskComposer
             onRun={handleRun}
             onAnswerClarification={handleAnswerClarification}

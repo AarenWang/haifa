@@ -190,13 +190,16 @@ export interface ResearchSource {
 export interface EvidenceItem {
   evidenceId: string;
   sourceId: string;
-  sourceTitle: string;
-  sourceUrl: string;
-  quoteOrParaphrase: string;
-  claim: string;
-  dimension: string;
+  runId: string;
+  threadId: string;
+  workItemId?: string | null;
+  summary: string;
+  claimSupportText: string;
+  locator: string;
   confidence: number;
-  extractedAt?: string | null;
+  accepted: boolean;
+  rejectionReason?: string | null;
+  createdAt: string;
 }
 
 
@@ -384,6 +387,16 @@ export interface AppState {
   uploads: UploadRecord[];
   selectedUploadIds: string[];
   runHistory: RunHistoryEntry[];
+  
+  // New unified domain model state fields
+  workItems?: WorkItem[];
+  claims?: Claim[];
+  citations?: Citation[];
+  budgetLedger?: BudgetLedger | null;
+  qualityAssessment?: QualityAssessment | null;
+  skillActivations?: SkillActivation[];
+  threadFiles?: ThreadFile[];
+  sources?: Source[];
 }
 
 export type AppAction =
@@ -413,7 +426,17 @@ export type AppAction =
   | { type: 'SET_STATUS'; payload: AppStatus }
   | { type: 'SET_TODO_SNAPSHOT'; payload?: TodoSnapshot }
   | { type: 'SET_TODO_GATE_BLOCKED'; payload: { blocked: boolean; message?: string } }
-  | { type: 'SET_LAST_REQUEST'; payload?: RunRequest };
+  | { type: 'SET_LAST_REQUEST'; payload?: RunRequest }
+  
+  // New actions for unified deep research
+  | { type: 'SET_WORK_ITEMS'; payload: WorkItem[] }
+  | { type: 'SET_CLAIMS'; payload: Claim[] }
+  | { type: 'SET_CITATIONS'; payload: Citation[] }
+  | { type: 'SET_BUDGET_LEDGER'; payload: BudgetLedger | null }
+  | { type: 'SET_QUALITY_ASSESSMENT'; payload: QualityAssessment | null }
+  | { type: 'SET_SKILL_ACTIVATIONS'; payload: SkillActivation[] }
+  | { type: 'SET_THREAD_FILES'; payload: ThreadFile[] }
+  | { type: 'SET_UNIFIED_SOURCES'; payload: Source[] };
 
 export interface AgentPersona {
   id?: string;
@@ -456,4 +479,127 @@ export interface MemoryCandidate {
   status: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface SkillActivation {
+  activationId: string;
+  runId: string;
+  skillName: string;
+  activationReason: string;
+  source?: string;
+  status: string;
+  activatedAt: string;
+  deactivatedAt?: string | null;
+  configurationJson: string;
+}
+
+export interface WorkItem {
+  workItemId: string;
+  runId: string;
+  threadId: string;
+  parentWorkItemId?: string | null;
+  kind: string;
+  title: string;
+  goal: string;
+  priority: string;
+  status: string;
+  owner: string;
+  createdAt: string;
+  updatedAt?: string | null;
+  completedAt?: string | null;
+  blockedReason?: string | null;
+  failureReason?: string | null;
+  budgetUsed?: number | null;
+  evidenceIds: string[];
+  artifactIds: string[];
+}
+
+export interface Source {
+  sourceId: string;
+  runId: string;
+  threadId: string;
+  url: string;
+  canonicalUrl?: string | null;
+  title: string;
+  domain: string;
+  lifecycleStatus: string;
+  sourceType: string;
+  qualityTier: string;
+  contentHash?: string | null;
+  discoveredAt: string;
+  fetchedAt?: string | null;
+  lastCheckedAt?: string | null;
+  discardReason?: string | null;
+  metadataJson?: string | null;
+}
+
+export interface Claim {
+  claimId: string;
+  runId: string;
+  threadId: string;
+  artifactId?: string | null;
+  text: string;
+  supportEvidenceIds: string[];
+  confidence: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Citation {
+  citationId: string;
+  claimId: string;
+  evidenceId: string;
+  sourceId: string;
+  locator: string;
+  status: string;
+  verifiedAt: string;
+}
+
+export interface BudgetLedger {
+  runId: string;
+  maxElapsedMs: number;
+  usedElapsedMs: number;
+  maxModelCalls: number;
+  usedModelCalls: number;
+  maxToolCalls: number;
+  usedToolCalls: number;
+  maxSearchQueries: number;
+  usedSearchQueries: number;
+  maxFetchedSources: number;
+  usedFetchedSources: number;
+  maxReplans: number;
+  usedReplans: number;
+  maxSubagents: number;
+  usedSubagents: number;
+  stopReason?: string | null;
+}
+
+export interface QualityAssessment {
+  assessmentId: string;
+  runId: string;
+  score: number;
+  passed: boolean;
+  gaps: string[];
+  risks: string[];
+  nextAction: string;
+  limitations?: string | null;
+  createdAt: string;
+}
+
+export interface ThreadFile {
+  fileId: string;
+  artifactId?: string | null;
+  threadId: string;
+  runId: string;
+  path: string;
+  editablePath?: string | null;
+  role: string;
+  status: string;
+  latestVersionOf?: string | null;
+  version: number;
+  generatedFromWorkItemIds: string[];
+  generatedFromEvidenceIds: string[];
+  createdAt: string;
+  updatedAt: string;
 }

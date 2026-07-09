@@ -67,7 +67,7 @@ public class ResearchDimensionDispatchNode implements AsyncNodeAction {
                             UUID.randomUUID().toString(),
                             runId,
                             threadId,
-                            AgentEventType.SUBAGENT_STARTED,
+                            AgentEventType.RESEARCH_STEP_COMPLETED,
                             "Research dimension dispatched: " + task.title(),
                             Map.of("taskId", task.id(),
                                    "dimension", task.dimension(),

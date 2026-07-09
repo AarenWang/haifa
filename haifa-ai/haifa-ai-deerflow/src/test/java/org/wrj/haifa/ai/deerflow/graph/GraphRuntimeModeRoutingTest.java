@@ -24,11 +24,11 @@ class GraphRuntimeModeRoutingTest {
     }
 
     @Test
-    void graphFirstModeRoutesChatAndResearchToGraphs() {
+    void graphFirstModeRoutesChatAndResearchToUnifiedChatGraph() {
         DeerFlowProperties properties = properties(GraphRuntimeMode.GRAPH_FIRST);
         assertThat(shouldUseActiveChatGraph(properties, new GraphChatRuntime(), chatRequest())).isTrue();
-        assertThat(shouldUseActiveResearchGraph(properties, new GraphResearchRuntime(), researchRequest())).isTrue();
-        assertThat(shouldUseActiveChatGraph(properties, new GraphChatRuntime(), researchRequest())).isFalse();
+        assertThat(shouldUseActiveResearchGraph(properties, new GraphResearchRuntime(), researchRequest())).isFalse();
+        assertThat(shouldUseActiveChatGraph(properties, new GraphChatRuntime(), researchRequest())).isTrue();
         assertThat(shouldUseActiveResearchGraph(properties, new GraphResearchRuntime(), chatRequest())).isFalse();
     }
 
@@ -40,10 +40,10 @@ class GraphRuntimeModeRoutingTest {
     }
 
     @Test
-    void activeResearchModeRoutesToGraphResearchRuntime() {
+    void activeResearchModeDoesNotUseDeprecatedResearchGraphRuntime() {
         DeerFlowProperties properties = properties(GraphRuntimeMode.ACTIVE_RESEARCH);
-        assertThat(shouldUseActiveResearchGraph(properties, new GraphResearchRuntime(), researchRequest())).isTrue();
-        assertThat(shouldUseActiveChatGraph(properties, new GraphChatRuntime(), researchRequest())).isFalse();
+        assertThat(shouldUseActiveResearchGraph(properties, new GraphResearchRuntime(), researchRequest())).isFalse();
+        assertThat(shouldUseActiveChatGraph(properties, new GraphChatRuntime(), researchRequest())).isTrue();
     }
 
     @Test
@@ -60,9 +60,9 @@ class GraphRuntimeModeRoutingTest {
     }
 
     @Test
-    void researchRequestDoesNotRouteToChatGraph() {
+    void researchRequestRoutesToChatGraphInActiveChatMode() {
         DeerFlowProperties properties = properties(GraphRuntimeMode.ACTIVE_CHAT);
-        assertThat(shouldUseActiveChatGraph(properties, new GraphChatRuntime(), researchRequest())).isFalse();
+        assertThat(shouldUseActiveChatGraph(properties, new GraphChatRuntime(), researchRequest())).isTrue();
     }
 
     // Helper methods

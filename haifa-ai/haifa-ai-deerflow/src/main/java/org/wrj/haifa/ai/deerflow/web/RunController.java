@@ -51,9 +51,57 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import java.time.format.DateTimeFormatter;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.wrj.haifa.ai.deerflow.runstate.SkillActivation;
+import org.wrj.haifa.ai.deerflow.runstate.SkillActivationStore;
+import org.wrj.haifa.ai.deerflow.work.WorkItem;
+import org.wrj.haifa.ai.deerflow.work.WorkItemStore;
+import org.wrj.haifa.ai.deerflow.source.Source;
+import org.wrj.haifa.ai.deerflow.source.SourceStore;
+import org.wrj.haifa.ai.deerflow.evidence.EvidenceItemStore;
+import org.wrj.haifa.ai.deerflow.claim.Claim;
+import org.wrj.haifa.ai.deerflow.claim.ClaimStore;
+import org.wrj.haifa.ai.deerflow.claim.Citation;
+import org.wrj.haifa.ai.deerflow.claim.CitationStore;
+import org.wrj.haifa.ai.deerflow.budget.BudgetLedger;
+import org.wrj.haifa.ai.deerflow.budget.BudgetLedgerStore;
+import org.wrj.haifa.ai.deerflow.quality.QualityAssessment;
+import org.wrj.haifa.ai.deerflow.quality.QualityAssessmentStore;
+import org.wrj.haifa.ai.deerflow.threadfile.ThreadFile;
+import org.wrj.haifa.ai.deerflow.threadfile.ThreadFileStore;
+
 @RestController
 @RequestMapping("/api/deerflow/runs")
 public class RunController {
+
+    @Autowired
+    private SkillActivationStore skillActivationStore;
+
+    @Autowired
+    private WorkItemStore workItemStore;
+
+    @Autowired
+    private SourceStore sourceStore;
+
+    @Autowired
+    @Qualifier("EvidenceItemStoreV2")
+    private EvidenceItemStore newEvidenceItemStore;
+
+    @Autowired
+    private ClaimStore claimStore;
+
+    @Autowired
+    private CitationStore citationStore;
+
+    @Autowired
+    private BudgetLedgerStore budgetLedgerStore;
+
+    @Autowired
+    private QualityAssessmentStore qualityAssessmentStore;
+
+    @Autowired
+    private ThreadFileStore threadFileStore;
 
     private final AgentRuntime agentRuntime;
     private final RunManager runManager;
@@ -316,17 +364,13 @@ public class RunController {
     }
 
     @GetMapping("/{runId}/sources")
-    public Mono<List<ResearchSourceResponse>> sources(@PathVariable String runId) {
-        return Mono.just(this.researchRuntimeSupport.listSourcesByRun(runId).stream()
-                .map(source -> toResearchSourceResponse(runId, source))
-                .toList());
+    public Mono<List<Source>> sources(@PathVariable String runId) {
+        return Mono.just(this.sourceStore.findByRunId(runId));
     }
 
     @GetMapping("/{runId}/evidence")
-    public Mono<List<EvidenceItemResponse>> evidence(@PathVariable String runId) {
-        return Mono.just(this.researchRuntimeSupport.listEvidenceByRun(runId).stream()
-                .map(this::toEvidenceItemResponse)
-                .toList());
+    public Mono<List<org.wrj.haifa.ai.deerflow.evidence.EvidenceItem>> evidence(@PathVariable String runId) {
+        return Mono.just(this.newEvidenceItemStore.findByRunId(runId));
     }
 
     private static RunResponse toResponse(RunRecord record) {
@@ -460,5 +504,50 @@ public class RunController {
                 dim.actualEvidenceCount(),
                 dim.evidenceIds()
         );
+    }
+
+    @GetMapping("/{runId}/activity")
+    public Mono<List<AgentEvent>> activity(@PathVariable String runId) {
+        return Mono.just(this.agentEventStore.findByRunId(runId));
+    }
+
+    @GetMapping("/{runId}/skill-activations")
+    public Mono<List<SkillActivation>> skillActivations(@PathVariable String runId) {
+        return Mono.just(this.skillActivationStore.findByRunId(runId));
+    }
+
+    @GetMapping("/{runId}/work-items")
+    public Mono<List<WorkItem>> workItems(@PathVariable String runId) {
+        return Mono.just(this.workItemStore.findByRunId(runId));
+    }
+
+    @GetMapping("/{runId}/claims")
+    public Mono<List<Claim>> claims(@PathVariable String runId) {
+        return Mono.just(this.claimStore.findByRunId(runId));
+    }
+
+    @GetMapping("/{runId}/citations")
+    public Mono<List<Citation>> citations(@PathVariable String runId) {
+        List<Claim> claims = this.claimStore.findByRunId(runId);
+        List<Citation> citations = new java.util.ArrayList<>();
+        for (Claim claim : claims) {
+            citations.addAll(this.citationStore.findByClaimId(claim.getClaimId()));
+        }
+        return Mono.just(citations);
+    }
+
+    @GetMapping("/{runId}/quality")
+    public Mono<QualityAssessment> quality(@PathVariable String runId) {
+        List<QualityAssessment> list = this.qualityAssessmentStore.findByRunId(runId);
+        if (list.isEmpty()) {
+            return Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Quality assessment not found"));
+        }
+        return Mono.just(list.get(list.size() - 1));
+    }
+
+    @GetMapping("/{runId}/budget")
+    public Mono<BudgetLedger> budget(@PathVariable String runId) {
+        return Mono.justOrEmpty(this.budgetLedgerStore.findByRunId(runId))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Budget ledger not found")));
     }
 }

@@ -1,5 +1,6 @@
 package org.wrj.haifa.ai.deerflow.research;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -25,6 +26,18 @@ import org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchQualityGate;
 import org.wrj.haifa.ai.deerflow.research.plan.ResearchTaskStatus;
 import org.wrj.haifa.ai.deerflow.todo.TodoStore;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.wrj.haifa.ai.deerflow.runstate.SkillActivationStore;
+import org.wrj.haifa.ai.deerflow.work.WorkItemStore;
+import org.wrj.haifa.ai.deerflow.source.Source;
+import org.wrj.haifa.ai.deerflow.source.SourceStore;
+import org.wrj.haifa.ai.deerflow.evidence.EvidenceItemStore;
+import org.wrj.haifa.ai.deerflow.claim.ClaimStore;
+import org.wrj.haifa.ai.deerflow.claim.CitationStore;
+import org.wrj.haifa.ai.deerflow.budget.BudgetLedgerStore;
+import org.wrj.haifa.ai.deerflow.quality.QualityAssessmentStore;
+import org.wrj.haifa.ai.deerflow.threadfile.ThreadFileStore;
 
 /**
  * AgentLoopObserver implementation for research-specific logic.
@@ -34,11 +47,23 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
 
     private static final Logger log = LoggerFactory.getLogger(ResearchLoopObserver.class);
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private final ResearchRuntimeSupport researchRuntimeSupport;
     private final ResearchPlanner researchPlanner;
     private final ResearchPlanStore researchPlanStore;
     private final ResearchProgressTracker researchProgressTracker;
     private final ResearchQualityGate researchQualityGate;
+
+    private SkillActivationStore skillActivationStore;
+    private WorkItemStore workItemStore;
+    private SourceStore sourceStore;
+    private EvidenceItemStore newEvidenceItemStore;
+    private ClaimStore claimStore;
+    private CitationStore citationStore;
+    private BudgetLedgerStore budgetLedgerStore;
+    private QualityAssessmentStore qualityAssessmentStore;
+    private ThreadFileStore threadFileStore;
 
     public ResearchLoopObserver(ResearchRuntimeSupport researchRuntimeSupport,
             ResearchPlanner researchPlanner, ResearchPlanStore researchPlanStore,
@@ -57,8 +82,86 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
         this.researchQualityGate = researchQualityGate;
     }
 
+    public ResearchLoopObserver(TodoStore todoStore, ResearchRuntimeSupport researchRuntimeSupport,
+            ResearchPlanner researchPlanner, ResearchPlanStore researchPlanStore,
+            ResearchProgressTracker researchProgressTracker, ResearchQualityGate researchQualityGate,
+            SkillActivationStore skillActivationStore, WorkItemStore workItemStore,
+            SourceStore sourceStore, EvidenceItemStore newEvidenceItemStore,
+            ClaimStore claimStore, CitationStore citationStore,
+            BudgetLedgerStore budgetLedgerStore, QualityAssessmentStore qualityAssessmentStore,
+            ThreadFileStore threadFileStore) {
+        this(todoStore, researchRuntimeSupport, researchPlanner, researchPlanStore, researchProgressTracker, researchQualityGate);
+        this.skillActivationStore = skillActivationStore;
+        this.workItemStore = workItemStore;
+        this.sourceStore = sourceStore;
+        this.newEvidenceItemStore = newEvidenceItemStore;
+        this.claimStore = claimStore;
+        this.citationStore = citationStore;
+        this.budgetLedgerStore = budgetLedgerStore;
+        this.qualityAssessmentStore = qualityAssessmentStore;
+        this.threadFileStore = threadFileStore;
+    }
+
+    private String checkAndIncrementBudget(String runId, String toolName) {
+        if (budgetLedgerStore == null) return null;
+        return budgetLedgerStore.findByRunId(runId).map(ledger -> {
+            budgetLedgerStore.incrementToolCalls(runId);
+            int updatedToolCalls = ledger.getUsedToolCalls() + 1;
+            if (updatedToolCalls > ledger.getMaxToolCalls()) {
+                budgetLedgerStore.updateStopReason(runId, "MAX_TOOL_CALLS_REACHED");
+                return "BUDGET_EXCEEDED: max tool calls reached (" + ledger.getMaxToolCalls() + ")";
+            }
+
+            if ("web_search".equals(toolName)) {
+                budgetLedgerStore.incrementSearchQueries(runId);
+                int updatedSearch = ledger.getUsedSearchQueries() + 1;
+                if (updatedSearch > ledger.getMaxSearchQueries()) {
+                    budgetLedgerStore.updateStopReason(runId, "MAX_SEARCH_QUERIES_REACHED");
+                    return "BUDGET_EXCEEDED: max search queries reached (" + ledger.getMaxSearchQueries() + ")";
+                }
+            } else if ("web_fetch".equals(toolName)) {
+                budgetLedgerStore.incrementFetchedSources(runId);
+                int updatedFetch = ledger.getUsedFetchedSources() + 1;
+                if (updatedFetch > ledger.getMaxFetchedSources()) {
+                    budgetLedgerStore.updateStopReason(runId, "MAX_FETCHED_SOURCES_REACHED");
+                    return "BUDGET_EXCEEDED: max fetched sources reached (" + ledger.getMaxFetchedSources() + ")";
+                }
+            }
+            return null;
+        }).orElse(null);
+    }
+
+    private String checkAndIncrementModelCalls(String runId) {
+        if (budgetLedgerStore == null) return null;
+        return budgetLedgerStore.findByRunId(runId).map(ledger -> {
+            budgetLedgerStore.incrementModelCalls(runId);
+            int updatedModelCalls = ledger.getUsedModelCalls() + 1;
+            if (updatedModelCalls > ledger.getMaxModelCalls()) {
+                budgetLedgerStore.updateStopReason(runId, "MAX_MODEL_CALLS_REACHED");
+                return "BUDGET_EXCEEDED: max model calls reached (" + ledger.getMaxModelCalls() + ")";
+            }
+            return null;
+        }).orElse(null);
+    }
+
+    private boolean isResearchActive(String runId) {
+        if (skillActivationStore == null) {
+            return this.researchRuntimeSupport != null || this.researchPlanStore != null || this.budgetLedgerStore != null;
+        }
+        return skillActivationStore.isSkillActive(runId, "deep-research");
+    }
+
     @Override
     public ToolCallResult beforeToolExecute(AgentRunConfig runConfig, ToolCall toolCall) {
+        if (!isResearchActive(runConfig.runId())) {
+            return super.beforeToolExecute(runConfig, toolCall);
+        }
+
+        String budgetStop = checkAndIncrementBudget(runConfig.runId(), toolCall.toolName());
+        if (budgetStop != null) {
+            return ToolCallResult.fromError(toolCall, budgetStop, 0);
+        }
+
         if (runConfig.mode() != RunMode.RESEARCH) {
             return super.beforeToolExecute(runConfig, toolCall);
         }
@@ -84,25 +187,50 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
     @Override
     public String onToolCompleted(AgentRunConfig runConfig, ToolCall toolCall, ToolCallResult toolResult,
             List<AgentEvent> events, AtomicInteger seq, List<String> history) {
+        if (!isResearchActive(runConfig.runId())) {
+            return super.onToolCompleted(runConfig, toolCall, toolResult, events, seq, history);
+        }
+
         if (runConfig.mode() != RunMode.RESEARCH) {
             return super.onToolCompleted(runConfig, toolCall, toolResult, events, seq, history);
         }
-        if (this.researchRuntimeSupport == null || toolResult.status() != ToolCallResult.Status.SUCCESS) {
+        if (toolResult.status() != ToolCallResult.Status.SUCCESS) {
             return null;
         }
 
         if ("web_search".equals(toolCall.toolName())) {
-            SearchIngestionResult ingestionResult = this.researchRuntimeSupport.ingestSearchResults(
-                    runConfig.threadId(), runConfig.runId(), toolResult.result());
-            for (var registration : ingestionResult.registrations()) {
-                events.add(event(seq, runConfig, AgentEventType.SOURCE_FOUND,
-                        registration.source().title(),
-                        Map.of("sourceId", registration.source().sourceId(),
-                                "url", registration.source().url(),
-                                "domain", registration.source().domain(),
-                                "deduplicated", registration.deduplicated())));
+            if (this.sourceStore != null) {
+                try {
+                    JsonNode root = MAPPER.readTree(toolResult.result());
+                    if (root.isArray()) {
+                        for (JsonNode item : root) {
+                            String url = item.has("link") ? item.get("link").asText() : (item.has("url") ? item.get("url").asText() : "");
+                            String title = item.has("title") ? item.get("title").asText() : "";
+                            String domain = item.has("domain") ? item.get("domain").asText() : "";
+                            if (!url.isBlank()) {
+                                this.sourceStore.discover(runConfig.runId(), runConfig.threadId(), url, title, domain);
+                            }
+                        }
+                    }
+                } catch (Exception ex) {
+                    log.warn("Failed to parse search results for SourceStore discovery: {}", ex.getMessage());
+                }
             }
-            return ingestionResult.observation();
+
+            if (this.researchRuntimeSupport != null) {
+                SearchIngestionResult ingestionResult = this.researchRuntimeSupport.ingestSearchResults(
+                        runConfig.threadId(), runConfig.runId(), toolResult.result());
+                for (var registration : ingestionResult.registrations()) {
+                    events.add(event(seq, runConfig, AgentEventType.SOURCE_FOUND,
+                            registration.source().title(),
+                            Map.of("sourceId", registration.source().sourceId(),
+                                    "url", registration.source().url(),
+                                    "domain", registration.source().domain(),
+                                    "deduplicated", registration.deduplicated())));
+                }
+                return ingestionResult.observation();
+            }
+            return null;
         }
 
         if ("web_fetch".equals(toolCall.toolName())) {
@@ -113,42 +241,77 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
             if (url.isBlank()) {
                 return null;
             }
-            FetchProcessingResult fetchProcessingResult = this.researchRuntimeSupport.ingestFetchedContent(
-                    runConfig.threadId(), runConfig.runId(), url, toolResult.result());
-            events.add(event(seq, runConfig, AgentEventType.SOURCE_FETCHED,
-                    fetchProcessingResult.registration().stored().source().title(),
-                    Map.of("sourceId", fetchProcessingResult.registration().stored().source().sourceId(),
-                            "url", fetchProcessingResult.registration().stored().source().url(),
-                            "domain", fetchProcessingResult.registration().stored().source().domain(),
-                            "cached", fetchProcessingResult.registration().cached(),
-                            "deduplicatedByUrl", fetchProcessingResult.registration().deduplicatedByUrl(),
-                            "deduplicatedByContentHash", fetchProcessingResult.registration().deduplicatedByContentHash())));
-            
-            if (this.researchProgressTracker != null && !fetchProcessingResult.registration().cached()) {
-                this.researchProgressTracker.recordFetchedSource(
-                        runConfig.runId(),
-                        fetchProcessingResult.registration().stored().source().sourceId()
-                );
-            }
-            
-            for (var evidenceItem : fetchProcessingResult.evidenceItems()) {
-                events.add(event(seq, runConfig, AgentEventType.EVIDENCE_EXTRACTED,
-                        evidenceItem.claim(),
-                        Map.of("evidenceId", evidenceItem.evidenceId(),
-                                "sourceId", evidenceItem.sourceId(),
-                                "dimension", evidenceItem.dimension(),
-                                "confidence", evidenceItem.confidence())));
-                if (this.researchProgressTracker != null) {
-                    this.researchProgressTracker.recordEvidence(runConfig.runId(), evidenceItem);
+            final String finalUrl = url;
+
+            Source unifiedSource = null;
+            if (this.sourceStore != null) {
+                try {
+                    String textContent = toolResult.result();
+                    String contentHash = org.springframework.util.DigestUtils.md5DigestAsHex(textContent.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    String title = stringValue(toolResult.metadata().get("title"));
+
+                    unifiedSource = this.sourceStore.findByUrlAndThreadIdAndRunId(finalUrl, runConfig.threadId(), runConfig.runId())
+                            .orElseGet(() -> this.sourceStore.discover(runConfig.runId(), runConfig.threadId(), finalUrl, title.isBlank() ? "Fetched Page" : title, ""));
+
+                    unifiedSource = this.sourceStore.updateFetched(unifiedSource.getSourceId(), finalUrl, title.isBlank() ? unifiedSource.getTitle() : title, "web_page", "high", contentHash, "{}");
+                } catch (Exception ex) {
+                    log.warn("Failed to update fetched SourceStore: {}", ex.getMessage());
                 }
             }
 
-            String sourceId = fetchProcessingResult.registration().stored().source().sourceId();
-            String title = fetchProcessingResult.registration().stored().source().title();
+            if (this.researchRuntimeSupport != null) {
+                FetchProcessingResult fetchProcessingResult = this.researchRuntimeSupport.ingestFetchedContent(
+                        runConfig.threadId(), runConfig.runId(), url, toolResult.result());
+                events.add(event(seq, runConfig, AgentEventType.SOURCE_FETCHED,
+                        fetchProcessingResult.registration().stored().source().title(),
+                        Map.of("sourceId", fetchProcessingResult.registration().stored().source().sourceId(),
+                                "url", fetchProcessingResult.registration().stored().source().url(),
+                                "domain", fetchProcessingResult.registration().stored().source().domain(),
+                                "cached", fetchProcessingResult.registration().cached(),
+                                "deduplicatedByUrl", fetchProcessingResult.registration().deduplicatedByUrl(),
+                                "deduplicatedByContentHash", fetchProcessingResult.registration().deduplicatedByContentHash())));
+                
+                if (this.researchProgressTracker != null && !fetchProcessingResult.registration().cached()) {
+                    this.researchProgressTracker.recordFetchedSource(
+                            runConfig.runId(),
+                            fetchProcessingResult.registration().stored().source().sourceId()
+                    );
+                }
 
-            // Tool output compression is now handled centrally by AgentLoop before event emission.
-            // This observer only handles source/evidence processing and returns observation.
-            return fetchProcessingResult.observation();
+                for (var evidenceItem : fetchProcessingResult.evidenceItems()) {
+                    events.add(event(seq, runConfig, AgentEventType.EVIDENCE_EXTRACTED,
+                            evidenceItem.claim(),
+                            Map.of("evidenceId", evidenceItem.evidenceId(),
+                                    "sourceId", evidenceItem.sourceId(),
+                                    "dimension", evidenceItem.dimension(),
+                                    "confidence", evidenceItem.confidence())));
+                    if (this.researchProgressTracker != null) {
+                        this.researchProgressTracker.recordEvidence(runConfig.runId(), evidenceItem);
+                    }
+                    if (this.newEvidenceItemStore != null && unifiedSource != null) {
+                        try {
+                            String workItemId = firstWorkItemId(runConfig.runId());
+                            var created = this.newEvidenceItemStore.create(
+                                    unifiedSource.getSourceId(),
+                                    runConfig.runId(),
+                                    runConfig.threadId(),
+                                    workItemId,
+                                    evidenceItem.claim(),
+                                    evidenceItem.quoteOrParaphrase(),
+                                    finalUrl,
+                                    evidenceItem.confidence());
+                            if (this.workItemStore != null && workItemId != null) {
+                                this.workItemStore.addEvidenceId(workItemId, created.getEvidenceId());
+                            }
+                        } catch (Exception ex) {
+                            log.warn("Failed to write unified EvidenceItem: {}", ex.getMessage());
+                        }
+                    }
+                }
+                
+                return fetchProcessingResult.observation();
+            }
+            return null;
         }
 
         return null;
@@ -168,6 +331,18 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
     @Override
     public boolean shouldContinue(AgentRunConfig runConfig, String responseContent, List<AgentEvent> events,
             AtomicInteger seq, int step, int totalToolCalls, List<String> history) {
+        if (!isResearchActive(runConfig.runId())) {
+            return super.shouldContinue(runConfig, responseContent, events, seq, step, totalToolCalls, history);
+        }
+
+        String modelBudgetStop = checkAndIncrementModelCalls(runConfig.runId());
+        if (modelBudgetStop != null) {
+            events.add(event(seq, runConfig, AgentEventType.RESEARCH_STEP_COMPLETED,
+                    modelBudgetStop,
+                    Map.of("stopReason", "BUDGET_EXCEEDED", "step", step, "totalToolCalls", totalToolCalls)));
+            return false;
+        }
+
         if (runConfig.mode() != RunMode.RESEARCH) {
             return super.shouldContinue(runConfig, responseContent, events, seq, step, totalToolCalls, history);
         }
@@ -187,6 +362,10 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
     public FinalAnswerDecision onFinalAnswerProposed(AgentRunConfig runConfig, String rawAnswer, List<AgentEvent> events,
             AtomicInteger seq, int step, int totalToolCalls) {
         FinalAnswerDecision todoDecision = super.onFinalAnswerProposed(runConfig, rawAnswer, events, seq, step, totalToolCalls);
+        if (!isResearchActive(runConfig.runId())) {
+            return todoDecision;
+        }
+
         if (!todoDecision.accepted()) {
             return todoDecision;
         }
@@ -195,6 +374,22 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
         }
 
         QualityGateResult readiness = evaluateResearchReadiness(runConfig);
+        
+        if (this.qualityAssessmentStore != null) {
+            try {
+                double score = readiness != null ? readiness.score() : 0.0;
+                boolean passed = readiness != null && readiness.passed();
+                List<String> gaps = readiness != null ? readiness.gaps() : new ArrayList<>(List.of("missing_evaluation"));
+                List<String> risks = new ArrayList<>();
+                String textAction = passed ? "synthesize" : "continue";
+                String limitations = readiness != null ? readiness.recommendation() : "No evaluation performed";
+                
+                this.qualityAssessmentStore.save(runConfig.runId(), score, passed, gaps, risks, textAction, limitations);
+            } catch (Exception ex) {
+                log.error("Failed to write QualityAssessment record: {}", ex.getMessage());
+            }
+        }
+
         if (shouldContinueResearch(runConfig, readiness)) {
             return FinalAnswerDecision.reject(
                     buildContinuationInstruction(runConfig, readiness),
@@ -212,11 +407,16 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
         // Run default checks (e.g. todo items completeness and limitations appending)
         FinalAnswerResult baseResult = super.onFinalAnswerAccepted(runConfig, rawAnswer, events, seq, step, totalToolCalls);
 
+        if (!isResearchActive(runConfig.runId())) {
+            return baseResult;
+        }
+
         if (runConfig.mode() != RunMode.RESEARCH) {
             return baseResult;
         }
 
         CitationProcessingResult citationProcessingResult = finalizeResearchAnswer(runConfig, baseResult.finalAnswer());
+        persistUnifiedClaims(runConfig, citationProcessingResult.finalAnswer());
         Map<String, Object> extraMetadata = Map.of(
                 "citedSources", citationProcessingResult.citedSources().stream().map(ResearchSource::sourceId).toList(),
                 "citedEvidence", citationProcessingResult.citations().stream().flatMap(c -> c.evidenceIds().stream()).distinct().toList()
@@ -227,6 +427,11 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
     @Override
     public void onMaxStepsReached(AgentRunConfig runConfig, String lastModelContent, List<AgentEvent> events,
             AtomicInteger seq, int step, int totalToolCalls) {
+        if (!isResearchActive(runConfig.runId())) {
+            super.onMaxStepsReached(runConfig, lastModelContent, events, seq, step, totalToolCalls);
+            return;
+        }
+
         if (runConfig.mode() != RunMode.RESEARCH) {
             super.onMaxStepsReached(runConfig, lastModelContent, events, seq, step, totalToolCalls);
             return;
@@ -297,9 +502,12 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
 
     private boolean shouldContinueResearch(AgentRunConfig runConfig, QualityGateResult readiness) {
         if (this.researchPlanStore == null || this.researchQualityGate == null || this.researchRuntimeSupport == null) {
-            return true;
+            return false;
         }
-        return readiness == null || !readiness.passed();
+        if (this.researchPlanStore.findByRunId(runConfig.runId()).isEmpty()) {
+            return false;
+        }
+        return readiness != null && !readiness.passed();
     }
 
     private String buildContinuationInstruction(AgentRunConfig runConfig, QualityGateResult readiness) {
@@ -332,6 +540,45 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
         }
         String gaps = readiness.gaps().isEmpty() ? "No specific gaps were captured." : String.join("; ", readiness.gaps());
         return "Limitations: " + gaps + ". Recommendation: " + readiness.recommendation();
+    }
+
+    private void persistUnifiedClaims(AgentRunConfig runConfig, String finalAnswer) {
+        if (this.claimStore == null || this.newEvidenceItemStore == null) {
+            return;
+        }
+        try {
+            List<org.wrj.haifa.ai.deerflow.evidence.EvidenceItem> evidence = this.newEvidenceItemStore.findByRunId(runConfig.runId());
+            if (evidence.isEmpty() || !this.claimStore.findByRunId(runConfig.runId()).isEmpty()) {
+                return;
+            }
+            List<String> evidenceIds = evidence.stream().map(org.wrj.haifa.ai.deerflow.evidence.EvidenceItem::getEvidenceId).toList();
+            var claim = this.claimStore.create(runConfig.runId(), runConfig.threadId(), null,
+                    summarizeClaim(finalAnswer), evidenceIds, 0.8, "accepted");
+            if (this.citationStore != null) {
+                for (var item : evidence) {
+                    this.citationStore.create(claim.getClaimId(), item.getEvidenceId(), item.getSourceId(), item.getLocator(), "valid");
+                }
+            }
+        } catch (Exception ex) {
+            log.warn("Failed to write unified claims/citations: {}", ex.getMessage());
+        }
+    }
+
+    private static String summarizeClaim(String finalAnswer) {
+        if (finalAnswer == null || finalAnswer.isBlank()) {
+            return "Research answer synthesized from collected evidence.";
+        }
+        String normalized = finalAnswer.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= 500 ? normalized : normalized.substring(0, 500);
+    }
+    private String firstWorkItemId(String runId) {
+        if (this.workItemStore == null) {
+            return null;
+        }
+        return this.workItemStore.findByRunId(runId).stream()
+                .findFirst()
+                .map(item -> item.getWorkItemId())
+                .orElse(null);
     }
 
     private CitationProcessingResult finalizeResearchAnswer(AgentRunConfig runConfig, String answer) {
