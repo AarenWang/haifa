@@ -52,7 +52,9 @@ public class ChatApplyMiddlewaresNode implements AsyncNodeAction {
             );
 
             String userMessage = "";
-            for (var msg : view.messageWindow()) {
+            List<Map<String, Object>> messageWindow = view.messageWindow();
+            for (int i = messageWindow.size() - 1; i >= 0; i--) {
+                Map<String, Object> msg = messageWindow.get(i);
                 if ("USER".equals(msg.get("role"))) {
                     userMessage = (String) msg.get("content");
                     break;
