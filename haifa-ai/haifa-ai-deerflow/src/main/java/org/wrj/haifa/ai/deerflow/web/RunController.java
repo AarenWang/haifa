@@ -30,6 +30,7 @@ import org.wrj.haifa.ai.deerflow.persistence.entity.AgentEventEntity;
 import org.wrj.haifa.ai.deerflow.persistence.entity.ModelStepEntity;
 import org.wrj.haifa.ai.deerflow.persistence.entity.ToolCallEntity;
 import org.wrj.haifa.ai.deerflow.persistence.entity.ToolExecutionEntity;
+import org.wrj.haifa.ai.deerflow.observability.RunObservabilityService;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentEventStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
@@ -68,6 +69,7 @@ public class RunController {
     private final MessageStore messageStore;
     private final ApprovalStore approvalStore;
     private final TodoStore todoStore;
+    private final RunObservabilityService runObservabilityService;
     private static final java.time.format.DateTimeFormatter ISO = java.time.format.DateTimeFormatter.ISO_INSTANT;
 
     public RunController(AgentRuntime agentRuntime, RunManager runManager,
@@ -81,7 +83,7 @@ public class RunController {
             MessageStore messageStore) {
         this(agentRuntime, runManager, agentEventStore, toolExecutionStore, toolCallStore, modelStepStore,
              researchRuntimeSupport, researchPlanStore, researchProgressTracker, researchQualityGate,
-             clarificationStore, messageStore, null, null);
+             clarificationStore, messageStore, null, null, null);
     }
 
     @Autowired
@@ -95,7 +97,8 @@ public class RunController {
             ClarificationStore clarificationStore,
             MessageStore messageStore,
             @Autowired(required = false) ApprovalStore approvalStore,
-            @Autowired(required = false) TodoStore todoStore) {
+            @Autowired(required = false) TodoStore todoStore,
+            @Autowired(required = false) RunObservabilityService runObservabilityService) {
         this.agentRuntime = agentRuntime;
         this.runManager = runManager;
         this.agentEventStore = agentEventStore;
@@ -110,6 +113,7 @@ public class RunController {
         this.messageStore = messageStore;
         this.approvalStore = approvalStore;
         this.todoStore = todoStore;
+        this.runObservabilityService = runObservabilityService;
     }
 
     @PostMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -267,6 +271,15 @@ public class RunController {
     @GetMapping("/{runId}/events")
     public Mono<List<AgentEvent>> events(@PathVariable String runId) {
         return Mono.just(this.agentEventStore.findByRunId(runId));
+    }
+
+    @GetMapping("/{runId}/observability")
+    public Mono<RunObservabilityService.RunObservabilityResponse> observability(@PathVariable String runId) {
+        if (this.runObservabilityService == null) {
+            return Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Run observability is not available"));
+        }
+        return Mono.justOrEmpty(this.runObservabilityService.describe(runId))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found")));
     }
 
     @GetMapping("/{runId}/todos")
