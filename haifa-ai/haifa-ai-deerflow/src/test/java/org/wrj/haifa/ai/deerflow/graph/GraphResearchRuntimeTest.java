@@ -136,6 +136,15 @@ class GraphResearchRuntimeTest {
         });
 
         assertThat(events).anySatisfy(event -> {
+            assertThat(event.type()).isEqualTo(AgentEventType.TODO_CREATED);
+        });
+
+        assertThat(events).anySatisfy(event -> {
+            assertThat(event.type()).isEqualTo(AgentEventType.SUBAGENT_STARTED);
+            assertThat(event.metadata()).containsEntry("dispatchMode", "dimension_graph");
+        });
+
+        assertThat(events).anySatisfy(event -> {
             assertThat(event.type()).isEqualTo(AgentEventType.SOURCE_FOUND);
         });
 
@@ -155,6 +164,9 @@ class GraphResearchRuntimeTest {
         ResearchPlan plan = planStore.findByRunId(runId).orElse(null);
         assertThat(plan).isNotNull();
         assertThat(plan.topic()).isEqualTo("deepseek technology software");
+        assertThat(planStore.findTasksByRunId(runId))
+                .isNotEmpty()
+                .allSatisfy(task -> assertThat(task.runId()).isEqualTo(runId));
         assertThat(researchRuntimeSupport.listSourcesByRun(runId)).isNotEmpty();
         assertThat(researchRuntimeSupport.listEvidenceByRun(runId)).isNotEmpty();
     }
@@ -195,6 +207,10 @@ class GraphResearchRuntimeTest {
                     .containsKey("evidenceCount")
                     .containsKey("qualityGatePassed")
                     .containsKey("artifactCount");
+            assertThat(last.fullState())
+                    .containsKeys(AgentGraphStateKeys.TODOS,
+                            AgentGraphStateKeys.SUBAGENTS,
+                            AgentGraphStateKeys.CITATION_VERIFICATION);
         }
         finally {
             properties.getGraph().getCheckpoint().setEnabled(originalCheckpointEnabled);

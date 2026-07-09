@@ -25,6 +25,9 @@ public final class AgentGraphStateKeys {
     public static final String RESEARCH_EVIDENCE_COUNT = "evidenceCount";
     public static final String RESEARCH_STEPS = "research_steps";
     public static final String QUALITY_GATE_PASSED = "quality_gate_passed";
+    public static final String RESEARCH_GAPS = "researchGaps";
+    public static final String REPLAN_COUNT = "replanCount";
+    public static final String CITATION_VERIFICATION = "citationVerification";
     public static final String EMITTED_EVIDENCE_IDS = "emittedEvidenceIds";
     public static final String SUBAGENTS = "subagents";
     public static final String CLARIFICATION = "clarification";

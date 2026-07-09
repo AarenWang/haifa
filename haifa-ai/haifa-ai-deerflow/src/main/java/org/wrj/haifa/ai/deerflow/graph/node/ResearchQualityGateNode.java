@@ -93,6 +93,7 @@ public class ResearchQualityGateNode implements AsyncNodeAction {
 
             Map<String, Object> update = new HashMap<>();
             update.put(AgentGraphStateKeys.QUALITY_GATE_PASSED, passed);
+            update.put(AgentGraphStateKeys.RESEARCH_GAPS, readiness.gaps());
             update.put(AgentGraphStateKeys.RESEARCH_STEPS, currentSteps);
             update.put(AgentGraphStateKeys.RESEARCH_PHASE, "quality_gate");
             update.put(AgentGraphStateKeys.RESEARCH_SOURCE_COUNT, sources.size());
