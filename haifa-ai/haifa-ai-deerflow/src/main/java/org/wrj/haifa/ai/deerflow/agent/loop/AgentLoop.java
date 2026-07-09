@@ -113,6 +113,9 @@ public class AgentLoop {
         this.promptAssembler = new PromptAssembler();
     }
 
+    public AgentLoopObserver observer() {
+        return this.observer;
+    }
     public Flux<AgentEvent> run(
             LoopConfig config,
             AgentRunConfig runConfig,

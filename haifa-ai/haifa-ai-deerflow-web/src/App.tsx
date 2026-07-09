@@ -45,6 +45,7 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isTraceOpen, setIsTraceOpen] = useState<boolean>(false);
   const [canvasArtifactId, setCanvasArtifactId] = useState<string | null>(null);
+  const allowArtifactAutoOpenRef = useRef(false);
 
   const toggleSidebar = useCallback(() => {
     setIsSidebarOpen((open) => !open);
@@ -96,12 +97,15 @@ function App() {
     if (state.threadId !== previousThreadId.current) {
       previousThreadId.current = state.threadId;
       previousArtifactsCount.current = state.artifacts.length;
+      allowArtifactAutoOpenRef.current = false;
+      setCanvasArtifactId(null);
       return;
     }
-    if (state.artifacts.length > previousArtifactsCount.current) {
+    if (allowArtifactAutoOpenRef.current && state.artifacts.length > previousArtifactsCount.current) {
       const newest = state.artifacts[0];
       if (newest) {
         handleOpenCanvas(newest.artifactId);
+        allowArtifactAutoOpenRef.current = false;
       }
     }
     previousArtifactsCount.current = state.artifacts.length;
@@ -391,6 +395,8 @@ function App() {
         uploadedFileIds: state.selectedUploadIds.length > 0 ? state.selectedUploadIds : undefined,
       };
       let streamThreadId = fullReq.threadId;
+      allowArtifactAutoOpenRef.current = true;
+      setCanvasArtifactId(null);
 
       dispatch({ type: 'START_RUN', payload: fullReq });
 
@@ -476,6 +482,8 @@ function App() {
     });
 
     let streamThreadId = state.threadId;
+    allowArtifactAutoOpenRef.current = true;
+    setCanvasArtifactId(null);
 
     readDeerFlowResumeStream(
       runId,
@@ -643,6 +651,8 @@ function App() {
     dispatch({ type: 'SET_RUN_OBSERVABILITY' });
     dispatch({ type: 'SET_THREAD_ID', payload: threadId });
     dispatch({ type: 'SET_LAST_REQUEST' });
+    allowArtifactAutoOpenRef.current = false;
+    setCanvasArtifactId(null);
     setIsSidebarOpen(false);
   }, []);
 
@@ -660,6 +670,8 @@ function App() {
     dispatch({ type: 'SET_RUN_OBSERVABILITY' });
     dispatch({ type: 'SET_THREAD_ID' });
     dispatch({ type: 'SET_LAST_REQUEST' });
+    allowArtifactAutoOpenRef.current = false;
+    setCanvasArtifactId(null);
     setIsSidebarOpen(false);
   }, []);
 

@@ -55,6 +55,7 @@ public class CompositeAgentLoopObserver implements AgentLoopObserver {
                                                      AtomicInteger seq, int step, int totalToolCalls) {
         String answer = rawAnswer;
         java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+        FinalAnswerDecision firstRejection = null;
         for (AgentLoopObserver observer : observers) {
             FinalAnswerDecision decision = observer.onFinalAnswerProposed(runConfig, answer, events, seq, step, totalToolCalls);
             if (decision == null) {
@@ -64,9 +65,15 @@ public class CompositeAgentLoopObserver implements AgentLoopObserver {
                 metadata.putAll(decision.metadata());
             }
             if (!decision.accepted()) {
-                return FinalAnswerDecision.reject(decision.retryInstruction(), metadata);
+                if (firstRejection == null) {
+                    firstRejection = decision;
+                }
+                continue;
             }
             answer = decision.answer();
+        }
+        if (firstRejection != null) {
+            return FinalAnswerDecision.reject(firstRejection.retryInstruction(), metadata);
         }
         return FinalAnswerDecision.accept(answer, metadata);
     }

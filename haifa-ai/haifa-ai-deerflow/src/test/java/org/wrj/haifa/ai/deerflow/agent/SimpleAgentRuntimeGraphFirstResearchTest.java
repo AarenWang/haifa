@@ -14,6 +14,9 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.config.GraphRuntimeMode;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
+import org.wrj.haifa.ai.deerflow.quality.QualityAssessmentStore;
+import org.wrj.haifa.ai.deerflow.source.SourceStore;
 import org.wrj.haifa.ai.deerflow.provider.*;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
 import org.wrj.haifa.ai.deerflow.thread.MessageRole;
@@ -40,6 +43,12 @@ public class SimpleAgentRuntimeGraphFirstResearchTest {
 
     @Autowired
     private MessageStore messageStore;
+
+    @Autowired
+    private SourceStore sourceStore;
+
+    @Autowired
+    private QualityAssessmentStore qualityAssessmentStore;
 
     @MockitoBean
     private AgentModelClient modelClient;
@@ -108,6 +117,35 @@ public class SimpleAgentRuntimeGraphFirstResearchTest {
         assertThat(assistantMsgs.get(0).content()).contains("Artifact");
     }
 
+    @Test
+    void graphFirstResearchToolLifecyclePersistsSourcesAndQualityAssessment() {
+        String threadId = "thread-first-research-lifecycle-" + UUID.randomUUID();
+
+        when(modelClient.generate(any()))
+                .thenReturn(
+                        Mono.just(new ModelResponse("", List.of(new ModelToolCall(
+                                "call-search-1",
+                                "web_search",
+                                "{\"query\":\"deepseek engineering adoption\",\"max_results\":3}")))),
+                        Mono.just(new ModelResponse("Premature research answer after one search.")));
+
+        AgentRequest request = new AgentRequest(
+                threadId,
+                "research about deepseek engineering adoption",
+                "zhipu",
+                List.of(),
+                RunMode.RESEARCH,
+                ResearchOptions.defaults());
+
+        List<AgentEvent> events = agentRuntime.stream(request).collectList().block();
+        assertThat(events).isNotEmpty();
+        String runId = events.get(0).runId();
+
+        assertThat(events).extracting(AgentEvent::type).contains(AgentEventType.SOURCE_FOUND);
+        assertThat(sourceStore.findByRunId(runId)).isNotEmpty();
+        assertThat(qualityAssessmentStore.findByRunId(runId))
+                .anySatisfy(assessment -> assertThat(assessment.getGaps()).isNotEqualTo(List.of("initial_exploration")));
+    }
     private static WebSearchProvider searchProvider() {
         return new WebSearchProvider() {
             @Override

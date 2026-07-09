@@ -221,6 +221,18 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
                 SearchIngestionResult ingestionResult = this.researchRuntimeSupport.ingestSearchResults(
                         runConfig.threadId(), runConfig.runId(), toolResult.result());
                 for (var registration : ingestionResult.registrations()) {
+                    if (this.sourceStore != null && registration.source() != null) {
+                        try {
+                            this.sourceStore.discover(
+                                    runConfig.runId(),
+                                    runConfig.threadId(),
+                                    registration.source().url(),
+                                    registration.source().title(),
+                                    registration.source().domain());
+                        } catch (Exception ex) {
+                            log.warn("Failed to mirror search result into unified SourceStore: {}", ex.getMessage());
+                        }
+                    }
                     events.add(event(seq, runConfig, AgentEventType.SOURCE_FOUND,
                             registration.source().title(),
                             Map.of("sourceId", registration.source().sourceId(),
@@ -362,18 +374,16 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
     public FinalAnswerDecision onFinalAnswerProposed(AgentRunConfig runConfig, String rawAnswer, List<AgentEvent> events,
             AtomicInteger seq, int step, int totalToolCalls) {
         FinalAnswerDecision todoDecision = super.onFinalAnswerProposed(runConfig, rawAnswer, events, seq, step, totalToolCalls);
-        if (!isResearchActive(runConfig.runId())) {
-            return todoDecision;
-        }
-
-        if (!todoDecision.accepted()) {
-            return todoDecision;
-        }
-        if (runConfig.mode() != RunMode.RESEARCH) {
+        if (!isResearchActive(runConfig.runId()) || runConfig.mode() != RunMode.RESEARCH) {
             return todoDecision;
         }
 
         QualityGateResult readiness = evaluateResearchReadiness(runConfig);
+        Map<String, Object> qualityMetadata = new java.util.HashMap<>();
+        qualityMetadata.put("legacyResearchGate", true);
+        qualityMetadata.put("qualityGaps", readiness == null ? List.of("missing_plan") : readiness.gaps());
+        qualityMetadata.put("step", step);
+        qualityMetadata.put("totalToolCalls", totalToolCalls);
         
         if (this.qualityAssessmentStore != null) {
             try {
@@ -390,13 +400,19 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
             }
         }
 
-        if (shouldContinueResearch(runConfig, readiness)) {
-            return FinalAnswerDecision.reject(
-                    buildContinuationInstruction(runConfig, readiness),
-                    Map.of("legacyResearchGate", true,
-                            "qualityGaps", readiness == null ? List.of("missing_plan") : readiness.gaps(),
-                            "step", step,
-                            "totalToolCalls", totalToolCalls));
+        boolean continueResearch = shouldContinueResearch(runConfig, readiness);
+        if (!todoDecision.accepted()) {
+            Map<String, Object> metadata = new java.util.HashMap<>(qualityMetadata);
+            if (todoDecision.metadata() != null) {
+                metadata.putAll(todoDecision.metadata());
+            }
+            if (continueResearch) {
+                metadata.put("researchRetryInstruction", buildContinuationInstruction(runConfig, readiness));
+            }
+            return FinalAnswerDecision.reject(todoDecision.retryInstruction(), metadata);
+        }
+        if (continueResearch) {
+            return FinalAnswerDecision.reject(buildContinuationInstruction(runConfig, readiness), qualityMetadata);
         }
         return todoDecision;
     }

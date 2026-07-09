@@ -49,17 +49,27 @@ export default function TaskComposer({
   }, [externalMessage, onClearExternalMessage]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [threadId, setThreadId] = useState('');
-
-  useEffect(() => {
-    setThreadId(activeThreadId || '');
-  }, [activeThreadId]);
-
   const [model, setModel] = useState('');
   const [mode, setMode] = useState<'chat' | 'research'>('chat');
   const [depth, setDepth] = useState<'quick' | 'standard' | 'deep'>('standard');
   const [maxSources, setMaxSources] = useState(10);
   const [outputAsReport, setOutputAsReport] = useState(false);
+  const previousActiveThreadId = useRef<string | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const nextThreadId = activeThreadId || '';
+    setThreadId(nextThreadId);
+    if (previousActiveThreadId.current !== nextThreadId) {
+      previousActiveThreadId.current = nextThreadId;
+      if (!isRunning) {
+        setMode('chat');
+        setDepth('standard');
+        setMaxSources(10);
+        setOutputAsReport(false);
+      }
+    }
+  }, [activeThreadId, isRunning]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -69,18 +79,22 @@ export default function TaskComposer({
   }, [message]);
 
   useEffect(() => {
-    if (lastRequest) {
-      if (status === 'failed') {
-        setMessage(lastRequest.message);
-      }
-      setThreadId(lastRequest.threadId || '');
-      setModel(lastRequest.model || '');
-      setMode(lastRequest.mode || 'chat');
-      setDepth(lastRequest.researchOptions?.depth || 'standard');
-      setMaxSources(lastRequest.researchOptions?.maxSources || 10);
-      setOutputAsReport(lastRequest.researchOptions?.outputFormat === 'report');
+    if (!lastRequest) return;
+    const requestThreadId = lastRequest.threadId || '';
+    const currentThreadId = activeThreadId || '';
+    if (requestThreadId && requestThreadId !== currentThreadId) return;
+    if (!isRunning && !requestThreadId && currentThreadId) return;
+
+    if (status === 'failed') {
+      setMessage(lastRequest.message);
     }
-  }, [lastRequest, status]);
+    setThreadId(requestThreadId || currentThreadId);
+    setModel(lastRequest.model || '');
+    setMode(lastRequest.mode || 'chat');
+    setDepth(lastRequest.researchOptions?.depth || 'standard');
+    setMaxSources(lastRequest.researchOptions?.maxSources || 10);
+    setOutputAsReport(lastRequest.researchOptions?.outputFormat === 'report');
+  }, [lastRequest, status, activeThreadId, isRunning]);
 
   const handleRun = () => {
     if (!message.trim() || isRunning) return;
