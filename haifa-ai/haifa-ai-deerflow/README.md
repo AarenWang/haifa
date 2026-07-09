@@ -9,7 +9,7 @@
 | 能力 | 说明 |
 | --- | --- |
 | 对话与运行 | 创建 thread/run，通过 SSE 返回 `RUN_STARTED`、`MODEL_*`、`TOOL_*`、`RUN_COMPLETED` 等事件 |
-| 通用 Agent Loop | 模型可用 XML 风格 `<tool_call name="...">{...}</tool_call>` 调用工具，多轮执行直到 final answer |
+| 通用 Agent Loop | 作为回滚路径保留，使用 provider 结构化 tool call 多轮执行直到最终回答 |
 | 深度研究模式 | 支持 `CHAT` / `RESEARCH` 两种模式，研究模式包含计划、搜索、抓取、证据、质量门禁与报告产物 |
 | 工具系统 | 内置 workspace 文件工具、上传文件工具、web search/fetch、todo、task subagent、bash sandbox、present files、image/current time 等工具 |
 | Skills | 从文件系统 / classpath 加载 Markdown skill，通过 slash skill 影响 prompt 和工具权限 |
@@ -18,7 +18,7 @@
 | Sandbox Bash | 可选启用 `bash` 工具，支持 local-restricted 与 docker backend，带命令 allowlist、路径拒绝、超时、输出截断和审计 metadata |
 | Guarded Run Script | 支持 `run_script` 工具，在受控沙箱中执行轻量脚本（Python/PowerShell/NodeJS/Bash），支持 Windows (PowerShell) / Unix (pwsh/bash) 跨平台切换 |
 | Human-in-the-Loop | 支持人工审批干预门禁，针对高风险操作（如脚本/命令运行）自动拦截并生成审批候选，可通过 REST API 审核决定并恢复 Run |
-| Graph Core 运行时 | 集成 `spring-ai-alibaba-graph-core`，支持 `SHADOW`（影子图流）、`ACTIVE_CHAT`（接管对话）和 `ACTIVE_RESEARCH`（接管研究）三种图引擎运行模式 |
+| Graph Core 运行时 | 集成 `spring-ai-alibaba-graph-core`，默认 `GRAPH_FIRST` 接管对话与研究；`OFF` 可回滚到 legacy `AgentLoop`，`SHADOW` 用于影子校验 |
 | 文件上传 | 支持文本类文件上传、转换、查看、删除，并可在 run 中引用 uploaded file ids |
 | 产物管理 | 研究报告 / 工具输出等产物写入 outputs，可通过 artifact API 预览和下载 |
 | 记忆与 Persona | 支持 Persona 配置、memory facts、候选记忆审批 / 拒绝、运行后反思候选生成，并排除瞬态噪音 |
@@ -51,6 +51,7 @@ flowchart TB
     RuntimeRoute -->|OFF| Chain
     RuntimeRoute -->|SHADOW| Chain
     RuntimeRoute -->|SHADOW| GraphRuntime
+    RuntimeRoute -->|GRAPH_FIRST| GraphRuntime
     RuntimeRoute -->|ACTIVE_CHAT| GraphRuntime
     RuntimeRoute -->|ACTIVE_RESEARCH| GraphRuntime
     GraphRuntime --> AlibabaGraph
@@ -225,31 +226,40 @@ mvn -pl haifa-ai/haifa-ai-deerflow -am spring-boot:run
 
 ### 配置 Graph 静态流图运行时
 
-`haifa-ai-deerflow` 集成了 `spring-ai-alibaba-graph-core` 作为流图（Graph）引擎。通过配置 `haifa.ai.deerflow.graph.enabled` 和 `haifa.ai.deerflow.graph.mode`，可以控制 Agent 的运行时行为：
+`haifa-ai-deerflow` 集成了 `spring-ai-alibaba-graph-core` 作为流图（Graph）引擎。Phase 8 起默认启用 Graph-first：`haifa.ai.deerflow.graph.enabled=true`，`haifa.ai.deerflow.graph.mode=GRAPH_FIRST`，对话和研究请求都会优先进入 Graph 运行时。
+
+默认启动无需额外 Graph 环境变量：
 
 ```powershell
-# 启用 Graph 运行时并设置为 ACTIVE_CHAT 模式
-$env:HAIFA_AI_DEERFLOW_GRAPH_ENABLED = "true"
-$env:HAIFA_AI_DEERFLOW_GRAPH_MODE = "ACTIVE_CHAT"
 mvn -pl haifa-ai/haifa-ai-deerflow -am spring-boot:run
 ```
 
-四种运行时模式：
+需要回滚到 legacy `AgentLoop` 时，可以关闭 Graph 或显式设置 `OFF`：
+
+```powershell
+$env:HAIFA_DEERFLOW_GRAPH_ENABLED = "false"
+# 或
+$env:HAIFA_DEERFLOW_GRAPH_MODE = "OFF"
+mvn -pl haifa-ai/haifa-ai-deerflow -am spring-boot:run
+```
+
+五种运行时模式：
 
 | 模式 | 说明 |
 | --- | --- |
-| `OFF`（默认） | 使用标准 `AgentLoop` 执行，Graph 引擎不介入。 |
+| `GRAPH_FIRST`（默认） | 对话请求由 `GraphChatRuntime` 接管，研究请求由 `GraphResearchRuntime` 接管；legacy `AgentLoop` 仅作为回滚路径。 |
+| `OFF` | 使用标准 `AgentLoop` 执行，Graph 引擎不介入。 |
 | `SHADOW` | 仍通过标准 `AgentLoop` 执行主响应，但在后台启动 Graph 引擎平行运转（影子图流），用于校验和影子分析。Graph 失败不会破坏主响应。 |
-| `ACTIVE_CHAT` | 完全接管对话流，由 `GraphChatRuntime` 的节点图状态机驱动：load_context → apply_prompt_middlewares → call_model → parse_model_output → execute_tools → finalize。 |
-| `ACTIVE_RESEARCH` | 完全接管深度研究流，由 `GraphResearchRuntime` 驱动：create_or_load_plan → search_sources → fetch_sources → extract_evidence → quality_gate → write_report。 |
+| `ACTIVE_CHAT` | 兼容过渡模式：仅接管对话流，由 `GraphChatRuntime` 的节点图状态机驱动：load_context → apply_prompt_middlewares → call_model → execute_tools → finalize。 |
+| `ACTIVE_RESEARCH` | 兼容过渡模式：仅接管深度研究流，由 `GraphResearchRuntime` 驱动：create_or_load_plan → sync_todos → dispatch_dimensions → search_sources → fetch_sources → extract_evidence → replan → verify_citations → write_report。 |
 
 #### Chat Graph 流程与 Prompt 来源
 
-`ACTIVE_CHAT` 下的模型调用严格遵守 **Prompt 单一来源** 原则：
+`GRAPH_FIRST` / `ACTIVE_CHAT` 下的模型调用严格遵守 **Prompt 单一来源** 原则：
 
 - `ChatCallModelNode` 以 `AgentGraphStateKeys.MODEL_PROMPT`（由 `MiddlewareChain` 处理后的 systemPrompt / userPrompt / modelName）为唯一主来源。
 - 不再使用 `DeerFlowProperties.getSystemPrompt()` 覆盖中间件结果。
-- Graph 运行时只在 middleware prompt 后追加极小的格式约束（XML tool call 格式、`<final_answer>` 标记）。
+- Graph 运行时只接受 provider 返回的结构化 `ModelResponse.toolCalls()` 作为工具调用来源；不再解析 XML、JSON 代码块、Markdown 或自然语言里的工具调用。
 - 如果 `MODEL_PROMPT` 缺失，使用显式 fallback（`"You are a helpful assistant."`），并在事件 metadata 中标记 `promptFallback=true`。
 
 #### Tool Policy 执行前 Gate
@@ -267,7 +277,7 @@ mvn -pl haifa-ai/haifa-ai-deerflow -am spring-boot:run
 
 #### Research Graph Checkpoint 与 Resume
 
-`ACTIVE_RESEARCH` 开启 `graph.checkpoint.enabled=true` 后，框架会在节点执行后自动保存 checkpoint 到 SQLite（`AgentGraphCheckpointStore`）。
+`GRAPH_FIRST` 的研究流默认开启 `graph.checkpoint.enabled=true`，框架会在 `GraphResearchRuntime` 节点执行后自动保存 checkpoint 到 SQLite（`AgentGraphCheckpointStore`）。
 
 - 再次以相同 thread 启动时，`GraphResearchRuntime` 会查询最新 checkpoint。
 - 如果 checkpoint 存在且 `nextNodeId` 有效（非空、非 `END`），且 `runId` 匹配，则进入 **resume 分支**。
@@ -397,9 +407,9 @@ curl -N -X POST http://localhost:8095/api/deerflow/runs/stream \
 | `haifa.ai.deerflow.sandbox.network-enabled` | `false` | sandbox 命令是否允许网络 |
 | `haifa.ai.deerflow.run-script-enabled` | `false` | 是否启用 run_script 脚本执行工具 |
 | `haifa.ai.deerflow.sandbox.allowed-script-languages` | `python,powershell,bash` | 允许在 sandbox 执行的脚本语言 |
-| `haifa.ai.deerflow.graph.enabled` | `false` | 是否启用 Graph 运行时引擎 |
-| `haifa.ai.deerflow.graph.mode` | `OFF` | Graph 运行模式（`OFF`/`SHADOW`/`ACTIVE_CHAT`/`ACTIVE_RESEARCH`）；需同时设置 `graph.enabled=true` 才生效 |
-| `haifa.ai.deerflow.graph.checkpoint.enabled` | `false` | 是否启用 Graph checkpoint 持久化（用于 resume 与审计） |
+| `haifa.ai.deerflow.graph.enabled` | `true` | 是否启用 Graph 运行时引擎；设为 `false` 可回滚到 legacy `AgentLoop` |
+| `haifa.ai.deerflow.graph.mode` | `GRAPH_FIRST` | Graph 运行模式（`GRAPH_FIRST`/`OFF`/`SHADOW`/`ACTIVE_CHAT`/`ACTIVE_RESEARCH`）；需同时设置 `graph.enabled=true` 才生效 |
+| `haifa.ai.deerflow.graph.checkpoint.enabled` | `true` | 是否启用 Graph checkpoint 持久化（用于 resume 与审计） |
 
 Spring Boot relaxed binding 支持用环境变量覆盖配置，例如：
 

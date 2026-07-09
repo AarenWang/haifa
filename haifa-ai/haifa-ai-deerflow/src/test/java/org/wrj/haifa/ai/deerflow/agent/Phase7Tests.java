@@ -115,6 +115,7 @@ class Phase7Tests {
         MessageStore messageStore = mock(MessageStore.class);
         AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("Summary of history. source-1."));
         DeerFlowProperties properties = new DeerFlowProperties();
+        properties.getGraph().setEnabled(false);
         properties.getSummarization().setEnabled(true);
         properties.getSummarization().setTriggerMessages(10);
         properties.getSummarization().setTriggerChars(8_000);
@@ -170,6 +171,7 @@ class Phase7Tests {
         MessageStore messageStore = mock(MessageStore.class);
         AgentModelClient modelClient = prompt -> Mono.error(new AssertionError("summary model should not be called"));
         DeerFlowProperties properties = new DeerFlowProperties();
+        properties.getGraph().setEnabled(false);
         properties.getSummarization().setEnabled(false);
 
         List<MessageRecord> messages = List.of(

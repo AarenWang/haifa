@@ -93,6 +93,11 @@ haifa:
       research-timeout: 3000000
       default-research-depth: STANDARD
       research-enabled: true
+      graph:
+        enabled: ${HAIFA_DEERFLOW_GRAPH_ENABLED:true}
+        mode: ${HAIFA_DEERFLOW_GRAPH_MODE:GRAPH_FIRST}
+        checkpoint:
+          enabled: ${HAIFA_DEERFLOW_GRAPH_CHECKPOINT_ENABLED:true}
       # Research loop system prompt (when in research mode)
       research-system-prompt: >
         You are a research assistant. You can use tools to search and fetch information.

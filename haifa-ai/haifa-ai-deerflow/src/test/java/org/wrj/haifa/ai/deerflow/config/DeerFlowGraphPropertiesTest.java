@@ -9,12 +9,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DeerFlowGraphPropertiesTest {
 
     @Test
-    void graphRuntimeDefaultsToDisabledOffModeWithoutCheckpoint() {
+    void graphRuntimeDefaultsToGraphFirstWithCheckpoint() {
         DeerFlowProperties properties = new DeerFlowProperties();
 
-        assertThat(properties.getGraph().isEnabled()).isFalse();
-        assertThat(properties.getGraph().getMode()).isEqualTo(GraphRuntimeMode.OFF);
-        assertThat(properties.getGraph().getCheckpoint().isEnabled()).isFalse();
+        assertThat(properties.getGraph().isEnabled()).isTrue();
+        assertThat(properties.getGraph().getMode()).isEqualTo(GraphRuntimeMode.GRAPH_FIRST);
+        assertThat(properties.getGraph().getCheckpoint().isEnabled()).isTrue();
     }
 
     @Test
@@ -25,9 +25,9 @@ class DeerFlowGraphPropertiesTest {
         properties.getGraph().setMode(null);
         properties.getGraph().setCheckpoint(null);
 
-        assertThat(properties.getGraph().isEnabled()).isFalse();
-        assertThat(properties.getGraph().getMode()).isEqualTo(GraphRuntimeMode.OFF);
-        assertThat(properties.getGraph().getCheckpoint().isEnabled()).isFalse();
+        assertThat(properties.getGraph().isEnabled()).isTrue();
+        assertThat(properties.getGraph().getMode()).isEqualTo(GraphRuntimeMode.GRAPH_FIRST);
+        assertThat(properties.getGraph().getCheckpoint().isEnabled()).isTrue();
     }
 
     @Test

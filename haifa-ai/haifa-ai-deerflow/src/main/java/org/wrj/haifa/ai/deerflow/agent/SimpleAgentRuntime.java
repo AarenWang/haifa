@@ -593,7 +593,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
         return graphChatRuntime != null
                 && properties.getGraph() != null
                 && properties.getGraph().isEnabled()
-                && properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_CHAT
+                && (properties.getGraph().getMode() == GraphRuntimeMode.GRAPH_FIRST
+                    || properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_CHAT)
                 && request != null
                 && request.isChatMode();
     }
@@ -602,7 +603,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
         return graphResearchRuntime != null
                 && properties.getGraph() != null
                 && properties.getGraph().isEnabled()
-                && properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_RESEARCH
+                && (properties.getGraph().getMode() == GraphRuntimeMode.GRAPH_FIRST
+                    || properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_RESEARCH)
                 && request != null
                 && request.isResearchMode();
     }

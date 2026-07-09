@@ -52,9 +52,9 @@ public class SimpleAgentRuntimeGraphFirstChatTest {
             originalGraphMode = GraphRuntimeMode.OFF;
         }
 
-        // Enable Active Chat Graph mode
+        // Enable Graph-first mode
         properties.getGraph().setEnabled(true);
-        properties.getGraph().setMode(GraphRuntimeMode.ACTIVE_CHAT);
+        properties.getGraph().setMode(GraphRuntimeMode.GRAPH_FIRST);
     }
 
     @AfterEach
@@ -64,7 +64,7 @@ public class SimpleAgentRuntimeGraphFirstChatTest {
     }
 
     @Test
-    void verifiesDuplicateAssistantMessageInActiveChatGraph() {
+    void verifiesDuplicateAssistantMessageInGraphFirstChat() {
         String threadId = "thread-first-chat-" + UUID.randomUUID();
         when(modelClient.streamGenerate(any()))
                 .thenReturn(Mono.just(new ModelResponse("Hello from active chat graph")).flux());

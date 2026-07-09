@@ -231,8 +231,8 @@ public class DeerFlowProperties {
     }
 
     public static class Graph {
-        private boolean enabled = false;
-        private GraphRuntimeMode mode = GraphRuntimeMode.OFF;
+        private boolean enabled = true;
+        private GraphRuntimeMode mode = GraphRuntimeMode.GRAPH_FIRST;
         private Checkpoint checkpoint = new Checkpoint();
 
         public boolean isEnabled() {
@@ -248,7 +248,7 @@ public class DeerFlowProperties {
         }
 
         public void setMode(GraphRuntimeMode mode) {
-            this.mode = mode == null ? GraphRuntimeMode.OFF : mode;
+            this.mode = mode == null ? GraphRuntimeMode.GRAPH_FIRST : mode;
         }
 
         public Checkpoint getCheckpoint() {
@@ -261,7 +261,7 @@ public class DeerFlowProperties {
     }
 
     public static class Checkpoint {
-        private boolean enabled = false;
+        private boolean enabled = true;
 
         public boolean isEnabled() {
             return enabled;

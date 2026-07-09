@@ -24,6 +24,15 @@ class GraphRuntimeModeRoutingTest {
     }
 
     @Test
+    void graphFirstModeRoutesChatAndResearchToGraphs() {
+        DeerFlowProperties properties = properties(GraphRuntimeMode.GRAPH_FIRST);
+        assertThat(shouldUseActiveChatGraph(properties, new GraphChatRuntime(), chatRequest())).isTrue();
+        assertThat(shouldUseActiveResearchGraph(properties, new GraphResearchRuntime(), researchRequest())).isTrue();
+        assertThat(shouldUseActiveChatGraph(properties, new GraphChatRuntime(), researchRequest())).isFalse();
+        assertThat(shouldUseActiveResearchGraph(properties, new GraphResearchRuntime(), chatRequest())).isFalse();
+    }
+
+    @Test
     void activeChatModeRoutesToGraphChatRuntime() {
         DeerFlowProperties properties = properties(GraphRuntimeMode.ACTIVE_CHAT);
         assertThat(shouldUseActiveChatGraph(properties, new GraphChatRuntime(), chatRequest())).isTrue();

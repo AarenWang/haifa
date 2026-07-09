@@ -57,9 +57,9 @@ public class SimpleAgentRuntimeGraphFirstResearchTest {
             originalGraphMode = GraphRuntimeMode.OFF;
         }
 
-        // Enable Active Research Graph mode
+        // Enable Graph-first mode
         properties.getGraph().setEnabled(true);
-        properties.getGraph().setMode(GraphRuntimeMode.ACTIVE_RESEARCH);
+        properties.getGraph().setMode(GraphRuntimeMode.GRAPH_FIRST);
     }
 
     @AfterEach
@@ -69,7 +69,7 @@ public class SimpleAgentRuntimeGraphFirstResearchTest {
     }
 
     @Test
-    void verifiesDuplicateReportArtifactInActiveResearchGraph() {
+    void verifiesDuplicateReportArtifactInGraphFirstResearch() {
         String threadId = "thread-first-research-" + UUID.randomUUID();
 
         // Mock model returns for planner (not-json will trigger fallback planner) and synthesizer
