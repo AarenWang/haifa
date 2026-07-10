@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
@@ -105,7 +106,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
 
             // Emit MODEL_STARTED
             int stepNum = state.<Integer>value("chat_steps").orElse(0) + 1;
-            int maxSteps = properties.getMaxIterations();
+            int maxSteps = GraphChatLifecycleRegistry.get(runId)
+                    .map(context -> context.loopConfig() == null ? properties.getMaxIterations() : context.loopConfig().maxSteps())
+                    .orElse(properties.getMaxIterations());
             Map<String, Object> modelStartedMetadata = new LinkedHashMap<>();
             modelStartedMetadata.put("step", stepNum);
             modelStartedMetadata.put("maxSteps", maxSteps);

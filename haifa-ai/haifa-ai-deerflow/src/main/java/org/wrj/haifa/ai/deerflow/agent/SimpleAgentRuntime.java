@@ -317,9 +317,11 @@ public class SimpleAgentRuntime implements AgentRuntime {
             Map<String, Object> runMetadataCopy = Map.copyOf(runMetadata);
             RunRecord run = this.runManager.create(threadId, modelName, runMetadataCopy);
             this.runManager.markRunning(run.runId());
+            inheritTodosFromResumedRun(threadId, run.runId(), request.metadata());
 
             String logMessage = request.message();
-            if (request.metadata() != null && request.metadata().containsKey("clarificationId") && this.clarificationStore != null) {
+            if (!isResumedRun(request.metadata()) && request.metadata() != null
+                    && request.metadata().containsKey("clarificationId") && this.clarificationStore != null) {
                 String clarId = (String) request.metadata().get("clarificationId");
                 logMessage = this.clarificationStore.find(clarId)
                         .map(org.wrj.haifa.ai.deerflow.persistence.store.ClarificationRecord::answer)
@@ -944,6 +946,50 @@ public class SimpleAgentRuntime implements AgentRuntime {
             return List.of();
         }
         return this.slashSkillResolver.resolve(request.message());
+    }
+
+    private void inheritTodosFromResumedRun(String threadId, String runId, Map<String, Object> metadata) {
+        if (this.todoStore == null || !isResumedRun(metadata)) {
+            return;
+        }
+        String parentRunId = String.valueOf(metadata.get("resumedFromRunId"));
+        if (!StringUtils.hasText(parentRunId) || parentRunId.equals(runId)) {
+            return;
+        }
+        try {
+            if (!this.todoStore.listTodos(threadId, runId).isEmpty()) {
+                return;
+            }
+            List<TodoItem> parentTodos = this.todoStore.listTodos(threadId, parentRunId);
+            if (parentTodos.isEmpty()) {
+                return;
+            }
+            List<TodoItem> copiedTodos = parentTodos.stream()
+                    .map(SimpleAgentRuntime::copyTodo)
+                    .toList();
+            this.todoStore.saveTodos(threadId, runId, copiedTodos);
+            log.info("Inherited {} todo(s) from resumed run. threadId={}, parentRunId={}, runId={}",
+                    copiedTodos.size(), threadId, parentRunId, runId);
+        }
+        catch (RuntimeException ex) {
+            log.warn("Failed to inherit todos from resumed run. threadId={}, parentRunId={}, runId={}, error={}",
+                    threadId, parentRunId, runId, ex.getMessage());
+        }
+    }
+
+    private static boolean isResumedRun(Map<String, Object> metadata) {
+        return metadata != null && metadata.get("resumedFromRunId") instanceof String parentRunId
+                && StringUtils.hasText(parentRunId);
+    }
+
+    private static TodoItem copyTodo(TodoItem source) {
+        TodoItem item = new TodoItem(source.getId(), source.getContent(), source.getStatus());
+        item.setPriority(source.getPriority());
+        item.setEvidence(source.getEvidence());
+        item.setOrderIndex(source.getOrderIndex());
+        item.setCreatedAt(source.getCreatedAt());
+        item.setUpdatedAt(source.getUpdatedAt());
+        return item;
     }
 
     private List<ToolResult> executePlannedTools(AgentRequest request, AgentRunConfig config, AtomicInteger seq,

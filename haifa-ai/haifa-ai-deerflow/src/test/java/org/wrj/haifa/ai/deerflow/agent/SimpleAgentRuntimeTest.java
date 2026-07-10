@@ -85,6 +85,9 @@ class SimpleAgentRuntimeTest {
     @Autowired
     private AgentClarificationStore clarificationStore;
 
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.todo.TodoStore todoStore;
+
     @Test
     void streamsToolAndModelEvents() throws Exception {
         Path workspace = Files.createTempDirectory("deerflow-runtime-test");
@@ -405,6 +408,75 @@ class SimpleAgentRuntimeTest {
 
         assertThat(clarificationStore.findPending("thread-clarify")).isEmpty();
         assertThat(resumedEvents).extracting(AgentEvent::type).contains(AgentEventType.RUN_STARTED);
+    }
+
+    @Test
+    void resumedRunInheritsParentTodosAndKeepsOriginalUserMessage() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("research system");
+        properties.setMaxIterations(1);
+        properties.setMaxResearchSteps(1);
+
+        String threadId = "thread-resume-inherit-todos";
+        threadManager.upsert(threadId, "Original research request", Map.of("source", "test"));
+        var parentRun = runManager.create(threadId, "test-model", Map.of("mode", "research"));
+        runManager.markSuspended(parentRun.runId());
+        todoStore.saveTodos(threadId, parentRun.runId(), List.of(
+                new org.wrj.haifa.ai.deerflow.todo.TodoItem("t1", "Collect evidence", "completed"),
+                new org.wrj.haifa.ai.deerflow.todo.TodoItem("t2", "Write final deck", "in_progress")
+        ));
+        clarificationStore.clearAll();
+        var record = clarificationStore.create(threadId, parentRun.runId(), "Choose style?", "missing_info", "");
+        clarificationStore.answer(record.clarificationId(), "Use concise professional style");
+
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("done"));
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(
+                properties,
+                new ToolRegistry(List.of()),
+                modelClient,
+                runManager,
+                threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new ClarificationMiddleware(clarificationStore),
+                        new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore,
+                toolExecutionStore,
+                modelStepStore,
+                toolCallStore,
+                agentLoopRunStore,
+                skillStorage,
+                todoStore,
+                null,
+                null,
+                clarificationStore,
+                null,
+                null
+        );
+
+        runtime.stream(new AgentRequest(
+                        threadId,
+                        "Original research request",
+                        "test-model",
+                        List.of(),
+                        RunMode.RESEARCH,
+                        ResearchOptions.standard(),
+                        "default-user",
+                        Map.of("clarificationId", record.clarificationId(), "resumedFromRunId", parentRun.runId())))
+                .collectList()
+                .block();
+
+        var resumedRun = runManager.listByThread(threadId).stream()
+                .filter(run -> !run.runId().equals(parentRun.runId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(todoStore.listTodos(threadId, resumedRun.runId()))
+                .extracting(org.wrj.haifa.ai.deerflow.todo.TodoItem::getContent)
+                .containsExactly("Collect evidence", "Write final deck");
+        assertThat(messageStore.listByRun(resumedRun.runId()))
+                .filteredOn(message -> message.role() == MessageRole.USER)
+                .extracting(MessageRecord::content)
+                .containsExactly("Original research request");
     }
 
     @Test

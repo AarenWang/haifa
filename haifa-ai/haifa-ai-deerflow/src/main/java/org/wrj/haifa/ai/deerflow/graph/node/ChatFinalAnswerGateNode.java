@@ -24,6 +24,8 @@ import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 @Component
 public class ChatFinalAnswerGateNode implements AsyncNodeAction {
 
+    private static final int MAX_REPEATED_FINAL_REJECTIONS = 3;
+
     @Autowired
     private GraphExecutionManager graphExecutionManager;
 
@@ -71,6 +73,21 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
                     context.runConfig(), answer, observerEvents, context.eventSequence(), step, totalToolCalls);
             publishObserverEvents(runId, observerEvents);
             if (decision != null && !decision.accepted() && !maxStepsReached) {
+                int repeatedRejections = countFinalAnswerRejections(view.messageWindow(), decision.retryInstruction());
+                if (repeatedRejections >= MAX_REPEATED_FINAL_REJECTIONS - 1) {
+                    Map<String, Object> metadata = new LinkedHashMap<>(decision.metadata());
+                    metadata.put("forcedFinalAnswerAfterRepeatedRejection", true);
+                    metadata.put("repeatedFinalAnswerRejections", repeatedRejections + 1);
+                    metadata.put("retryInstruction", decision.retryInstruction());
+                    update.put("final_answer_gate_status", "FORCED_ACCEPTED");
+                    update.put("accepted_final_answer", answer == null ? "" : answer.trim());
+                    update.put("accepted_final_metadata", metadata);
+                    update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of(
+                            "node", "final_answer_gate",
+                            "status", "forced_accepted",
+                            "repeatedFinalAnswerRejections", repeatedRejections + 1)));
+                    return update;
+                }
                 update.put("final_answer_gate_status", "CONTINUE");
                 update.put(AgentGraphStateKeys.MESSAGE_WINDOW, List.of(systemMessage(threadId, runId,
                         decision.retryInstruction(), Map.of("observer", "onFinalAnswerProposed", "finalAnswerRejected", true))));
@@ -124,6 +141,28 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
         return history.subList(Math.max(0, before), history.size());
     }
 
+
+    private static int countFinalAnswerRejections(List<Map<String, Object>> window, String retryInstruction) {
+        if (window == null || retryInstruction == null || retryInstruction.isBlank()) {
+            return 0;
+        }
+        int count = 0;
+        for (Map<String, Object> message : window) {
+            if (!"SYSTEM".equalsIgnoreCase(stringValue(message.get("role")))) {
+                continue;
+            }
+            if (!retryInstruction.equals(stringValue(message.get("content")))) {
+                continue;
+            }
+            Object metadata = message.get("metadata");
+            if (metadata instanceof Map<?, ?> metadataMap
+                    && Boolean.TRUE.equals(metadataMap.get("finalAnswerRejected"))
+                    && "onFinalAnswerProposed".equals(stringValue(metadataMap.get("observer")))) {
+                count++;
+            }
+        }
+        return count;
+    }
     private static List<Map<String, Object>> systemMessages(String threadId, String runId,
             List<String> entries, Map<String, Object> metadata) {
         if (entries == null || entries.isEmpty()) {
