@@ -19,6 +19,7 @@ import org.wrj.haifa.ai.deerflow.graph.GraphLifecycleService;
 import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationService;
 
 @Component
 public class ChatFinalizeNode implements AsyncNodeAction {
@@ -32,12 +33,17 @@ public class ChatFinalizeNode implements AsyncNodeAction {
     @org.springframework.beans.factory.annotation.Autowired
     private GraphExecutionManager graphExecutionManager;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private RunCancellationService runCancellationService;
+
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
+
+            throwIfCancelled(runId);
             String content = state.<String>value("accepted_final_answer")
                     .orElse(state.<String>value("last_assistant_content").orElse(""));
             int stepNum = state.<Integer>value("chat_steps").orElse(0);
@@ -85,6 +91,12 @@ public class ChatFinalizeNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "finalize", "status", "completed")));
             return update;
         }, executor);
+    }
+
+    private void throwIfCancelled(String runId) {
+        if (runCancellationService != null) {
+            runCancellationService.throwIfCancelled(runId);
+        }
     }
 
     private static void publishObserverEvents(String runId, List<AgentEvent> events) {

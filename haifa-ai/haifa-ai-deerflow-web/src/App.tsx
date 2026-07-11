@@ -24,6 +24,7 @@ import {
   fetchRunQuality,
   fetchRunBudget,
   fetchThreadFiles,
+  cancelRun,
 } from './api/deerflowClient';
 import Header from './components/Header';
 import TaskComposer, { type PendingClarification } from './components/TaskComposer';
@@ -573,12 +574,23 @@ function App() {
   }, [handleRun, state.lastRequest?.mode]);
 
   const handleStop = useCallback(() => {
+    const runId = state.runId;
+    if (runId) {
+      void cancelRun(runId).catch(() => {
+        // The local stream is still stopped even if the cancel request races the server terminal state.
+      }).finally(() => {
+        refreshThreads();
+        if (state.threadId) {
+          void refreshMessages(state.threadId);
+        }
+      });
+    }
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
     }
     dispatch({ type: 'STOP_RUN' });
-  }, []);
+  }, [refreshMessages, refreshThreads, state.runId, state.threadId]);
 
   const handleReRun = useCallback(() => {
     if (state.lastRequest) {

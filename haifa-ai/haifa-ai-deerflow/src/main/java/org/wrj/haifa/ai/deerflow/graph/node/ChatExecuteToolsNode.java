@@ -32,6 +32,7 @@ import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationService;
 
 @Component
 public class ChatExecuteToolsNode implements AsyncNodeAction {
@@ -42,6 +43,9 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
 
     @Autowired(required = false)
     private ToolCallStore toolCallStore;
+
+    @Autowired(required = false)
+    private RunCancellationService runCancellationService;
 
     public ChatExecuteToolsNode(ToolRegistry toolRegistry, DeerFlowProperties properties) {
         this(toolRegistry, properties, null);
@@ -65,6 +69,9 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
 
+
+            throwIfCancelled(runId);
+
             AgentGraphStateView view = AgentGraphStateView.of(state);
             GraphChatLifecycleContext lifecycle = GraphChatLifecycleRegistry.get(runId).orElse(null);
             List<String> uploadedFileIds = lifecycle != null
@@ -79,6 +86,8 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             List<Map<String, Object>> toolResultsList = new ArrayList<>();
 
             for (AgentLoopObserver.FilteredToolCall filtered : filteredCalls) {
+
+                throwIfCancelled(runId);
                 ToolCall toolCall = filtered.toolCall();
                 String safeName = nullToEmpty(toolCall.toolName());
                 String safeArguments = nullToEmpty(toolCall.arguments());
@@ -129,6 +138,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                 }
             }
 
+            throwIfCancelled(runId);
             Map<String, Object> update = new HashMap<>();
             update.put(AgentGraphStateKeys.MESSAGE_WINDOW, toolMessages);
             update.put(AgentGraphStateKeys.TOOL_RESULTS, toolResultsList);
@@ -137,6 +147,13 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "execute_tools", "status", "completed")));
             return update;
         }, executor);
+    }
+
+
+    private void throwIfCancelled(String runId) {
+        if (runCancellationService != null) {
+            runCancellationService.throwIfCancelled(runId);
+        }
     }
 
     private List<AgentLoopObserver.FilteredToolCall> filterToolCalls(GraphChatLifecycleContext lifecycle,

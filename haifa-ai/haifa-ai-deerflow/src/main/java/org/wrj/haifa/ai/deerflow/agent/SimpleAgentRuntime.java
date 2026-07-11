@@ -53,6 +53,7 @@ import org.wrj.haifa.ai.deerflow.research.ResearchSource;
 import org.wrj.haifa.ai.deerflow.research.EvidenceItem;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationService;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.skill.SlashSkillResolver;
 import org.wrj.haifa.ai.deerflow.thread.MessageRole;
@@ -157,6 +158,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
     @Autowired(required = false)
     private GraphResearchRuntime graphResearchRuntime;
+
+    @Autowired(required = false)
+    private RunCancellationService runCancellationService;
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
             RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
@@ -691,10 +695,14 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     .doOnCancel(() -> {
                         long totalDuration = System.currentTimeMillis() - runStartTime;
                         log.info("Run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
-                        this.runManager.markCancelled(run.runId());
-                        this.threadManager.touch(threadId);
-                        this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, "Run cancelled",
-                                Map.of("status", "CANCELLED", "totalDurationMs", totalDuration));
+                        if (this.runCancellationService != null) {
+                            this.runCancellationService.recordCancelled(run.runId(), threadId, "SSE_CANCELLED", totalDuration);
+                        } else {
+                            this.runManager.markCancelled(run.runId());
+                            this.threadManager.touch(threadId);
+                            this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, "Run cancelled",
+                                    Map.of("status", "CANCELLED", "totalDurationMs", totalDuration));
+                        }
                     });
         }).subscribeOn(Schedulers.boundedElastic());
     }

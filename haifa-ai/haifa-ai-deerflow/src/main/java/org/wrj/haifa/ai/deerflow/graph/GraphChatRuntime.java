@@ -18,6 +18,9 @@ import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateStrategies;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationService;
+import org.wrj.haifa.ai.deerflow.run.RunCancelledException;
+import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
@@ -96,14 +99,21 @@ public class GraphChatRuntime {
     @Autowired
     private GraphExecutionManager graphExecutionManager;
 
+    @Autowired(required = false)
+    private RunCancellationService runCancellationService;
+
     public Flux<AgentEvent> run(GraphChatRuntimeRequest request) {
         Sinks.Many<AgentEvent> eventSink = Sinks.many().unicast().onBackpressureBuffer();
         String runId = request.runConfig().runId();
         GraphEventRegistry.register(runId, eventSink, request.eventSequence());
+        if (runCancellationService != null) {
+            runCancellationService.register(runId, request.runConfig().threadId());
+        }
 
         java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
-        CompletableFuture.runAsync(() -> {
+        CompletableFuture<Void> graphTask = CompletableFuture.runAsync(() -> {
             try {
+                throwIfCancelled(runId);
                 GraphChatLifecycleRegistry.register(runId, new GraphChatLifecycleContext(
                         request.runConfig(),
                         request.loopConfig(),
@@ -145,25 +155,59 @@ public class GraphChatRuntime {
                     }
                 }
 
+                throwIfCancelled(runId);
                 var streamResult = isResume
                         ? graph.stream(Map.of(AgentGraphStateKeys.RUN_ID, runId), runnableConfig)
                         : graph.stream(initialState, runnableConfig);
 
                 streamResult.collectList()
                         .block(Duration.ofMillis(request.loopConfig().timeoutMs()));
+                throwIfCancelled(runId);
 
                 eventSink.tryEmitComplete();
             }
+            catch (RunCancelledException ex) {
+                eventSink.tryEmitNext(AgentEvent.of(java.util.UUID.randomUUID().toString(), runId,
+                        request.runConfig().threadId(), AgentEventType.RUN_CANCELLED, "Run cancelled",
+                        Map.of("status", "CANCELLED", "stopReason", "USER_CANCELLED")));
+                eventSink.tryEmitComplete();
+            }
             catch (Exception ex) {
-                eventSink.tryEmitError(ex);
+                if (runCancellationService != null && runCancellationService.isCancelled(runId)) {
+                    eventSink.tryEmitNext(AgentEvent.of(java.util.UUID.randomUUID().toString(), runId,
+                            request.runConfig().threadId(), AgentEventType.RUN_CANCELLED, "Run cancelled",
+                            Map.of("status", "CANCELLED", "stopReason", "USER_CANCELLED")));
+                    eventSink.tryEmitComplete();
+                } else {
+                    eventSink.tryEmitError(ex);
+                }
             }
             finally {
                 GraphChatLifecycleRegistry.deregister(runId);
                 GraphEventRegistry.deregister(runId);
+                if (runCancellationService != null) {
+                    runCancellationService.finishExecution(runId);
+                }
             }
         }, executor);
+        if (runCancellationService != null) {
+            runCancellationService.attachTask(runId, graphTask);
+        }
 
         return eventSink.asFlux();
+    }
+    private void emitCancelledIfNotRecorded(Sinks.Many<AgentEvent> eventSink, String runId, String threadId) {
+        if (runCancellationService == null || !runCancellationService.isCancellationRecorded(runId)) {
+            eventSink.tryEmitNext(AgentEvent.of(java.util.UUID.randomUUID().toString(), runId,
+                    threadId, AgentEventType.RUN_CANCELLED, "Run cancelled",
+                    Map.of("status", "CANCELLED", "stopReason", "USER_CANCELLED")));
+        }
+    }
+
+    private void throwIfCancelled(String runId) {
+        if (runCancellationService != null) {
+            runCancellationService.throwIfCancelled(runId);
+        }
     }
 
     private StateGraph chatGraph(int maxSteps) throws Exception {

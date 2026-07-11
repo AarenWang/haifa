@@ -20,6 +20,7 @@ import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntimeRequest;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
+import org.wrj.haifa.ai.deerflow.persistence.repository.AgentGraphCheckpointExternalRefRepository;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import reactor.core.publisher.Mono;
@@ -51,6 +52,9 @@ class SQLiteCheckpointSaverTest {
     @Autowired
     private DeerFlowProperties properties;
 
+    @Autowired
+    private AgentGraphCheckpointExternalRefRepository externalRefRepository;
+
     @MockitoBean
     private AgentModelClient modelClient;
 
@@ -76,6 +80,39 @@ class SQLiteCheckpointSaverTest {
         assertThat(loaded.get().getState()).containsEntry("test-key", "test-val");
     }
 
+    @Test
+    void reusesExternalRefsForRepeatedLargeContent() {
+        String threadId = "thread-external-ref-" + UUID.randomUUID();
+        String runId = "run-external-ref-" + UUID.randomUUID();
+        String largeContent = ("large-content-" + UUID.randomUUID() + "-").repeat(400);
+        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
+
+        long before = externalRefRepository.count();
+        checkpointSaver.put(config, Checkpoint.builder()
+                .id("cp-external-1")
+                .nodeId("node-A")
+                .nextNodeId("node-B")
+                .state(Map.of(
+                        "runId", runId,
+                        "large-a", largeContent,
+                        "nested", List.of(Map.of("large-b", largeContent))))
+                .build());
+
+        long afterFirstPut = externalRefRepository.count();
+        assertThat(afterFirstPut - before).isEqualTo(1);
+
+        checkpointSaver.put(config, Checkpoint.builder()
+                .id("cp-external-2")
+                .nodeId("node-B")
+                .nextNodeId("node-C")
+                .state(Map.of("runId", runId, "large-c", largeContent))
+                .build());
+
+        assertThat(externalRefRepository.count()).isEqualTo(afterFirstPut);
+        Optional<Checkpoint> loaded = checkpointSaver.get(config);
+        assertThat(loaded).isPresent();
+        assertThat(loaded.get().getState()).containsEntry("large-c", largeContent);
+    }
     @Test
     void savesCheckpointsDuringGraphExecutionUsingSQLiteSaver() {
         // Temporarily enable checkpointing in properties

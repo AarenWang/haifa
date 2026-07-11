@@ -22,6 +22,7 @@ import org.wrj.haifa.ai.deerflow.agent.loop.PromptAssembler;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationService;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -45,6 +46,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
     @Autowired(required = false)
     private ToolPolicyService toolPolicyService;
 
+    @Autowired(required = false)
+    private RunCancellationService runCancellationService;
+
     public ChatCallModelNode(AgentModelClient modelClient,
                              ToolRegistry toolRegistry,
                              DeerFlowProperties properties) {
@@ -63,6 +67,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
+
+
+            throwIfCancelled(runId);
 
             // Fetch state messages using view
             AgentGraphStateView view = AgentGraphStateView.of(state);
@@ -137,7 +144,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
             if (stream == null) {
                 stream = modelClient.generate(prompt).flux();
             }
-            stream
+            stream.takeUntilOther(cancellationSignal(runId))
                     .doOnNext(response -> {
                         String chunk = response.content();
                         if (chunk != null && !chunk.isEmpty()) {
@@ -160,6 +167,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
                     })
                     .then()
                     .block(java.time.Duration.ofMillis(properties.getModelTimeout()));
+
+
+            throwIfCancelled(runId);
 
             long duration = System.currentTimeMillis() - startTime;
             String responseContent = fullContent.toString();
@@ -207,7 +217,16 @@ public class ChatCallModelNode implements AsyncNodeAction {
         }, executor);
     }
 
-    private static ModelMessage toModelMessage(Map<String, Object> map) {
+
+    private void throwIfCancelled(String runId) {
+        if (runCancellationService != null) {
+            runCancellationService.throwIfCancelled(runId);
+        }
+    }
+
+    private reactor.core.publisher.Mono<Void> cancellationSignal(String runId) {
+        return runCancellationService == null ? reactor.core.publisher.Mono.never() : runCancellationService.cancellationSignal(runId);
+    }    private static ModelMessage toModelMessage(Map<String, Object> map) {
         String roleStr = stringValue(map.get("role"));
         ModelMessage.Role role = ModelMessage.Role.USER;
         try {

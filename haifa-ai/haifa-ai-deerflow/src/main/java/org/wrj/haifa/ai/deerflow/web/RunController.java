@@ -45,6 +45,7 @@ import java.util.Optional;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationService;
 import org.wrj.haifa.ai.deerflow.todo.TodoSnapshot;
 import org.wrj.haifa.ai.deerflow.todo.TodoStore;
 import reactor.core.publisher.Flux;
@@ -120,6 +121,9 @@ public class RunController {
     private final RunObservabilityService runObservabilityService;
     private static final java.time.format.DateTimeFormatter ISO = java.time.format.DateTimeFormatter.ISO_INSTANT;
 
+    @Autowired(required = false)
+    private RunCancellationService runCancellationService;
+
     public RunController(AgentRuntime agentRuntime, RunManager runManager,
             AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
             ToolCallStore toolCallStore, ModelStepStore modelStepStore,
@@ -194,6 +198,19 @@ public class RunController {
                 .body(body);
     }
 
+
+    @PostMapping(path = "/{runId}/cancel")
+    public CancelRunResponse cancel(@PathVariable String runId) {
+        RunRecord run = this.runManager.find(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+        if (this.runCancellationService != null) {
+            this.runCancellationService.recordCancelled(runId, run.threadId(), "USER_CANCELLED", 0);
+        } else {
+            this.runManager.markCancelled(runId);
+        }
+        RunRecord updated = this.runManager.find(runId).orElse(run);
+        return new CancelRunResponse(updated.runId(), updated.threadId(), updated.status().name());
+    }
     @PostMapping(path = "/{runId}/resume", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public org.springframework.http.ResponseEntity<Flux<ServerSentEvent<AgentEvent>>> resume(
             @PathVariable String runId,
@@ -549,5 +566,7 @@ public class RunController {
     public Mono<BudgetLedger> budget(@PathVariable String runId) {
         return Mono.justOrEmpty(this.budgetLedgerStore.findByRunId(runId))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Budget ledger not found")));
+    }
+    public record CancelRunResponse(String runId, String threadId, String status) {
     }
 }

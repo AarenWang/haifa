@@ -175,6 +175,17 @@ export async function readDeerFlowStream(
   handlers.onDone();
 }
 
+
+export async function cancelRun(runId: string): Promise<RunResponse> {
+  const res = await fetchWithUser(`/api/deerflow/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error');
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  return res.json() as Promise<RunResponse>;
+}
 export async function readDeerFlowResumeStream(
   runId: string,
   handlers: StreamHandlers,
