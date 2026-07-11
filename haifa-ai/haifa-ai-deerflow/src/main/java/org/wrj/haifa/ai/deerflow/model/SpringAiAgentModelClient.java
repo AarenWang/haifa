@@ -24,6 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
@@ -69,6 +70,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                 .subscribeOn(Schedulers.boundedElastic())
                 .timeout(Duration.ofMillis(timeoutMs))
                 .retryWhen(Retry.fixedDelay(3, Duration.ofSeconds(3))
+                        .filter(SpringAiAgentModelClient::isRetryableFailure)
                         .doBeforeRetry(retrySignal -> {
                             log.warn("Spring AI model call failed. Retrying (attempt {}/3)... Error: {}",
                                     retrySignal.totalRetries() + 1,
@@ -157,6 +159,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         .subscribeOn(Schedulers.boundedElastic())
         .timeout(Duration.ofMillis(timeoutMs))
         .retryWhen(Retry.fixedDelay(3, Duration.ofSeconds(3))
+                .filter(SpringAiAgentModelClient::isRetryableFailure)
                 .doBeforeRetry(retrySignal -> {
                     log.warn("Spring AI model streaming failed. Retrying (attempt {}/3)... Error: {}",
                             retrySignal.totalRetries() + 1,
@@ -262,7 +265,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                                     blankToDefault(toolCall.id(), ""),
                                     blankToDefault(toolCall.type(), "tool_call"),
                                     blankToDefault(toolCall.name(), ""),
-                                    blankToDefault(toolCall.arguments(), "{}")))
+                                    ModelToolCallSanitizer.sanitizeArguments(toolCall.arguments())))
                             .toList())
                     .build();
             case TOOL -> ToolResponseMessage.builder()
@@ -273,6 +276,18 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                     .metadata(message.metadata())
                     .build();
         };
+    }
+
+    static boolean isRetryableFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof WebClientResponseException responseException) {
+                int status = responseException.getStatusCode().value();
+                return status == 408 || status == 429 || status >= 500;
+            }
+            current = current.getCause();
+        }
+        return true;
     }
 
     static ChatOptions chatOptionsFor(ModelPrompt prompt) {

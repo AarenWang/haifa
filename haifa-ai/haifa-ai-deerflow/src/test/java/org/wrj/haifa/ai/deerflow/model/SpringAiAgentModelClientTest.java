@@ -9,10 +9,13 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.HttpHeaders;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import reactor.test.StepVerifier;
 
@@ -125,5 +128,36 @@ class SpringAiAgentModelClientTest {
 
         // 1 original attempt + 3 retries = 4 total attempts
         assertThat(callCount.get()).isEqualTo(4);
+    }
+
+    @Test
+    void retriesOnlyRecoverableProviderResponseErrors() {
+        assertThat(SpringAiAgentModelClient.isRetryableFailure(
+                WebClientResponseException.create(400, "Bad Request", HttpHeaders.EMPTY, new byte[0], null)))
+                .isFalse();
+        assertThat(SpringAiAgentModelClient.isRetryableFailure(
+                WebClientResponseException.create(429, "Too Many Requests", HttpHeaders.EMPTY, new byte[0], null)))
+                .isTrue();
+        assertThat(SpringAiAgentModelClient.isRetryableFailure(
+                WebClientResponseException.create(503, "Unavailable", HttpHeaders.EMPTY, new byte[0], null)))
+                .isTrue();
+    }
+
+    @Test
+    void sanitizesMalformedPersistedToolArgumentsBeforeProviderRequest() {
+        ModelMessage assistant = new ModelMessage(
+                ModelMessage.Role.ASSISTANT,
+                "",
+                List.of(new ModelToolCall("call-1", "ask_clarification", "{\"question\":\"unfinished")),
+                null,
+                null,
+                java.util.Map.of());
+
+        AssistantMessage springMessage = (AssistantMessage) SpringAiAgentModelClient.toSpringAiMessages(
+                new ModelPrompt("system", "", "model", List.of(assistant))).get(1);
+
+        assertThat(springMessage.getToolCalls()).singleElement()
+                .extracting(AssistantMessage.ToolCall::arguments)
+                .isEqualTo("{}");
     }
 }

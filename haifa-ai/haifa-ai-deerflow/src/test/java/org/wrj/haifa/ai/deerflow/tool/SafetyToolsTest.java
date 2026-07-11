@@ -46,6 +46,14 @@ class SafetyToolsTest {
         assertThat(artifactService.list("thread-1", "run-1")).hasSize(1);
         assertThat(Files.readString(outputs.resolve("bar.txt"))).isEqualTo("output");
 
+        // Text writes cannot masquerade as generated binary artifacts.
+        ToolRequest binaryReq = new ToolRequest(
+                "{\"path\": \"/mnt/user-data/outputs/fake.pdf\", \"content\": \"not a pdf\"}",
+                workspace, List.of(), "thread-1", "run-1");
+        ToolResult binaryResult = tool.execute(binaryReq);
+        assertThat(binaryResult.content()).contains("only writes UTF-8 text", "format-specific generator");
+        assertThat(Files.exists(outputs.resolve("fake.pdf"))).isFalse();
+
         // 3. Frontend uploads are readable but not writable by agent file tools
         ToolRequest uploadsReq = new ToolRequest("{\"path\": \"/mnt/user-data/uploads/agent.txt\", \"content\": \"blocked\"}", workspace);
         ToolResult uploadsRes = tool.execute(uploadsReq);

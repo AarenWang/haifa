@@ -120,6 +120,8 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                         execution.deniedByPolicy() ? AgentEventType.TOOL_DENIED : AgentEventType.TOOL_COMPLETED,
                         eventContent,
                         metadata);
+                publishTodoMutationEventIfNeeded(runId, threadId, safeName, toolCall.id(), rawResult, eventContent,
+                        metadata);
 
                 toolMessages.add(toolMessage(threadId, runId, safeName, toolCall.id(), eventContent, metadata));
                 if (observation != null && !observation.isBlank()) {
@@ -274,6 +276,25 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             Map<String, Object> metadata) {
         GraphEventRegistry.publish(runId, AgentEvent.of(
                 UUID.randomUUID().toString(), runId, threadId, type, content, metadata));
+    }
+
+    private static void publishTodoMutationEventIfNeeded(String runId, String threadId, String toolName,
+            String toolCallId, ToolCallResult result, String content, Map<String, Object> metadata) {
+        if (!"write_todos".equals(toolName) || result.status() != ToolCallResult.Status.SUCCESS
+                || Boolean.TRUE.equals(result.metadata().get("error"))) {
+            return;
+        }
+        String operation = String.valueOf(result.metadata().getOrDefault("todoOperation", "updated"));
+        if ("read".equals(operation) || "ignored".equals(operation)) {
+            return;
+        }
+        Map<String, Object> eventMetadata = new LinkedHashMap<>(metadata);
+        eventMetadata.put("toolCallId", toolCallId);
+        eventMetadata.put("toolName", toolName);
+        AgentEventType eventType = "created".equals(operation)
+                ? AgentEventType.TODO_CREATED
+                : AgentEventType.TODO_UPDATED;
+        publishToolEvent(runId, threadId, eventType, content, eventMetadata);
     }
 
     private static void publishObserverEvents(String runId, List<AgentEvent> events) {

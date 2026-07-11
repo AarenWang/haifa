@@ -6,7 +6,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.artifact.ArtifactRecord;
@@ -17,6 +19,10 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 public class WriteFileTool implements AgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Set<String> BINARY_EXTENSIONS = Set.of(
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+            "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico",
+            "zip", "gz", "tar", "7z", "rar", "jar", "class", "exe", "dll");
     private final DeerFlowProperties properties;
     private final ArtifactService artifactService;
     private final UserDataPathResolver pathResolver;
@@ -34,7 +40,7 @@ public class WriteFileTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Write content to a file. Provide path and content arguments. Relative paths write under /mnt/user-data/workspace. User-facing deliverables should use /mnt/user-data/outputs. Do not write to uploads.";
+        return "Write UTF-8 text content to a text file. Provide path and content arguments. Relative paths write under /mnt/user-data/workspace. User-facing text deliverables should use /mnt/user-data/outputs. Binary formats such as PDF, Office documents, archives, and images must be created by a format-specific tool or script. Do not write to uploads.";
     }
 
     @Override
@@ -73,6 +79,11 @@ public class WriteFileTool implements AgentTool {
             if (requestedPath == null || requestedPath.isBlank()) {
                 return ToolResult.of(name(), "Error: path is required");
             }
+            if (hasBinaryExtension(requestedPath)) {
+                return ToolResult.of(name(), "Error: write_file only writes UTF-8 text and cannot create binary file '"
+                        + requestedPath + "'. Use a format-specific generator and verify the resulting file instead.",
+                        Map.of("error", true, "reason", "BINARY_FORMAT_REQUIRES_GENERATOR"));
+            }
             Path resolved = pathResolver.resolveWritable(requestedPath, request.workspaceRoot());
             Path outputsPath = pathResolver.outputsRoot();
 
@@ -101,5 +112,11 @@ public class WriteFileTool implements AgentTool {
         } catch (Exception e) {
             return ToolResult.of(name(), "Error: " + e.getMessage());
         }
+    }
+
+    private static boolean hasBinaryExtension(String path) {
+        String filename = Path.of(path.replace('\\', '/')).getFileName().toString().toLowerCase(Locale.ROOT);
+        int dot = filename.lastIndexOf('.');
+        return dot >= 0 && dot < filename.length() - 1 && BINARY_EXTENSIONS.contains(filename.substring(dot + 1));
     }
 }

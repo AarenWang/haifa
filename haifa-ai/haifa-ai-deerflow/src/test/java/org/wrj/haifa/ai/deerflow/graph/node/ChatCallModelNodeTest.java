@@ -9,6 +9,7 @@ import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
@@ -143,6 +144,29 @@ class ChatCallModelNodeTest {
 
         assertThat(capturedPrompt.get().systemPrompt())
                 .contains("run_script: run_script description");
+    }
+
+    @Test
+    void sanitizesTruncatedModelToolArgumentsBeforeExecution() {
+        ChatCallModelNode node = new ChatCallModelNode(
+                prompt -> Mono.just(new ModelResponse("", List.of(
+                        new ModelToolCall("call-1", "ask_clarification", "{\"question\":\"unfinished")))),
+                new ToolRegistry(List.of()),
+                new DeerFlowProperties()
+        );
+
+        Map<String, Object> update = node.apply(new OverAllState(Map.of(
+                AgentGraphStateKeys.RUN_ID, "run-4",
+                AgentGraphStateKeys.THREAD_ID, "thread-4",
+                AgentGraphStateKeys.MODE, RunMode.CHAT.name(),
+                AgentGraphStateKeys.MODEL_PROMPT, Map.of("systemPrompt", "system", "userPrompt", "user"),
+                AgentGraphStateKeys.MESSAGE_WINDOW, List.of()
+        ))).join();
+
+        List<Map<String, Object>> pending = (List<Map<String, Object>>) update.get(AgentGraphStateKeys.PENDING_TOOL_CALLS);
+        assertThat(pending).singleElement().satisfies(call -> assertThat(call)
+                .containsEntry("name", "ask_clarification")
+                .containsEntry("arguments", "{}"));
     }
 
     private static AgentTool tool(String name) {

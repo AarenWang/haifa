@@ -2,8 +2,11 @@ package org.wrj.haifa.ai.deerflow.graph.node;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
 import org.junit.jupiter.api.Test;
+import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
+import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
@@ -18,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import reactor.core.publisher.Sinks;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -130,6 +134,43 @@ class ChatExecuteToolsNodeTest {
         Map<String, Object> metadata = assertObservation(update, "unstable_tool",
                 "Error executing tool unstable_tool: boom", "FAILED");
         assertThat(metadata).containsEntry("errorType", "IllegalStateException");
+    }
+
+    @Test
+    void publishesTodoSnapshotImmediatelyAfterWriteTodosMutation() {
+        Map<String, Object> snapshot = Map.of(
+                "threadId", "thread-1",
+                "runId", "run-1",
+                "revision", 1,
+                "operation", "created",
+                "todos", List.of(Map.of("id", "todo-1", "content", "First task", "status", "pending")),
+                "summary", Map.of("total", 1, "pending", 1)
+        );
+        AgentTool tool = tool("write_todos", request -> ToolResult.of("write_todos", "Todo list created: 1 item(s)",
+                Map.of("todoOperation", "created", "snapshot", snapshot)));
+        ChatExecuteToolsNode node = new ChatExecuteToolsNode(
+                new ToolRegistry(List.of(tool)),
+                new DeerFlowProperties(),
+                new ToolPolicyService(List.of(tool))
+        );
+        Sinks.Many<AgentEvent> sink = Sinks.many().unicast().onBackpressureBuffer();
+        GraphEventRegistry.register("run-1", sink, new AtomicInteger());
+        try {
+            node.apply(state("write_todos")).join();
+            sink.tryEmitComplete();
+
+            List<AgentEvent> events = sink.asFlux().collectList().block();
+            assertThat(events).extracting(AgentEvent::type)
+                    .containsSubsequence(AgentEventType.TOOL_STARTED, AgentEventType.TOOL_COMPLETED,
+                            AgentEventType.TODO_CREATED);
+            AgentEvent todoEvent = events.stream()
+                    .filter(event -> event.type() == AgentEventType.TODO_CREATED)
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(todoEvent.metadata()).containsEntry("snapshot", snapshot);
+        } finally {
+            GraphEventRegistry.deregister("run-1");
+        }
     }
 
     private static OverAllState state(String toolName) {

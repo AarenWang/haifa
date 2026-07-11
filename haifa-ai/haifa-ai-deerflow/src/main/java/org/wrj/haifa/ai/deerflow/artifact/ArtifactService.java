@@ -41,13 +41,15 @@ public class ArtifactService {
         }
         Path resolved = validateRegisteredPath(file);
         try {
+            String resolvedMimeType = StringUtils.hasText(mimeType) ? mimeType : detectMimeType(resolved);
+            validateBinarySignature(resolved, resolvedMimeType);
             ArtifactRecord record = new ArtifactRecord(
                     UUID.randomUUID().toString(),
                     runId,
                     threadId,
                     resolved.toString(),
                     resolved.getFileName().toString(),
-                    StringUtils.hasText(mimeType) ? mimeType : detectMimeType(resolved),
+                    resolvedMimeType,
                     Files.size(resolved),
                     Instant.now()
             );
@@ -93,6 +95,7 @@ public class ArtifactService {
         if (!path.startsWith(outputsRoot()) || !Files.isRegularFile(path)) {
             throw new IllegalArgumentException("Artifact path is no longer valid");
         }
+        validateBinarySignature(path, record.mimeType());
         return path;
     }
 
@@ -244,6 +247,59 @@ public class ArtifactService {
         int semicolon = mimeType.indexOf(';');
         String normalized = semicolon >= 0 ? mimeType.substring(0, semicolon) : mimeType;
         return normalized.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static void validateBinarySignature(Path path, String mimeType) {
+        String normalizedMime = normalizeMime(mimeType);
+        String fileExtension = extension(path.getFileName().toString());
+        String signatureType = switch (fileExtension) {
+            case "pdf" -> "application/pdf";
+            case "png" -> "image/png";
+            case "jpg", "jpeg" -> "image/jpeg";
+            case "gif" -> "image/gif";
+            case "webp" -> "image/webp";
+            default -> normalizedMime;
+        };
+        try {
+            byte[] header = readHeader(path, 12);
+            boolean valid = switch (signatureType) {
+                case "application/pdf" -> startsWith(header, "%PDF-".getBytes(StandardCharsets.US_ASCII));
+                case "image/png" -> startsWith(header,
+                        new byte[] {(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a});
+                case "image/jpeg" -> header.length >= 3
+                        && header[0] == (byte) 0xff && header[1] == (byte) 0xd8 && header[2] == (byte) 0xff;
+                case "image/gif" -> startsWith(header, "GIF87a".getBytes(StandardCharsets.US_ASCII))
+                        || startsWith(header, "GIF89a".getBytes(StandardCharsets.US_ASCII));
+                case "image/webp" -> header.length >= 12
+                        && startsWith(header, "RIFF".getBytes(StandardCharsets.US_ASCII))
+                        && header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P';
+                default -> true;
+            };
+            if (!valid) {
+                throw new IllegalArgumentException("Artifact content does not match its declared binary format: "
+                        + path.getFileName());
+            }
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("Unable to validate artifact content: " + path, ex);
+        }
+    }
+
+    private static byte[] readHeader(Path path, int maxBytes) throws IOException {
+        try (java.io.InputStream input = Files.newInputStream(path)) {
+            return input.readNBytes(maxBytes);
+        }
+    }
+
+    private static boolean startsWith(byte[] value, byte[] prefix) {
+        if (value.length < prefix.length) {
+            return false;
+        }
+        for (int i = 0; i < prefix.length; i++) {
+            if (value[i] != prefix[i]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private synchronized void loadArtifacts() {

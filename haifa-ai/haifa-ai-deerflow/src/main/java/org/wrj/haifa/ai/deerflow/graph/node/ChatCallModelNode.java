@@ -17,6 +17,7 @@ import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCallSanitizer;
 import org.wrj.haifa.ai.deerflow.model.ModelToolDefinition;
 import org.wrj.haifa.ai.deerflow.agent.loop.PromptAssembler;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
@@ -281,7 +282,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
                 calls.add(new ModelToolCall(
                         stringValue(map.get("id")),
                         stringValue(map.get("name")),
-                        firstNonBlank(stringValue(map.get("arguments")), "{}"),
+                        ModelToolCallSanitizer.sanitizeArguments(stringValue(map.get("arguments"))),
                         firstNonBlank(stringValue(map.get("type")), "tool_call")));
             }
         }
@@ -297,7 +298,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("id", toolCall.id() == null ? "" : toolCall.id());
                     item.put("name", toolCall.name() == null ? "" : toolCall.name());
-                    item.put("arguments", toolCall.arguments() == null ? "{}" : toolCall.arguments());
+                    item.put("arguments", ModelToolCallSanitizer.sanitizeArguments(toolCall.arguments()));
                     item.put("type", toolCall.type() == null ? "tool_call" : toolCall.type());
                     return item;
                 })

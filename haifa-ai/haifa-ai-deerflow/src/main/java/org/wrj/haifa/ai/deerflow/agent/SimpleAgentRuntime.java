@@ -1119,6 +1119,16 @@ public class SimpleAgentRuntime implements AgentRuntime {
     }
 
     private static String describeException(Throwable ex) {
+        if (ex instanceof org.springframework.web.reactive.function.client.WebClientResponseException responseException) {
+            String responseBody = responseException.getResponseBodyAsString();
+            if (StringUtils.hasText(responseBody)) {
+                String compactBody = responseBody.replaceAll("\\s+", " ").trim();
+                if (compactBody.length() > 1_500) {
+                    compactBody = compactBody.substring(0, 1_500) + "...";
+                }
+                return ex.getClass().getName() + ": " + ex.getMessage() + "; responseBody=" + compactBody;
+            }
+        }
         String message = ex.getMessage();
         if (StringUtils.hasText(message)) {
             return ex.getClass().getName() + ": " + message;
