@@ -180,23 +180,42 @@ public class RunScriptTool implements AgentTool {
 
             String relativeScriptPath = workspaceRootPath.relativize(scriptFile.toAbsolutePath()).toString().replace('\\', '/');
 
+            Map<String, String> environment = new HashMap<>();
+            if (properties.getSandbox().getEnvironment() != null) {
+                properties.getSandbox().getEnvironment().forEach((key, value) -> {
+                    if (key != null && key.matches("[A-Za-z_][A-Za-z0-9_]*") && value != null && !value.isBlank()) {
+                        environment.put(key, value);
+                    }
+                });
+            }
+            environment.putAll(Map.of(
+                    "DEERFLOW_UPLOADS_DIR", UserDataPathResolver.VIRTUAL_UPLOADS_ROOT,
+                    "DEERFLOW_WORKSPACE_DIR", UserDataPathResolver.VIRTUAL_WORKSPACE_ROOT,
+                    "DEERFLOW_OUTPUTS_DIR", UserDataPathResolver.VIRTUAL_OUTPUTS_ROOT,
+                    "DEERFLOW_SKILLS_DIR", properties.getSkillsContainerPath()));
+
             SandboxResult result = sandboxRunner.run(new SandboxRequest(
                     commandToRun,
                     cmdArgs,
                     pathResolver.workspaceRoot(),
                     normalizedDir,
                     Duration.ofMillis(properties.getSandbox().getTimeoutMs()),
-                    Map.of(
-                            "DEERFLOW_UPLOADS_DIR", pathResolver.uploadsRoot().toString(),
-                            "DEERFLOW_WORKSPACE_DIR", pathResolver.workspaceRoot().toString(),
-                            "DEERFLOW_OUTPUTS_DIR", pathResolver.outputsRoot().toString()),
+                    environment,
                     properties.getSandbox().isNetworkEnabled(),
                     request.runId()
             ));
 
-            return ToolResult.of(name(), render(result, language), metadata(result, language, purpose, relativeScriptPath));
+            Map<String, Object> metadata = metadata(result, language, purpose, relativeScriptPath);
+            if (result.timedOut()) {
+                return ToolResult.timedOut(name(), render(result, language), metadata);
+            }
+            if (result.exitCode() != 0) {
+                return ToolResult.failed(name(), render(result, language), metadata);
+            }
+            return ToolResult.success(name(), render(result, language), metadata);
         } catch (Exception e) {
-            return ToolResult.of(name(), "Error executing script: " + e.getMessage());
+            return ToolResult.failed(name(), "Error executing script: " + e.getMessage(),
+                    Map.of("errorType", e.getClass().getSimpleName()));
         }
     }
 

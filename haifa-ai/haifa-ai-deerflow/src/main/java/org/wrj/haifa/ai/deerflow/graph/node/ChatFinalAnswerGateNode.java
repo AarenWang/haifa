@@ -38,7 +38,8 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
             String answer = state.<String>value("last_assistant_content").orElse("");
             int step = state.<Integer>value("chat_steps").orElse(0);
             AgentGraphStateView view = AgentGraphStateView.of(state);
-            int totalToolCalls = view.listOfMaps(AgentGraphStateKeys.TOOL_RESULTS).size();
+            List<Map<String, Object>> toolResults = view.listOfMaps(AgentGraphStateKeys.TOOL_RESULTS);
+            int totalToolCalls = toolResults.size();
 
             Map<String, Object> update = new HashMap<>();
             update.put("final_answer_gate_status", "ACCEPTED");
@@ -47,11 +48,35 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "final_answer_gate", "status", "accepted")));
 
             GraphChatLifecycleContext context = GraphChatLifecycleRegistry.get(runId).orElse(null);
+            boolean maxStepsReached = context != null && context.loopConfig() != null
+                    && step >= context.loopConfig().maxSteps();
+            if (hasArtifactCompletionClaim(answer) && !hasSuccessfulArtifactDelivery(toolResults)) {
+                Map<String, Object> evidenceMetadata = Map.of(
+                        "unsupportedCompletionClaim", true,
+                        "requiredEvidenceTool", "present_files");
+                if (maxStepsReached) {
+                    update.put("final_answer_gate_status", "EVIDENCE_MISSING");
+                    update.put("accepted_final_answer",
+                            "任务未完成：尚未获得可验证的文件生成与交付证据，请检查失败的工具调用后重试。");
+                    update.put("accepted_final_metadata", evidenceMetadata);
+                    update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of(
+                            "node", "final_answer_gate", "status", "evidence_missing")));
+                    return update;
+                }
+                update.put("final_answer_gate_status", "CONTINUE");
+                update.put(AgentGraphStateKeys.MESSAGE_WINDOW, List.of(systemMessage(threadId, runId,
+                        "Do not claim that a file was generated, saved, delivered, or is downloadable. "
+                                + "The run has no successful present_files artifact evidence. Inspect the failed tool result, "
+                                + "retry the generic runtime if appropriate, and call present_files only after a non-empty output exists.",
+                        evidenceMetadata)));
+                update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of(
+                        "node", "final_answer_gate", "status", "evidence_rejected")));
+                return update;
+            }
             if (context == null || context.observer() == null || context.runConfig() == null) {
                 return update;
             }
 
-            boolean maxStepsReached = context.loopConfig() != null && step >= context.loopConfig().maxSteps();
             List<AgentEvent> observerEvents = new ArrayList<>();
             List<String> history = historyFromWindow(view.messageWindow());
 
@@ -116,6 +141,41 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
             GraphEventRegistry.publish(runId, event);
         }
         events.clear();
+    }
+
+    private static boolean hasArtifactCompletionClaim(String answer) {
+        if (answer == null || answer.isBlank()) {
+            return false;
+        }
+        String lower = answer.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("已成功生成") || lower.contains("成功生成并")
+                || lower.contains("已保存至") || lower.contains("已成功交付")
+                || lower.contains("可直接下载") || lower.contains("successfully generated")
+                || lower.contains("successfully delivered") || lower.contains("saved to")
+                || lower.contains("ready for download");
+    }
+
+    private static boolean hasSuccessfulArtifactDelivery(List<Map<String, Object>> toolResults) {
+        if (toolResults == null) {
+            return false;
+        }
+        for (Map<String, Object> result : toolResults) {
+            if (!"present_files".equals(stringValue(result.get("toolName")))) {
+                continue;
+            }
+            Object rawMetadata = result.get("metadata");
+            if (!(rawMetadata instanceof Map<?, ?> metadata)) {
+                continue;
+            }
+            boolean success = "SUCCESS".equalsIgnoreCase(stringValue(metadata.get("status")));
+            boolean delivered = Boolean.TRUE.equals(metadata.get("artifactDeliverySucceeded"));
+            Object ids = metadata.get("presentedArtifactIds");
+            boolean hasIds = ids instanceof List<?> list && !list.isEmpty();
+            if (success && delivered && hasIds) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<String> historyFromWindow(List<Map<String, Object>> window) {

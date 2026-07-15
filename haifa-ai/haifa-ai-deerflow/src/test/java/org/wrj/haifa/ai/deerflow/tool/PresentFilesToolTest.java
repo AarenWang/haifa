@@ -13,7 +13,7 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 class PresentFilesToolTest {
 
     @Test
-    void presentsOnlyRegisteredArtifacts(@TempDir Path tempDir) throws Exception {
+    void registersAndPresentsExistingOutputPaths(@TempDir Path tempDir) throws Exception {
         Path outputs = tempDir.resolve("outputs");
         Files.createDirectories(outputs);
         Path report = outputs.resolve("report.md");
@@ -22,21 +22,25 @@ class PresentFilesToolTest {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setOutputsRoot(outputs.toString());
         ArtifactService service = new ArtifactService(properties);
-        ArtifactRecord record = service.register("thread-1", "run-1", report, "text/markdown");
-        PresentFilesTool tool = new PresentFilesTool(service);
+        UserDataPathResolver resolver = new UserDataPathResolver(properties);
+        PresentFilesTool tool = new PresentFilesTool(service, resolver);
 
         ToolResult ok = tool.execute(new ToolRequest(
-                "{\"files\":[\"" + record.artifactId() + "\"]}",
+                "{\"filepaths\":[\"/mnt/user-data/outputs/report.md\"]}",
                 tempDir,
                 java.util.List.of(),
-                "thread-1"));
+                "thread-1", "run-1"));
         ToolResult bad = tool.execute(new ToolRequest(
-                "{\"files\":[\"../secrets.md\"]}",
+                "{\"filepaths\":[\"/mnt/user-data/outputs/missing.md\"]}",
                 tempDir,
                 java.util.List.of(),
-                "thread-1"));
+                "thread-1", "run-1"));
 
+        ArtifactRecord record = service.list("thread-1", "run-1").get(0);
+        assertThat(ok.status()).isEqualTo(ToolResult.Status.SUCCESS);
         assertThat(ok.content()).contains(record.artifactId(), "/api/deerflow/artifacts/");
-        assertThat(bad.content()).contains("not a registered artifact");
+        assertThat(ok.metadata()).containsEntry("artifactDeliverySucceeded", true);
+        assertThat(bad.status()).isEqualTo(ToolResult.Status.FAILED);
+        assertThat(bad.content()).contains("unable to present file");
     }
 }

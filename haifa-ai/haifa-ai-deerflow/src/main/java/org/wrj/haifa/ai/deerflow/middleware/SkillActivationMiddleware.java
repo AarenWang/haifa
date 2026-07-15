@@ -43,7 +43,7 @@ public class SkillActivationMiddleware implements AgentMiddleware {
             String skillsSection = SkillPromptRenderer.renderSkillSystem(
                     availableSkills,
                     activeSkills,
-                    context.properties().getSkillsRoot()
+                    context.properties().getSkillsContainerPath()
             );
             String updatedSystem = SkillPromptRenderer.injectIntoSystemPrompt(prompt.systemPrompt(), skillsSection);
             return new ModelPrompt(updatedSystem, prompt.userPrompt(), prompt.modelName());

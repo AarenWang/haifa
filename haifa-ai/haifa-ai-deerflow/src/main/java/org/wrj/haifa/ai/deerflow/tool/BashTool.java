@@ -40,7 +40,7 @@ public class BashTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Run a shell command inside the configured sandbox. Arguments: {\"command\": \"command to run\"}";
+        return "Run a shell command inside the configured sandbox. Arguments: {\"description\": \"optional summary\", \"command\": \"command to run\"}. Use /mnt/skills and /mnt/user-data virtual paths.";
     }
 
     @Override
@@ -51,31 +51,33 @@ public class BashTool implements AgentTool {
     @Override
     public ToolResult execute(ToolRequest request) {
         if (!properties.isBashEnabled()) {
-            return ToolResult.of(name(), "Tool bash is disabled by security configuration.");
+            return ToolResult.denied(name(), "Tool bash is disabled by security configuration.",
+                    Map.of("denied", true, "reason", "bash disabled"));
         }
         if (properties.getSandbox() == null || !properties.getSandbox().isEnabled()) {
-            return ToolResult.of(name(), "Tool bash sandbox is disabled by security configuration.",
+            return ToolResult.denied(name(), "Tool bash sandbox is disabled by security configuration.",
                     Map.of("denied", true, "reason", "sandbox disabled"));
         }
         try {
             String jsonInput = request.userMessage();
             if (jsonInput == null || jsonInput.isBlank()) {
-                return ToolResult.of(name(), "Error: arguments JSON required");
+                return ToolResult.failed(name(), "Error: arguments JSON required");
             }
             JsonNode node;
             try {
                 node = MAPPER.readTree(jsonInput);
             } catch (Exception jsonEx) {
-                return ToolResult.of(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
+                return ToolResult.failed(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
             }
             String command = node.has("command") ? node.get("command").asText() : null;
             if (command == null || command.isBlank()) {
-                return ToolResult.of(name(), "Error: command is required");
+                return ToolResult.failed(name(), "Error: command is required");
             }
+            command = normalizeLineContinuations(command);
 
             CommandPolicy.Decision decision = commandPolicy.evaluate(command, request.workspaceRoot());
             if (!decision.allowed()) {
-                return ToolResult.of(name(), "Command denied: " + decision.reason(),
+                return ToolResult.denied(name(), "Command denied: " + decision.reason(),
                         Map.of("denied", true, "reason", decision.reason()));
             }
 
@@ -84,14 +86,40 @@ public class BashTool implements AgentTool {
                     request.workspaceRoot(),
                     null,
                     Duration.ofMillis(properties.getSandbox().getTimeoutMs()),
-                    Map.of(),
+                    configuredEnvironment(),
                     properties.getSandbox().isNetworkEnabled(),
                     request.runId()
             ));
-            return ToolResult.of(name(), render(result), metadata(result));
+            Map<String, Object> metadata = metadata(result);
+            if (result.timedOut()) {
+                return ToolResult.timedOut(name(), render(result), metadata);
+            }
+            if (result.exitCode() != 0) {
+                return ToolResult.failed(name(), render(result), metadata);
+            }
+            return ToolResult.success(name(), render(result), metadata);
         } catch (Exception e) {
-            return ToolResult.of(name(), "Error executing command: " + e.getMessage());
+            return ToolResult.failed(name(), "Error executing command: " + e.getMessage(),
+                    Map.of("errorType", e.getClass().getSimpleName()));
         }
+    }
+
+    private Map<String, String> configuredEnvironment() {
+        Map<String, String> configured = properties.getSandbox().getEnvironment();
+        if (configured == null || configured.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> result = new HashMap<>();
+        configured.forEach((key, value) -> {
+            if (key != null && key.matches("[A-Za-z_][A-Za-z0-9_]*") && value != null && !value.isBlank()) {
+                result.put(key, value);
+            }
+        });
+        return Map.copyOf(result);
+    }
+
+    private static String normalizeLineContinuations(String command) {
+        return command.replaceAll("\\\\\\r?\\n\\s*", " ").trim();
     }
 
     private static String render(SandboxResult result) {

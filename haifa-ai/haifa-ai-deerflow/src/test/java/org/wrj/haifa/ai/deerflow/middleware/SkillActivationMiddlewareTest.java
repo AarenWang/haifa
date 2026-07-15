@@ -43,6 +43,8 @@ class SkillActivationMiddlewareTest {
                     assertThat(prompt.systemPrompt()).contains("<skill_system>");
                     assertThat(prompt.systemPrompt()).contains("research");
                     assertThat(prompt.systemPrompt()).contains("<location>");
+                    assertThat(prompt.systemPrompt()).contains("/mnt/skills/public/research/SKILL.md");
+                    assertThat(prompt.systemPrompt()).doesNotContain(publicDir.toAbsolutePath().toString());
                     assertThat(prompt.userPrompt()).contains("User request:");
                 })
                 .verifyComplete();

@@ -73,7 +73,7 @@ public class DockerSandboxRunner implements SandboxRunner {
                             "strongIsolation", true,
                             "sandboxWorkdir", workdir.toString(),
                             "workspaceMounted", workspaceMountAvailable(request),
-                            "workspaceMountMode", workspaceMountAvailable(request) ? "readonly" : "none",
+                            "workspaceMountMode", workspaceMountAvailable(request) ? "readwrite" : "none",
                             "dockerImage", properties.getSandbox().getDockerImage(),
                             "networkEnabled", request.networkEnabled(),
                             "timeoutMs", timeout.toMillis()
@@ -89,7 +89,7 @@ public class DockerSandboxRunner implements SandboxRunner {
                             "strongIsolation", true,
                             "sandboxWorkdir", workdir.toString(),
                             "workspaceMounted", workspaceMountAvailable(request),
-                            "workspaceMountMode", workspaceMountAvailable(request) ? "readonly" : "none",
+                            "workspaceMountMode", workspaceMountAvailable(request) ? "readwrite" : "none",
                             "error", ex.getClass().getName()
                     ));
         }
@@ -110,14 +110,27 @@ public class DockerSandboxRunner implements SandboxRunner {
         if (workspaceMountAvailable(request)) {
             command.add("--mount");
             command.add("type=bind,source=" + DockerPathMapper.bindSource(request.workspaceRoot())
-                    + ",target=/workspace,readonly");
+                    + ",target=" + org.wrj.haifa.ai.deerflow.tool.UserDataPathResolver.VIRTUAL_WORKSPACE_ROOT);
         }
+        addMount(command, Path.of(properties.getSkillsRoot()), properties.getSkillsContainerPath(), true);
+        addMount(command, Path.of(properties.getUploadsRoot()),
+                org.wrj.haifa.ai.deerflow.tool.UserDataPathResolver.VIRTUAL_UPLOADS_ROOT, true);
+        addMount(command, Path.of(properties.getOutputsRoot()),
+                org.wrj.haifa.ai.deerflow.tool.UserDataPathResolver.VIRTUAL_OUTPUTS_ROOT, false);
         command.add("--mount");
         command.add("type=bind,source=" + DockerPathMapper.bindSource(workdir) + ",target=/sandbox");
         command.add("-w");
-        command.add(request.runWorkingDirectory() != null ? "/sandbox" : (workspaceMountAvailable(request) ? "/workspace" : "/sandbox"));
+        command.add(request.runWorkingDirectory() != null ? "/sandbox"
+                : (workspaceMountAvailable(request)
+                        ? org.wrj.haifa.ai.deerflow.tool.UserDataPathResolver.VIRTUAL_WORKSPACE_ROOT : "/sandbox"));
         command.add("-e");
         command.add("SANDBOX_WORKDIR=/sandbox");
+        request.environment().forEach((key, value) -> {
+            if (key != null && key.matches("[A-Za-z_][A-Za-z0-9_]*") && value != null) {
+                command.add("-e");
+                command.add(key + "=" + value);
+            }
+        });
         command.add(properties.getSandbox().getDockerImage());
         if (request.cmdArgs() != null && !request.cmdArgs().isEmpty()) {
             command.addAll(request.cmdArgs());
@@ -127,6 +140,16 @@ public class DockerSandboxRunner implements SandboxRunner {
             command.add(request.command());
         }
         return command;
+    }
+
+    private static void addMount(List<String> command, Path source, String target, boolean readOnly) {
+        Path normalized = source.toAbsolutePath().normalize();
+        if (!Files.isDirectory(normalized)) {
+            return;
+        }
+        command.add("--mount");
+        command.add("type=bind,source=" + DockerPathMapper.bindSource(normalized) + ",target=" + target
+                + (readOnly ? ",readonly" : ""));
     }
 
     private Path prepareWorkdir(SandboxRequest request, String sandboxId) {

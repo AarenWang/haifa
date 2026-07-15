@@ -67,4 +67,16 @@ class CommandPolicyTest {
         assertThat(policy.evaluate("cat C:\\Users\\me\\secret.txt", Path.of(".")).reason()).contains("absolute host path");
         assertThat(policy.evaluate("cat ../secret.txt", Path.of(".")).reason()).contains("parent directory");
     }
+
+    @Test
+    void allowsOnlyRecognizedVirtualAbsoluteRoots() {
+        CommandPolicy policy = new CommandPolicy(new DeerFlowProperties());
+
+        assertThat(policy.evaluate(
+                "python /mnt/skills/public/image-generation/scripts/generate.py --output-file=/mnt/user-data/outputs/result.png",
+                Path.of(".")).allowed()).isTrue();
+        assertThat(policy.evaluate("cat /mnt/user-data/uploads/input.txt", Path.of(".")).allowed()).isTrue();
+        assertThat(policy.evaluate("cat /tmp/secret.txt", Path.of(".")).reason())
+                .contains("absolute host path");
+    }
 }

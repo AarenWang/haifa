@@ -36,21 +36,22 @@ class DeferredToolCatalogTest {
     }
 
     @Test
-    void searchFindsSkillToolsBySkillName() {
+    void skillNamesDoNotSynthesizeTools() {
         List<ToolDescriptor> results = catalog.search("writer");
-        assertThat(results).extracting(ToolDescriptor::name).contains("summarize");
+        assertThat(results).isEmpty();
     }
 
     @Test
     void emptyKeywordListsAll() {
         List<ToolDescriptor> results = catalog.search("");
-        assertThat(results.size()).isGreaterThanOrEqualTo(21); // standardDescriptors size + skills
+        assertThat(results).hasSize(22);
     }
 
     @Test
     void listAllReturnsEverything() {
         List<ToolDescriptor> results = catalog.listAll();
-        assertThat(results.size()).isGreaterThanOrEqualTo(21);
+        assertThat(results).hasSize(22);
+        assertThat(results).extracting(ToolDescriptor::name).doesNotContain("summarize");
     }
 
     @Test

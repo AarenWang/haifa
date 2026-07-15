@@ -43,7 +43,7 @@ public class CommandPolicy {
             }
         }
         for (String token : parsed.tokens()) {
-            SensitivePathDecision pathDecision = evaluatePathToken(token);
+            SensitivePathDecision pathDecision = evaluatePathToken(token, properties.getSkillsContainerPath());
             if (!pathDecision.allowed()) {
                 return Decision.deny(pathDecision.reason());
             }
@@ -166,7 +166,7 @@ public class CommandPolicy {
         };
     }
 
-    private static SensitivePathDecision evaluatePathToken(String token) {
+    private static SensitivePathDecision evaluatePathToken(String token, String skillsContainerPath) {
         String normalized = token.replace('\\', '/');
         String lower = normalized.toLowerCase(Locale.ROOT);
         if (lower.contains(".git") || lower.contains("%userprofile%") || lower.contains("$home")
@@ -180,10 +180,25 @@ public class CommandPolicy {
         if (lower.equals("..") || lower.startsWith("../") || lower.contains("/../") || lower.endsWith("/..")) {
             return SensitivePathDecision.deny("command references a parent directory path");
         }
-        if (isAbsolutePathToken(normalized)) {
+        if (isAbsolutePathToken(normalized) && !isAllowedVirtualPath(normalized, skillsContainerPath)) {
             return SensitivePathDecision.deny("command references an absolute host path");
         }
         return SensitivePathDecision.allow();
+    }
+
+    private static boolean isAllowedVirtualPath(String token, String skillsContainerPath) {
+        String path = stripArgumentPrefix(token).replace('\\', '/');
+        String skillsRoot = skillsContainerPath == null || skillsContainerPath.isBlank()
+                ? "/mnt/skills" : skillsContainerPath.replace('\\', '/').replaceAll("/$", "");
+        return path.equals(skillsRoot) || path.startsWith(skillsRoot + "/")
+                || path.equals("/mnt/user-data/uploads") || path.startsWith("/mnt/user-data/uploads/")
+                || path.equals("/mnt/user-data/workspace") || path.startsWith("/mnt/user-data/workspace/")
+                || path.equals("/mnt/user-data/outputs") || path.startsWith("/mnt/user-data/outputs/");
+    }
+
+    private static String stripArgumentPrefix(String token) {
+        int equals = token.indexOf('=');
+        return equals >= 0 ? token.substring(equals + 1) : token;
     }
 
     private static boolean isAbsolutePathToken(String token) {

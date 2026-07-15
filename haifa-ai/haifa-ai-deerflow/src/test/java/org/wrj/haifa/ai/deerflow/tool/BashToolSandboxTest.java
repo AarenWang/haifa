@@ -24,6 +24,7 @@ class BashToolSandboxTest {
                 .execute(new ToolRequest("{\"command\":\"pwd\"}", tmp));
 
         assertThat(result.content()).contains("disabled by security configuration");
+        assertThat(result.status()).isEqualTo(ToolResult.Status.DENIED);
     }
 
     @Test
@@ -37,6 +38,7 @@ class BashToolSandboxTest {
                 .execute(new ToolRequest("{\"command\":\"pwd\"}", tmp));
 
         assertThat(result.content()).contains("sandbox is disabled");
+        assertThat(result.status()).isEqualTo(ToolResult.Status.DENIED);
         assertThat(runner.calls).isEqualTo(0);
     }
 
@@ -58,6 +60,7 @@ class BashToolSandboxTest {
         assertThat(result.metadata()).containsEntry("exitCode", 0);
         assertThat(result.metadata()).containsEntry("stdout", "hello\n");
         assertThat(result.metadata()).containsEntry("timedOut", false);
+        assertThat(result.status()).isEqualTo(ToolResult.Status.SUCCESS);
     }
 
     @Test
@@ -72,19 +75,56 @@ class BashToolSandboxTest {
 
         assertThat(result.content()).contains("Command denied");
         assertThat(result.metadata()).containsEntry("denied", true);
+        assertThat(result.status()).isEqualTo(ToolResult.Status.DENIED);
         assertThat(runner.calls).isEqualTo(0);
+    }
+
+    @Test
+    void nonZeroAndTimeoutAreNotReportedAsSuccess(@TempDir Path tmp) {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setBashEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        FakeSandboxRunner runner = new FakeSandboxRunner();
+        runner.nextResult = new SandboxResult("sandbox-test", 7, "", "provider failed", 12,
+                false, false, Map.of("sandboxBackend", "local"));
+        BashTool tool = new BashTool(properties, runner, new CommandPolicy(properties));
+
+        ToolResult failed = tool.execute(new ToolRequest("{\"command\":\"pwd\"}", tmp));
+        runner.nextResult = new SandboxResult("sandbox-test", -1, "", "timeout", 12,
+                true, false, Map.of("sandboxBackend", "local"));
+        ToolResult timedOut = tool.execute(new ToolRequest("{\"command\":\"pwd\"}", tmp));
+
+        assertThat(failed.status()).isEqualTo(ToolResult.Status.FAILED);
+        assertThat(timedOut.status()).isEqualTo(ToolResult.Status.TIMED_OUT);
+    }
+
+    @Test
+    void passesOnlyConfiguredNonBlankEnvironment(@TempDir Path tmp) {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setBashEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setEnvironment(Map.of(
+                "GEMINI_API_KEY", "secret", "EMPTY_VALUE", ""));
+        FakeSandboxRunner runner = new FakeSandboxRunner();
+
+        new BashTool(properties, runner, new CommandPolicy(properties))
+                .execute(new ToolRequest("{\"description\":\"generate\",\"command\":\"pwd\"}", tmp));
+
+        assertThat(runner.lastRequest.environment()).containsEntry("GEMINI_API_KEY", "secret")
+                .doesNotContainKey("EMPTY_VALUE");
     }
 
     private static class FakeSandboxRunner implements SandboxRunner {
         private int calls;
         private SandboxRequest lastRequest;
+        private SandboxResult nextResult = new SandboxResult("sandbox-test", 0, "hello\n", "", 12,
+                false, false, Map.of("sandboxBackend", "local", "isolationLevel", "test"));
 
         @Override
         public SandboxResult run(SandboxRequest request) {
             calls++;
             lastRequest = request;
-            return new SandboxResult("sandbox-test", 0, "hello\n", "", 12, false, false,
-                    Map.of("sandboxBackend", "local", "isolationLevel", "test"));
+            return nextResult;
         }
     }
 }

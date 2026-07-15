@@ -109,7 +109,7 @@ public class DeferredToolCatalog {
                 new ToolDescriptor("ask_clarification", "Ask the user for structured clarification about ambiguous requirements.", "builtin", "展示/人机交互", false),
                 new ToolDescriptor("view_image", "View an image file from the workspace.", "builtin", "展示/人机交互", false),
                 new ToolDescriptor("current_time", "Get the current date and time.", "builtin", "展示/人机交互", false),
-                new ToolDescriptor("tool_search", "Search available tools and skills.", "builtin", "展示/人机交互", false),
+                new ToolDescriptor("tool_search", "Search available callable tools.", "builtin", "展示/人机交互", false),
                 
                 new ToolDescriptor("web_search", "Search the web for queries to find relevant sources and snippets.", "configured", "Web/检索", false,
                         buildWebSearchProviderInfo()),
@@ -145,40 +145,11 @@ public class DeferredToolCatalog {
                 results.add(td);
             }
         }
-        for (Skill skill : allSkills()) {
-            if (skill.allowedTools() != null) {
-                for (String toolName : skill.allowedTools()) {
-                    if (toolName.toLowerCase().contains(lower) || skill.name().toLowerCase().contains(lower)) {
-                        results.add(new ToolDescriptor(
-                                toolName,
-                                "Provided by skill: " + skill.name() + " (" + skill.description() + ")",
-                                getSource(toolName),
-                                getCategory(toolName),
-                                true
-                        ));
-                    }
-                }
-            }
-        }
         return results;
     }
 
     public List<ToolDescriptor> listAll() {
-        List<ToolDescriptor> results = new java.util.ArrayList<>(standardDescriptors());
-        for (Skill skill : allSkills()) {
-            if (skill.allowedTools() != null) {
-                for (String toolName : skill.allowedTools()) {
-                    results.add(new ToolDescriptor(
-                            toolName,
-                            "Provided by skill: " + skill.name(),
-                            getSource(toolName),
-                            getCategory(toolName),
-                            true
-                    ));
-                }
-            }
-        }
-        return results;
+        return standardDescriptors();
     }
 
     private static boolean matches(String name, String description, String keyword) {

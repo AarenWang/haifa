@@ -3,6 +3,8 @@ package org.wrj.haifa.ai.deerflow.config;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType;
@@ -16,6 +18,7 @@ public class DeerFlowProperties {
     private String userDataRoot = "${user.dir}/data/user-data";
     private String workspaceRoot = "${user.dir}/data/user-data/workspace";
     private String skillsRoot = ".";
+    private String skillsContainerPath = "/mnt/skills";
     private boolean skillsEnabled = true;
     private boolean mcpEnabled = false;
     private boolean toolSearchEnabled = true;
@@ -132,6 +135,7 @@ public class DeerFlowProperties {
         private String allowedScriptLanguages = "python,powershell,bash";
         private String scriptWorkdirSubdir = "scripts";
         private boolean runScriptLocalUnsafeAllowed = false;
+        private Map<String, String> environment = new LinkedHashMap<>();
 
         public boolean isEnabled() {
             return enabled;
@@ -227,6 +231,14 @@ public class DeerFlowProperties {
 
         public void setRunScriptLocalUnsafeAllowed(boolean runScriptLocalUnsafeAllowed) {
             this.runScriptLocalUnsafeAllowed = runScriptLocalUnsafeAllowed;
+        }
+
+        public Map<String, String> getEnvironment() {
+            return environment;
+        }
+
+        public void setEnvironment(Map<String, String> environment) {
+            this.environment = environment == null ? new LinkedHashMap<>() : new LinkedHashMap<>(environment);
         }
     }
 
@@ -384,6 +396,14 @@ public class DeerFlowProperties {
 
     public void setSkillsRoot(String skillsRoot) {
         this.skillsRoot = skillsRoot;
+    }
+
+    public String getSkillsContainerPath() {
+        return StringUtils.hasText(skillsContainerPath) ? skillsContainerPath : "/mnt/skills";
+    }
+
+    public void setSkillsContainerPath(String skillsContainerPath) {
+        this.skillsContainerPath = skillsContainerPath;
     }
 
     public boolean isSkillsEnabled() {

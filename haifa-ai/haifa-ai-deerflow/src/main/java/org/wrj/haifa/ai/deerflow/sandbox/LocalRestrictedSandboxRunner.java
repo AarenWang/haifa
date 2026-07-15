@@ -105,7 +105,8 @@ public class LocalRestrictedSandboxRunner implements SandboxRunner {
                 processEnv.putIfAbsent("LANG", "en_US.UTF-8");
                 processEnv.putIfAbsent("LC_ALL", "en_US.UTF-8");
             }
-            processEnv.putAll(request.environment());
+            request.environment().forEach((key, value) ->
+                    processEnv.put(key, pathResolver.rewriteContainerPathsToLocal(value)));
 
             process = processBuilder.start();
             ByteArrayOutputStream stdout = new ByteArrayOutputStream();
@@ -118,6 +119,7 @@ public class LocalRestrictedSandboxRunner implements SandboxRunner {
             boolean timedOut = !finished;
             if (timedOut) {
                 terminateProcessTree(process);
+                closeProcessStreams(process);
             }
             stdoutThread.join(1_000);
             ThreadStderr.join(1_000);
@@ -171,11 +173,21 @@ public class LocalRestrictedSandboxRunner implements SandboxRunner {
     }
 
     private static void terminateProcessTree(Process process) {
-        List<ProcessHandle> descendants = process.descendants().toList();
+        List<ProcessHandle> descendants = process.descendants().toList().reversed();
         descendants.forEach(ProcessHandle::destroyForcibly);
         process.destroyForcibly();
-        waitForExit(process.toHandle().onExit(), 2_000);
-        descendants.forEach(handle -> waitForExit(handle.onExit(), 2_000));
+        descendants.forEach(handle -> waitForExit(handle.onExit(), 5_000));
+        waitForExit(process.toHandle().onExit(), 5_000);
+        process.descendants().toList().reversed().forEach(handle -> {
+            handle.destroyForcibly();
+            waitForExit(handle.onExit(), 2_000);
+        });
+    }
+
+    private static void closeProcessStreams(Process process) {
+        try { process.getInputStream().close(); } catch (IOException ignored) { }
+        try { process.getErrorStream().close(); } catch (IOException ignored) { }
+        try { process.getOutputStream().close(); } catch (IOException ignored) { }
     }
 
     private static void waitForExit(CompletableFuture<ProcessHandle> exit, long timeoutMs) {

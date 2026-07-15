@@ -22,7 +22,7 @@ public class ToolSearchTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Search available tools and skills by keyword. Returns tool name, description, source, and whether skill activation is required.";
+        return "Search available tools by keyword. Returns callable tool names, descriptions, and sources. Skills are instructions, not tools, and are never returned here.";
     }
 
     @Override

@@ -11,6 +11,7 @@ public class UserDataPathResolver {
     public static final String VIRTUAL_UPLOADS_ROOT = "/mnt/user-data/uploads";
     public static final String VIRTUAL_WORKSPACE_ROOT = "/mnt/user-data/workspace";
     public static final String VIRTUAL_OUTPUTS_ROOT = "/mnt/user-data/outputs";
+    public static final String VIRTUAL_SKILLS_ROOT = "/mnt/skills";
 
     private final DeerFlowProperties properties;
 
@@ -75,6 +76,9 @@ public class UserDataPathResolver {
         if (isUnder(abs, outputsRoot())) {
             return VIRTUAL_OUTPUTS_ROOT + "/" + slash(outputsRoot().relativize(abs));
         }
+        if (isUnder(abs, skillsRoot())) {
+            return properties.getSkillsContainerPath() + "/" + slash(skillsRoot().relativize(abs));
+        }
         return abs.toString();
     }
 
@@ -91,6 +95,10 @@ public class UserDataPathResolver {
         }
         if (path.equals(VIRTUAL_OUTPUTS_ROOT) || path.startsWith(VIRTUAL_OUTPUTS_ROOT + "/")) {
             return outputsRoot().resolve(path.substring(VIRTUAL_OUTPUTS_ROOT.length()).replaceFirst("^/", "")).normalize();
+        }
+        String skillsContainerPath = properties.getSkillsContainerPath().replace('\\', '/').replaceAll("/$", "");
+        if (path.equals(skillsContainerPath) || path.startsWith(skillsContainerPath + "/")) {
+            return skillsRoot().resolve(path.substring(skillsContainerPath.length()).replaceFirst("^/", "")).normalize();
         }
         if (Path.of(path).isAbsolute()) {
             return Path.of(path).toAbsolutePath().normalize();
@@ -132,6 +140,7 @@ public class UserDataPathResolver {
         result = result.replace(VIRTUAL_UPLOADS_ROOT, slash(uploadsRoot()));
         result = result.replace(VIRTUAL_WORKSPACE_ROOT, slash(workspaceRoot()));
         result = result.replace(VIRTUAL_OUTPUTS_ROOT, slash(outputsRoot()));
+        result = result.replace(properties.getSkillsContainerPath(), slash(skillsRoot()));
         return result;
     }
 
@@ -141,10 +150,12 @@ public class UserDataPathResolver {
         result = result.replace(slash(uploadsRoot()), VIRTUAL_UPLOADS_ROOT);
         result = result.replace(slash(workspaceRoot()), VIRTUAL_WORKSPACE_ROOT);
         result = result.replace(slash(outputsRoot()), VIRTUAL_OUTPUTS_ROOT);
+        result = result.replace(slash(skillsRoot()), properties.getSkillsContainerPath());
         // Handle Windows backslash paths compatible masking
         result = result.replace(uploadsRoot().toString(), VIRTUAL_UPLOADS_ROOT);
         result = result.replace(workspaceRoot().toString(), VIRTUAL_WORKSPACE_ROOT);
         result = result.replace(outputsRoot().toString(), VIRTUAL_OUTPUTS_ROOT);
+        result = result.replace(skillsRoot().toString(), properties.getSkillsContainerPath());
         return result;
     }
 

@@ -21,6 +21,10 @@ class UserDataPathResolverTest {
                 .isEqualTo(tmp.resolve("workspace/note.md").toAbsolutePath().normalize());
         assertThat(resolver.resolveReadable("/mnt/user-data/outputs/report.md", tmp.resolve("workspace")))
                 .isEqualTo(tmp.resolve("outputs/report.md").toAbsolutePath().normalize());
+        assertThat(resolver.resolveReadable("/mnt/skills/public/image-generation/SKILL.md", tmp.resolve("workspace")))
+                .isEqualTo(tmp.resolve("skills/public/image-generation/SKILL.md").toAbsolutePath().normalize());
+        assertThatThrownBy(() -> resolver.resolveWritable("/mnt/skills/public/image-generation/SKILL.md",
+                tmp.resolve("workspace"))).hasMessageContaining("outside writable directories");
     }
 
     @Test
@@ -51,7 +55,7 @@ class UserDataPathResolverTest {
         DeerFlowProperties properties = properties(tmp);
         UserDataPathResolver resolver = new UserDataPathResolver(properties);
 
-        String text = "Read from /mnt/user-data/uploads/input.csv and write to /mnt/user-data/workspace/result.csv and /mnt/user-data/outputs/report.md";
+        String text = "Read /mnt/skills/public/demo/SKILL.md and /mnt/user-data/uploads/input.csv and write to /mnt/user-data/workspace/result.csv and /mnt/user-data/outputs/report.md";
         String localUploads = tmp.resolve("uploads").toAbsolutePath().normalize().toString().replace('\\', '/');
         String localWorkspace = tmp.resolve("workspace").toAbsolutePath().normalize().toString().replace('\\', '/');
         String localOutputs = tmp.resolve("outputs").toAbsolutePath().normalize().toString().replace('\\', '/');
@@ -60,6 +64,8 @@ class UserDataPathResolverTest {
         assertThat(rewritten).contains(localUploads + "/input.csv");
         assertThat(rewritten).contains(localWorkspace + "/result.csv");
         assertThat(rewritten).contains(localOutputs + "/report.md");
+        assertThat(rewritten).contains(tmp.resolve("skills").toAbsolutePath().normalize().toString().replace('\\', '/')
+                + "/public/demo/SKILL.md");
 
         String masked = resolver.maskLocalPathsToContainer(rewritten);
         assertThat(masked).isEqualTo(text);
@@ -70,6 +76,7 @@ class UserDataPathResolverTest {
         properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
         properties.setUploadsRoot(tmp.resolve("uploads").toString());
         properties.setOutputsRoot(tmp.resolve("outputs").toString());
+        properties.setSkillsRoot(tmp.resolve("skills").toString());
         return properties;
     }
 }

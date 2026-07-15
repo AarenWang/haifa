@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.LinkOption;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
@@ -41,6 +42,13 @@ public class ArtifactService {
         }
         Path resolved = validateRegisteredPath(file);
         try {
+            Optional<ArtifactRecord> existing = artifactsById.values().stream()
+                    .filter(record -> threadId.equals(record.threadId()) && runId.equals(record.runId()))
+                    .filter(record -> Path.of(record.path()).toAbsolutePath().normalize().equals(resolved))
+                    .findFirst();
+            if (existing.isPresent()) {
+                return existing.get();
+            }
             String resolvedMimeType = StringUtils.hasText(mimeType) ? mimeType : detectMimeType(resolved);
             validateBinarySignature(resolved, resolvedMimeType);
             ArtifactRecord record = new ArtifactRecord(
@@ -74,16 +82,21 @@ public class ArtifactService {
     }
 
     public Optional<ArtifactRecord> findVisible(String threadId, String token) {
+        return findVisible(threadId, null, token);
+    }
+
+    public Optional<ArtifactRecord> findVisible(String threadId, String runId, String token) {
         if (!StringUtils.hasText(token)) {
             return Optional.empty();
         }
         ArtifactRecord byId = artifactsById.get(token);
-        if (byId != null && matchesThread(threadId, byId)) {
+        if (byId != null && matchesThread(threadId, byId) && matchesRun(runId, byId)) {
             return Optional.of(byId);
         }
         String safeToken = Path.of(token).getFileName().toString();
         return artifactsById.values().stream()
                 .filter(record -> matchesThread(threadId, record))
+                .filter(record -> matchesRun(runId, record))
                 .filter(record -> record.filename().equals(token) || record.filename().equals(safeToken))
                 .findFirst();
     }
@@ -174,14 +187,30 @@ public class ArtifactService {
         if (!resolved.startsWith(root)) {
             throw new IllegalArgumentException("Only files under outputsRoot can be registered as artifacts");
         }
-        if (!Files.isRegularFile(resolved)) {
+        if (Files.isSymbolicLink(resolved) || !Files.isRegularFile(resolved, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalArgumentException("Artifact file does not exist: " + file);
         }
-        return resolved;
+        try {
+            Path realRoot = Files.exists(root) ? root.toRealPath() : root;
+            Path realFile = resolved.toRealPath();
+            if (!realFile.startsWith(realRoot)) {
+                throw new IllegalArgumentException("Artifact path escapes outputsRoot");
+            }
+            if (Files.size(realFile) <= 0) {
+                throw new IllegalArgumentException("Artifact file is empty: " + file);
+            }
+            return realFile;
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("Unable to validate artifact path: " + file, ex);
+        }
     }
 
     private static boolean matchesThread(String threadId, ArtifactRecord record) {
         return !StringUtils.hasText(threadId) || threadId.equals(record.threadId());
+    }
+
+    private static boolean matchesRun(String runId, ArtifactRecord record) {
+        return !StringUtils.hasText(runId) || runId.equals(record.runId());
     }
 
     private static boolean isMarkdown(ArtifactRecord record) {
