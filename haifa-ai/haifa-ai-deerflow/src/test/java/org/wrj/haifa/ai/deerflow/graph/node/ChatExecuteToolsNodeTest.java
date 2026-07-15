@@ -137,6 +137,18 @@ class ChatExecuteToolsNodeTest {
     }
 
     @Test
+    void explicitToolFailureWritesFailedObservation() {
+        AgentTool tool = tool("provider_tool", request ->
+                ToolResult.failed("provider_tool", "provider returned exit code 7"));
+        ChatExecuteToolsNode node = new ChatExecuteToolsNode(
+                new ToolRegistry(List.of(tool)), new DeerFlowProperties(), new ToolPolicyService(List.of(tool)));
+
+        Map<String, Object> update = node.apply(state("provider_tool")).join();
+
+        assertObservation(update, "provider_tool", "provider returned exit code 7", "FAILED");
+    }
+
+    @Test
     void publishesTodoSnapshotImmediatelyAfterWriteTodosMutation() {
         Map<String, Object> snapshot = Map.of(
                 "threadId", "thread-1",

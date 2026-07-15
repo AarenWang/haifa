@@ -81,9 +81,16 @@ public class ChatAssembleModelInputNode implements AsyncNodeAction {
         List<ToolResult> results = new ArrayList<>();
         for (Map<String, Object> item : stateResults) {
             String toolName = item.get("toolName") instanceof String text ? text : "";
-            String content = item.get("content") instanceof String text ? text : "";
+            String content = item.get("result") instanceof String text ? text
+                    : item.get("content") instanceof String fallback ? fallback : "";
             Map<String, Object> metadata = stringObjectMap(item.get("metadata"));
-            results.add(new ToolResult(toolName, content, metadata));
+            ToolResult.Status status;
+            try {
+                status = ToolResult.Status.valueOf(String.valueOf(metadata.getOrDefault("status", "SUCCESS")));
+            } catch (IllegalArgumentException ex) {
+                status = ToolResult.Status.FAILED;
+            }
+            results.add(new ToolResult(toolName, status, content, metadata));
         }
         return List.copyOf(results);
     }

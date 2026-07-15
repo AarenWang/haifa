@@ -212,7 +212,7 @@ class SimpleAgentRuntimeTest {
                 .block();
 
         assertThat(events).extracting(AgentEvent::type)
-                .contains(AgentEventType.TOOL_COMPLETED,
+                .contains(AgentEventType.TOOL_FAILED,
                         AgentEventType.MODEL_COMPLETED,
                         AgentEventType.RUN_COMPLETED);
         assertThat(events).anySatisfy(event -> assertThat(event.content()).contains("Tool failed: boom"));

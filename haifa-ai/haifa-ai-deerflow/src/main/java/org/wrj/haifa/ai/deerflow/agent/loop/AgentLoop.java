@@ -518,10 +518,13 @@ public class AgentLoop {
         String compressedResult = compressToolResult(toolCall, rawToolResult, runConfig, seq, emitter);
         Map<String, Object> completionMetadata = completionMetadata(toolCall, rawToolResult);
         String eventContent = toolEventContent(rawToolResult, compressedResult);
-        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED, eventContent, completionMetadata));
+        emitter.emit(event(seq, runConfig,
+                rawToolResult.status() == ToolCallResult.Status.SUCCESS
+                        ? AgentEventType.TOOL_COMPLETED : AgentEventType.TOOL_FAILED,
+                eventContent, completionMetadata));
 
-        history.add("Tool result (" + record.toolName() + "): " + compressedResult);
-        typedHistory.add(toolMessage(toolCall.id(), record.toolName(), compressedResult,
+        history.add("Tool result (" + record.toolName() + "): " + eventContent);
+        typedHistory.add(toolMessage(toolCall.id(), record.toolName(), eventContent,
                 rawToolResult.status().name(), rawToolResult.metadata()));
         emitter.flush();
         return 1;
@@ -639,7 +642,7 @@ public class AgentLoop {
     }
 
     private static String toolEventContent(ToolCallResult result, String compressedResult) {
-        if (result.status() == ToolCallResult.Status.FAILED && result.error() != null) {
+        if (result.status() != ToolCallResult.Status.SUCCESS && result.error() != null) {
             return result.error();
         }
         return compressedResult;
@@ -666,7 +669,9 @@ public class AgentLoop {
         AgentTool tool = findTool(toolName);
         if (tool == null) {
             log.warn("Tool not found: {}. Available: {}", toolName, toolRegistry.tools().stream().map(AgentTool::name).toList());
-            return ToolCallResult.fromError(toolCall, "Tool not found: " + toolName, 0);
+            return new ToolCallResult(toolCall.id(), toolName, toolCall.arguments(),
+                    ToolCallResult.Status.NOT_FOUND, "", "Tool not found: " + toolName, 0,
+                    Map.of("notFound", true));
         }
 
         ToolRequest request = new ToolRequest(toolCall.arguments(), runConfig.workspaceRoot(),
@@ -676,8 +681,7 @@ public class AgentLoop {
         try {
             ToolResult result = tool.execute(request);
             long duration = System.currentTimeMillis() - startTime;
-            return new ToolCallResult(toolCall.id(), toolCall.toolName(), toolCall.arguments(),
-                    ToolCallResult.Status.SUCCESS, result.content(), "", duration, result.metadata());
+            return ToolCallResult.from(toolCall, result, duration);
         } catch (RuntimeException ex) {
             long duration = System.currentTimeMillis() - startTime;
             log.warn("Tool {} failed: {}", toolName, ex.getMessage());
@@ -1164,7 +1168,9 @@ public class AgentLoop {
                         completionMetadata));
             }
 
-            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+            emitter.emit(event(seq, runConfig,
+                    rawToolResult.status() == ToolCallResult.Status.SUCCESS
+                            ? AgentEventType.TOOL_COMPLETED : AgentEventType.TOOL_FAILED,
                     eventContent,
                     completionMetadata));
             typedHistory.add(toolMessage(toolCall.id(), pending.targetToolName(), eventContent,

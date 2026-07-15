@@ -159,7 +159,7 @@ class GraphChatRuntimeTest {
         assertThat(events).isNotEmpty();
 
         assertThat(events).anySatisfy(e -> {
-            assertThat(e.type()).isEqualTo(AgentEventType.TOOL_COMPLETED);
+            assertThat(e.type()).isEqualTo(AgentEventType.TOOL_FAILED);
             assertThat(e.metadata().get("status")).isEqualTo("NOT_FOUND");
         });
         assertThat(events).anySatisfy(e -> assertThat(e.type()).isEqualTo(AgentEventType.RUN_COMPLETED));

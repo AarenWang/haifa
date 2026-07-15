@@ -4,6 +4,7 @@ public enum AgentEventType {
     RUN_STARTED,
     TOOL_STARTED,
     TOOL_COMPLETED,
+    TOOL_FAILED,
     TOOL_DENIED,
     MODEL_STARTED,
     MODEL_COMPLETED,

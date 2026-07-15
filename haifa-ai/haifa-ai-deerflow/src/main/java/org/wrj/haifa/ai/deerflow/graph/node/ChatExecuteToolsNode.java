@@ -117,7 +117,10 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                 publishObserverEvents(runId, observerEvents);
 
                 publishToolEvent(runId, threadId,
-                        execution.deniedByPolicy() ? AgentEventType.TOOL_DENIED : AgentEventType.TOOL_COMPLETED,
+                        execution.deniedByPolicy() || rawResult.status() == ToolCallResult.Status.DENIED
+                                ? AgentEventType.TOOL_DENIED
+                                : rawResult.status() == ToolCallResult.Status.SUCCESS
+                                        ? AgentEventType.TOOL_COMPLETED : AgentEventType.TOOL_FAILED,
                         eventContent,
                         metadata);
                 publishTodoMutationEventIfNeeded(runId, threadId, safeName, toolCall.id(), rawResult, eventContent,
@@ -200,8 +203,9 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                 ToolPolicyDecision decision = toolPolicyService.evaluateTool(toolName, view.activeSkills(), view.mode());
                 if (!decision.allowed()) {
                     String reason = decision.reason() == null || decision.reason().isBlank() ? "Tool denied by policy" : decision.reason();
-                    ToolCallResult result = ToolCallResult.fromError(toolCall, "Error: tool denied by policy: " + reason,
-                            System.currentTimeMillis() - startTime);
+                    ToolCallResult result = new ToolCallResult(toolCall.id(), toolName, toolCall.arguments(),
+                            ToolCallResult.Status.DENIED, "", "Error: tool denied by policy: " + reason,
+                            System.currentTimeMillis() - startTime, Map.of("denied", true, "reason", reason));
                     return new ToolExecution("DENIED", result, "", true, reason);
                 }
             }
@@ -219,9 +223,9 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             );
             ToolResult result = tool.execute(toolRequest);
             long duration = System.currentTimeMillis() - startTime;
-            ToolCallResult raw = new ToolCallResult(toolCall.id(), toolName, toolCall.arguments(),
-                    ToolCallResult.Status.SUCCESS, result.content(), "", duration, result.metadata());
-            return new ToolExecution("SUCCESS", raw, "", false, "");
+            ToolCallResult raw = ToolCallResult.from(toolCall, result, duration);
+            return new ToolExecution(raw.status().name(), raw, "", raw.status() == ToolCallResult.Status.DENIED,
+                    raw.status() == ToolCallResult.Status.DENIED ? result.content() : "");
         }
         catch (Exception ex) {
             return failedExecution(toolCall, "FAILED", "Error executing tool " + toolName + ": " + ex.getMessage(), startTime,
@@ -230,7 +234,15 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
     }
 
     private ToolExecution failedExecution(ToolCall toolCall, String status, String error, long startTime, String errorType) {
-        ToolCallResult raw = ToolCallResult.fromError(toolCall, error, System.currentTimeMillis() - startTime);
+        ToolCallResult.Status rawStatus;
+        try {
+            rawStatus = ToolCallResult.Status.valueOf(status);
+        } catch (IllegalArgumentException ex) {
+            rawStatus = ToolCallResult.Status.FAILED;
+        }
+        ToolCallResult raw = new ToolCallResult(toolCall.id(), toolCall.toolName(), toolCall.arguments(),
+                rawStatus, "", error, System.currentTimeMillis() - startTime,
+                Map.of("failed", true, "errorType", errorType));
         return new ToolExecution(status, raw, errorType, false, "");
     }
 
