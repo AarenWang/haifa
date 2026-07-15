@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import sys
 
 import requests
 
@@ -108,10 +109,10 @@ def _generate_image_minimax(
 ) -> str:
     api_key = os.getenv("MINIMAX_API_KEY")
     if not api_key:
-        return "MINIMAX_API_KEY is not set"
+        raise ValueError("MINIMAX_API_KEY is not set")
     prompt = _minimax_prompt(prompt)
     if len(prompt) > MINIMAX_PROMPT_MAX_CHARS:
-        return (
+        raise ValueError(
             f"Prompt is {len(prompt)} characters but MiniMax image-01 accepts at most "
             f"{MINIMAX_PROMPT_MAX_CHARS}. Shorten the prompt to stay within the limit; "
             f"reference images plus a tighter description usually recover the detail."
@@ -145,6 +146,8 @@ def _generate_image_minimax(
     _ensure_output_dir(output_file)
     with open(output_file, "wb") as f:
         f.write(base64.b64decode(images[0]))
+    if not os.path.isfile(output_file) or os.path.getsize(output_file) <= 0:
+        raise RuntimeError("MiniMax did not create a non-empty output file")
     return f"Successfully generated image to {output_file}"
 
 
@@ -169,14 +172,17 @@ def _generate_image_gemini(
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        return "GEMINI_API_KEY is not set"
+        raise ValueError("GEMINI_API_KEY is not set")
+    api_host = os.getenv("GEMINI_API_HOST", "https://generativelanguage.googleapis.com").rstrip("/")
+    model = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3-pro-image-preview")
     response = requests.post(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent",
+        f"{api_host}/v1beta/models/{model}:generateContent",
         headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
         json={
             "generationConfig": {"imageConfig": {"aspectRatio": aspect_ratio}},
             "contents": [{"parts": [*parts, {"text": prompt}]}],
         },
+        timeout=60,
     )
     response.raise_for_status()
     data = response.json()
@@ -187,6 +193,8 @@ def _generate_image_gemini(
         _ensure_output_dir(output_file)
         with open(output_file, "wb") as f:
             f.write(base64.b64decode(base64_image))
+        if not os.path.isfile(output_file) or os.path.getsize(output_file) <= 0:
+            raise RuntimeError("Gemini did not create a non-empty output file")
         return f"Successfully generated image to {output_file}"
     raise Exception("Failed to generate image")
 
@@ -225,4 +233,5 @@ if __name__ == "__main__":
         print(generate_image(args.prompt_file, args.reference_images,
                              args.output_file, args.aspect_ratio))
     except Exception as e:
-        print(f"Error while generating image: {e}")
+        print(f"Error while generating image: {e}", file=sys.stderr)
+        raise SystemExit(1)

@@ -83,6 +83,10 @@ flowchart LR
 
 需要区分代码默认值和 YAML 值：`DeerFlowProperties` 代码默认 `bashEnabled=false`、`runScriptEnabled=false`、`sandbox.enabled=false`、`approval.enabled=true`，但当前 YAML 明确打开本地脚本/网络 sandbox，并关闭 approval。因此按仓库 YAML 启动时，本地工具能力较开放，适合开发实验，不适合直接作为公网生产默认配置。
 
+## Skill/Tool runtime boundary
+
+Skills are instruction/resource packages, not Tools. The runtime never creates a Tool implementation per Skill; `tool_search` exposes callable Tools only. Executable skills use the generic `read_file -> write_file -> bash -> present_files` pipeline, stable `/mnt/skills` and `/mnt/user-data/**` virtual roots, explicit `ToolResult.Status`, and artifact delivery evidence. See [skill-tool-runtime.md](skill-tool-runtime.md) for the mount, status, image-provider, and final-answer contracts.
+
 ## HTTP API
 
 主要控制器和路径来自 `web` 包：

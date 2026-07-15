@@ -1,5 +1,15 @@
 # haifa-ai-deerflow
 
+## Skill execution and image generation
+
+A Skill is an instruction package (`SKILL.md`, scripts, templates, and references); it is not a Tool and does not create a Spring `AgentTool` bean. `tool_search` lists callable tools only. Media skills use the same atomic runtime as every other skill:
+
+`read_file -> write_file -> bash -> present_files`
+
+The model sees stable virtual paths. The host `skills-root` is exposed read-only as `/mnt/skills`; uploads are read-only, while workspace and outputs are writable. A non-zero exit code, timeout, policy denial, or process-start error is a failed tool result. `present_files` registers only non-empty regular files below `/mnt/user-data/outputs` and supplies final-answer delivery evidence.
+
+Image generation is implemented by `skills/public/image-generation/scripts/generate.py`, not by an `ImageGenerationTool`. See [the Skill/Tool runtime guide](docs/skill-tool-runtime.md) for provider models and configuration.
+
 `haifa-ai-deerflow` 是一个 Java / Spring Boot WebFlux 实现的 DeerFlow 风格 Agent Runtime。它把 SSE run、thread/message 持久化、工具调用、skills、deep research、uploads/artifacts、memory/persona、SQLite 审计和 Spring AI Graph 运行时组合在一个本地可运行的后端服务中。
 
 本文按当前代码事实维护。更详细的架构说明见 [docs/architecture.md](docs/architecture.md)。

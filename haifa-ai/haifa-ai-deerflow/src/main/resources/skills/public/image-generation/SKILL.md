@@ -1,6 +1,6 @@
 ---
 name: image-generation
-description: Use this skill when the user requests to generate, create, imagine, or visualize images including characters, scenes, products, or any visual content. Supports structured prompts and reference images for guided generation.
+description: Generate creative raster images such as characters, scenes, products, illustrations, and decorative visual assets through Gemini or MiniMax, with optional reference images. Do not use for charts, tables, diagrams, or text-heavy infographics that require exact labels, values, or Chinese text; route those to chart-visualization.
 ---
 
 # Image Generation Skill
@@ -8,6 +8,13 @@ description: Use this skill when the user requests to generate, create, imagine,
 ## Overview
 
 This skill generates high-quality images using structured prompts and a Python script. The workflow includes creating JSON-formatted prompts and executing image generation with optional reference images.
+
+## Routing boundary
+
+- Use `chart-visualization` for exact data, labels, legends, axis text, tables, and Chinese/CJK typography.
+- Do not ask an image provider to render authoritative chart text. Generative image models do not guarantee exact wording or glyphs.
+- For a creative background plus exact text, generate the background without text, then overlay text with a deterministic renderer using a verified CJK font.
+- Never replace this Skill with an `image_generation` Tool call. Execute the bundled script through the generic `bash` capability.
 
 ## Core Capabilities
 

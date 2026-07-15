@@ -50,6 +50,7 @@ haifa:
       user-data-root: ${HAIFA_DEERFLOW_USER_DATA:${user.dir}/data/user-data}
       workspace-root: ${HAIFA_DEERFLOW_WORKSPACE:${user.dir}/data/user-data/workspace}
       skills-root: ${HAIFA_DEERFLOW_SKILLS:${user.dir}/skills}
+      skills-container-path: /mnt/skills
       skills-enabled: true
       mcp-enabled: false
       write-file-enabled: true
@@ -66,6 +67,17 @@ haifa:
         allowed-commands:
         denied-patterns: rm -rf,format,shutdown,reboot,del /s,Remove-Item -Recurse
         script-workdir-subdir: scripts
+        # Explicit sandbox environment allowlist. Values are injected into the
+        # generic bash/run_script runtime and are never included in tool metadata.
+        environment:
+          DEERFLOW_CJK_FONT: ${DEERFLOW_CJK_FONT:}
+          IMAGE_GENERATION_PROVIDER: ${IMAGE_GENERATION_PROVIDER:}
+          GEMINI_API_KEY: ${GEMINI_API_KEY:}
+          GEMINI_API_HOST: ${GEMINI_API_HOST:https://generativelanguage.googleapis.com}
+          GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:gemini-3-pro-image-preview}
+          MINIMAX_API_KEY: ${MINIMAX_API_KEY:}
+          MINIMAX_API_HOST: ${MINIMAX_API_HOST:https://api.minimaxi.com}
+          MINIMAX_IMAGE_MODEL: ${MINIMAX_IMAGE_MODEL:image-01}
       uploads-root: ${HAIFA_DEERFLOW_UPLOADS:${user.dir}/data/user-data/uploads}
       outputs-root: ${HAIFA_DEERFLOW_OUTPUTS:${user.dir}/data/user-data/outputs}
       max-upload-bytes: 10485760
@@ -114,4 +126,3 @@ haifa:
         require-for-network: false
         require-for-file-write: false
         hardline-patterns-enabled: false
-
