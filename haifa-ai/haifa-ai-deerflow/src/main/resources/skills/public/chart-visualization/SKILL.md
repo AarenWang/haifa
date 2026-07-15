@@ -31,9 +31,37 @@ Analyze the data features, choose the most suitable chart type, and consult the 
 ## Workflow
 
 1. Choose a chart type that matches the data. Consult the matching file in `references/` when its schema is useful.
-2. For a comparison dashboard made of labeled bar panels, write a JSON specification under `/mnt/user-data/workspace/` and run the bundled renderer.
-3. For another chart type, use an actually available deterministic renderer. Never invent a Tool name or claim that a missing `scripts/generate.js` exists.
-4. Write the final PNG under `/mnt/user-data/outputs/` and call `present_files` only after successful rendering.
+2. For a comparison dashboard made of labeled bar panels, use the local Pillow renderer. For another supported chart, use the bundled AntV client.
+3. Write one UTF-8 JSON specification under `/mnt/user-data/workspace/` and choose an output path under `/mnt/user-data/outputs/`.
+4. Run the selected script through generic `bash` or `run_script`. Treat any non-zero exit as failure; never convert it into a success response.
+5. Check that the requested output file exists and is non-empty, then call `present_files`. A remote URL alone is not a delivered DeerFlow artifact.
+
+## AntV remote renderer
+
+Use `scripts/generate.js` for the operation names listed above, including `generate_spreadsheet`. The JSON `tool` field is only an operation selector understood by this script; it is not a DeerFlow Tool and needs no Tool implementation class.
+
+```json
+{
+  "tool": "generate_line_chart",
+  "args": {
+    "title": "月度收入趋势",
+    "data": [
+      {"time": "2026-01", "value": 120},
+      {"time": "2026-02", "value": 148}
+    ]
+  }
+}
+```
+
+```bash
+node /mnt/skills/public/chart-visualization/scripts/generate.js \
+  /mnt/user-data/workspace/monthly-revenue.json \
+  --output-file /mnt/user-data/outputs/monthly-revenue.png
+```
+
+The script requires Node.js 18+ and outbound HTTPS. It sends the chart request, validates the API response, downloads the returned image, and exits non-zero on parse, operation, API, download, or empty-file failures. Invoke it once per output image when using `--output-file`.
+
+The default endpoint is `https://antv-studio.alipay.com/api/gpt-vis`. Override it with `VIS_REQUEST_SERVER`; override the source marker with `VIS_REQUEST_SOURCE` and the 30-second timeout with `VIS_REQUEST_TIMEOUT_MS`. The default endpoint is suitable as a convenience service, but no public production SLA is part of this Skill. For sensitive data or availability guarantees, configure an approved compatible endpoint or a local renderer. Map operations may additionally require `SERVICE_ID` from the selected backend.
 
 ## Comparison dashboard renderer
 
