@@ -157,8 +157,6 @@ class SQLiteCheckpointSaverTest {
                     new LoopConfig(3, 2, 30_000, null),
                     runConfig,
                     agentRequest,
-                    "You are helpful assistant",
-                    "call tool list_workspace_files please",
                     new AtomicInteger(0),
                     null,
                     List.of(),

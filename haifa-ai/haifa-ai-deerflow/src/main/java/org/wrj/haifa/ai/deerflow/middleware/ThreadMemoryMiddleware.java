@@ -17,6 +17,7 @@ import reactor.core.publisher.Mono;
 
 @Component
 @MiddlewareOrder(20)
+@MiddlewareLifecycle(MiddlewarePhase.MODEL_INPUT)
 public class ThreadMemoryMiddleware implements AgentMiddleware {
 
     private final ResearchPlanStore planStore;

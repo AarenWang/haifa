@@ -29,6 +29,8 @@ import org.wrj.haifa.ai.deerflow.tool.MockFetchTool;
 import org.wrj.haifa.ai.deerflow.tool.MockSearchTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
+import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
+import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -647,6 +649,60 @@ class AgentLoopTest {
                     assertThat(e.metadata()).containsEntry("denied", true);
                     assertThat(e.content()).contains("Tool denied by policy");
                 });
+    }
+
+    @Test
+    void clarificationToolSuspendsRunWithoutEmittingToolCompletion() {
+        AgentModelClient model = prompt -> Mono.just(new ModelResponse("", List.of(
+                new ModelToolCall("call-clarify", "ask_clarification", "{}"))));
+        AgentTool clarificationTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "ask_clarification";
+            }
+
+            @Override
+            public String description() {
+                return "Ask the user for missing information";
+            }
+
+            @Override
+            public boolean supports(String userMessage) {
+                return true;
+            }
+
+            @Override
+            public ToolResult execute(ToolRequest request) {
+                return ToolResult.of(name(), "Question: Which environment?", Map.of(
+                        "clarificationRequired", true,
+                        "question", "Which environment?",
+                        "clarificationId", "clarification-1",
+                        "clarificationType", "missing_info",
+                        "options", List.of("test", "production"),
+                        "questions", List.of()));
+            }
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(clarificationTool)));
+        AgentRunConfig config = new AgentRunConfig(
+                "thread-clarify", "run-clarify", "test-model", false, false,
+                2, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT, null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                LoopConfig.fromDefaults(), config, "You are an assistant.", "Deploy it",
+                new AtomicInteger(), null, List.of(), List.of()).collectList().block();
+
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.TOOL_CALL_REQUESTED,
+                        AgentEventType.TOOL_STARTED,
+                        AgentEventType.CLARIFICATION_REQUIRED,
+                        AgentEventType.RUN_SUSPENDED)
+                .doesNotContain(AgentEventType.TOOL_COMPLETED, AgentEventType.RUN_COMPLETED);
+        assertThat(events).filteredOn(event -> event.type() == AgentEventType.RUN_SUSPENDED)
+                .singleElement()
+                .satisfies(event -> assertThat(event.metadata())
+                        .containsEntry("clarificationId", "clarification-1")
+                        .containsEntry("resumeRunId", "run-clarify"));
     }
 }
 

@@ -64,8 +64,6 @@ class GraphCheckpointRecorderTest {
                         new LoopConfig(2, 2, 30_000, null),
                         runConfig,
                         agentRequest,
-                        "system",
-                        "user",
                         new AtomicInteger(),
                         null,
                         List.of(),

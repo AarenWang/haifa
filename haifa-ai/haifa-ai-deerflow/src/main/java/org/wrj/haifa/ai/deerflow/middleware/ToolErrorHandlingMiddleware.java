@@ -8,6 +8,7 @@ import reactor.core.publisher.Mono;
 
 @Component
 @MiddlewareOrder(30)
+@MiddlewareLifecycle(MiddlewarePhase.TOOL_RESULT)
 public class ToolErrorHandlingMiddleware implements AgentMiddleware {
 
     @Override

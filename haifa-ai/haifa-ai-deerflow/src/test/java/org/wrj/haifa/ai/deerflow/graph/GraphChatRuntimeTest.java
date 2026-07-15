@@ -13,6 +13,8 @@ import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
 import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
+import org.wrj.haifa.ai.deerflow.model.ModelMessage;
+import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
@@ -25,6 +27,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,8 +86,6 @@ class GraphChatRuntimeTest {
                 new LoopConfig(3, 2, 30_000, null),
                 runConfig,
                 agentRequest,
-                "You are chat assistant",
-                "hello deerflow graph",
                 new AtomicInteger(0),
                 null,
                 List.of(),
@@ -132,10 +133,16 @@ class GraphChatRuntimeTest {
         );
         AgentRequest agentRequest = new AgentRequest(threadId, "call unknown_tool", "zhipu");
 
-        when(modelClient.generate(any()))
-                .thenReturn(
-                        Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-unknown-tool", "unknown_tool", "{}")))),
-                        Mono.just(new ModelResponse("Tool unknown_tool was not found.")));
+        List<ModelPrompt> observedPrompts = new CopyOnWriteArrayList<>();
+        AtomicInteger modelCalls = new AtomicInteger();
+        when(modelClient.generate(any())).thenAnswer(invocation -> {
+            observedPrompts.add(invocation.getArgument(0));
+            if (modelCalls.getAndIncrement() == 0) {
+                return Mono.just(new ModelResponse("",
+                        List.of(new ModelToolCall("call-unknown-tool", "unknown_tool", "{}"))));
+            }
+            return Mono.just(new ModelResponse("Tool unknown_tool was not found."));
+        });
 
         AgentLoop loop = new AgentLoop(
                 prompt -> Mono.just(new ModelResponse("Tool unknown_tool was not found.")),
@@ -144,7 +151,7 @@ class GraphChatRuntimeTest {
 
         GraphChatRuntimeRequest request = new GraphChatRuntimeRequest(
                 loop, new LoopConfig(3, 2, 30_000, null),
-                runConfig, agentRequest, "You are chat assistant", "call unknown_tool",
+                runConfig, agentRequest,
                 new AtomicInteger(0), null, List.of(), List.of(), List.of()
         );
 
@@ -156,5 +163,22 @@ class GraphChatRuntimeTest {
             assertThat(e.metadata().get("status")).isEqualTo("NOT_FOUND");
         });
         assertThat(events).anySatisfy(e -> assertThat(e.type()).isEqualTo(AgentEventType.RUN_COMPLETED));
+
+        List<ModelPrompt> graphPrompts = observedPrompts.stream()
+                .filter(prompt -> prompt.systemPrompt().contains("[Dynamic context]"))
+                .toList();
+        assertThat(graphPrompts).hasSize(2);
+        assertThat(graphPrompts)
+                .allSatisfy(prompt -> assertThat(count(prompt.systemPrompt(), "[Dynamic context]")).isEqualTo(1));
+        assertThat(graphPrompts.get(1).messages())
+                .anySatisfy(message -> {
+                    assertThat(message.role()).isEqualTo(ModelMessage.Role.TOOL);
+                    assertThat(message.name()).isEqualTo("unknown_tool");
+                    assertThat(message.content()).contains("not found");
+                });
+    }
+
+    private static int count(String value, String token) {
+        return value.split(java.util.regex.Pattern.quote(token), -1).length - 1;
     }
 }

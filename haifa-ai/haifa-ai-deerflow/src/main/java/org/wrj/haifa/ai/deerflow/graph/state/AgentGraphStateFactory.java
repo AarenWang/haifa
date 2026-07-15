@@ -57,6 +57,9 @@ public class AgentGraphStateFactory {
         state.put(AgentGraphStateKeys.UPLOADED_FILE_IDS, List.copyOf(request.uploadedFileIds()));
         state.put(AgentGraphStateKeys.REQUEST_METADATA, Map.copyOf(request.metadata()));
         state.put(AgentGraphStateKeys.MESSAGE_WINDOW, messageWindow(threadHistory));
+        state.put(AgentGraphStateKeys.RUN_PROMPT_BASE, Map.of());
+        state.put(AgentGraphStateKeys.RUN_PREPARED, false);
+        state.put(AgentGraphStateKeys.PROMPT_REVISION, 0);
         state.put(AgentGraphStateKeys.MODEL_PROMPT, modelPrompt(prompt));
         state.put(AgentGraphStateKeys.MODEL_STEPS, List.of());
         state.put(AgentGraphStateKeys.TOOL_CALLS, List.of());

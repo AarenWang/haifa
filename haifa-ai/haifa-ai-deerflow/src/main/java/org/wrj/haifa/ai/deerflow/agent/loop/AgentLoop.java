@@ -116,6 +116,7 @@ public class AgentLoop {
     public AgentLoopObserver observer() {
         return this.observer;
     }
+
     public Flux<AgentEvent> run(
             LoopConfig config,
             AgentRunConfig runConfig,
@@ -126,7 +127,22 @@ public class AgentLoop {
             List<Skill> activeSkills,
             List<String> uploadedFileIds) {
         return Flux.<AgentEvent>create(sink -> {
-            try {
+            executeRun(config, runConfig, systemPrompt, userMessage, seq, toolPolicy,
+                    activeSkills, uploadedFileIds, sink);
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private void executeRun(
+            LoopConfig config,
+            AgentRunConfig runConfig,
+            String systemPrompt,
+            String userMessage,
+            AtomicInteger seq,
+            ToolPolicyService toolPolicy,
+            List<Skill> activeSkills,
+            List<String> uploadedFileIds,
+            FluxSink<AgentEvent> sink) {
+        try {
             long loopStartTime = System.currentTimeMillis();
             List<String> history = new ArrayList<>();
             history.add("User: " + userMessage);
@@ -139,156 +155,13 @@ public class AgentLoop {
 
             List<AgentEvent> events = new ArrayList<>();
             EventEmitter emitter = new EventEmitter(events, sink);
-            int totalToolCalls = 0;
+            int totalToolCalls = resumeFromApprovalIfPresent(
+                    runConfig, seq, activeSkills, uploadedFileIds, history, typedHistory, emitter);
 
-            // Check if resumed from approval
-            if (runConfig.metadata() != null && runConfig.metadata().containsKey("approvalId") && approvalStore != null && approvalPolicyService != null) {
-                String approvalId = (String) runConfig.metadata().get("approvalId");
-                Optional<ApprovalRequestRecord> appOpt = approvalStore.find(approvalId);
-                if (appOpt.isPresent()) {
-                    ApprovalRequestRecord appRecord = appOpt.get();
-                    history.add("Assistant requested tool " + appRecord.toolName() + " with id " + appRecord.toolCallId());
-                    typedHistory.add(new ModelMessage(
-                            ModelMessage.Role.ASSISTANT,
-                            "",
-                            List.of(new ModelToolCall(appRecord.toolCallId(), appRecord.toolName(), appRecord.argsJson())),
-                            null,
-                            null,
-                            Map.of("resumedApproval", true)));
-                    
-                    // Auto-expire pending approvals that have passed their expiration time
-                    if (appRecord.status() == ApprovalStatus.PENDING && appRecord.expiresAt() != null && Instant.now().isAfter(appRecord.expiresAt())) {
-                        appRecord = approvalStore.markExpired(approvalId);
-                    }
-                    
-                    // Verify the status
-                    if (appRecord.status() == ApprovalStatus.APPROVED) {
-                        // Re-verify hash!
-                        String calculatedHash = approvalPolicyService.hashArgs(appRecord.toolName(), appRecord.argsJson());
-                        if (appRecord.argsHash().equals(calculatedHash)) {
-                            // Mark as EXECUTED
-                            approvalStore.markExecuted(approvalId);
-
-                            // Execute the tool call
-                            long toolStartTime = System.currentTimeMillis();
-                            ToolCall toolCall = ToolCall.of(appRecord.toolCallId(), appRecord.toolName(), appRecord.argsJson());
-                            
-                            // Emit start event
-                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
-                                    "Executing " + appRecord.toolName() + " (Approved)",
-                                    Map.of("toolCallId", appRecord.toolCallId(), "toolName", appRecord.toolName())));
-                            
-                            ToolCallResult rawToolResult;
-                            try {
-                                rawToolResult = executeTool(toolCall, runConfig, uploadedFileIds, activeSkills);
-                            } catch (Exception ex) {
-                                long duration = System.currentTimeMillis() - toolStartTime;
-                                rawToolResult = ToolCallResult.fromError(toolCall, "Tool failed: " + ex.getMessage(), duration);
-                            }
-                            
-                            long toolDuration = rawToolResult.durationMs();
-                            
-                            // Persist result
-                            if (toolCallStore != null) {
-                                try {
-                                    toolCallStore.saveResult(toolCall.id(), rawToolResult);
-                                } catch (Exception e) {
-                                    log.warn("Failed to persist tool call result: {}", e.getMessage());
-                                }
-                            }
-                            
-                            // Compress output
-                            String compressedResult = rawToolResult.result();
-                            if (toolOutputBudgetMiddleware != null && rawToolResult.status() == ToolCallResult.Status.SUCCESS) {
-                                String processed = toolOutputBudgetMiddleware.processToolOutput(
-                                        toolCall.toolName(), rawToolResult.result(), runConfig.threadId(), runConfig.runId(), null, null, null);
-                                if (processed != null && processed.length() < rawToolResult.result().length()) {
-                                    compressedResult = processed;
-                                    emitter.emit(event(seq, runConfig, AgentEventType.TOOL_OUTPUT_BUDGET_EXCEEDED,
-                                            "Tool output budget exceeded for: " + toolCall.toolName() + ". Compressed.",
-                                            Map.of("toolName", toolCall.toolName(), "compressed", true)));
-                                }
-                            }
-                            
-                            String eventContent = compressedResult;
-                            if (rawToolResult.status() == ToolCallResult.Status.FAILED && rawToolResult.error() != null) {
-                                eventContent = rawToolResult.error();
-                            }
-                            
-                            Map<String, Object> completionMetadata = new HashMap<>(rawToolResult.metadata());
-                            completionMetadata.put("toolCallId", toolCall.id());
-                            completionMetadata.put("toolName", toolCall.toolName());
-                            completionMetadata.put("status", rawToolResult.status().name());
-                            completionMetadata.put("durationMs", toolDuration);
-                            completionMetadata.put("error", rawToolResult.error() != null ? rawToolResult.error() : "");
-                            
-                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
-                                    eventContent,
-                                    completionMetadata));
-                            
-                            // Append tool result to history
-                            history.add("Tool result (" + appRecord.toolName() + "): " + compressedResult);
-                            typedHistory.add(toolMessage(toolCall.id(), appRecord.toolName(), compressedResult,
-                                    rawToolResult.status().name(), rawToolResult.metadata()));
-                            totalToolCalls++;
-                            
-                            emitter.flush();
-                        } else {
-                            // INVALIDATED due to args hash mismatch!
-                            approvalStore.markInvalidated(approvalId, "Args hash mismatch: expected " + appRecord.argsHash() + " but got " + calculatedHash);
-                            history.add("Tool result (" + appRecord.toolName() + "): Error: args hash mismatch. Tool call parameter modification detected.");
-                            typedHistory.add(toolMessage(appRecord.toolCallId(), appRecord.toolName(),
-                                    "Error: args hash mismatch. Tool call parameter modification detected.",
-                                    "FAILED", Map.of("approvalInvalidated", true)));
-                        }
-                    } else {
-                        // DENIED, EXPIRED, CANCELLED etc.
-                        String denMsg = "APPROVAL_DENIED: This action was not executed. Do not retry this action, rephrase it, switch tools, or bypass the user's decision.";
-                        if (appRecord.status() == ApprovalStatus.EXPIRED) {
-                            denMsg = "APPROVAL_EXPIRED: This action was not executed. Do not retry this action, rephrase it, switch tools, or bypass the user's decision.";
-                            emitter.emit(event(seq, runConfig, AgentEventType.APPROVAL_EXPIRED,
-                                    "Approval expired for " + appRecord.toolName(),
-                                    Map.of(
-                                            "approvalId", appRecord.approvalId(),
-                                            "toolCallId", appRecord.toolCallId(),
-                                            "toolName", appRecord.toolName(),
-                                            "reason", "Approval timeout"
-                                    )));
-                        }
-                        
-                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
-                                "Policy denied " + appRecord.toolName() + " (" + appRecord.status() + ")",
-                                Map.of("toolCallId", appRecord.toolCallId(), "toolName", appRecord.toolName(), "denied", true)));
-                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
-                                denMsg,
-                                Map.of("toolCallId", appRecord.toolCallId(), "toolName", appRecord.toolName(),
-                                        "status", "DENIED", "denied", true, "reason", appRecord.status().name())));
-                        
-                        history.add("Tool result (" + appRecord.toolName() + "): " + denMsg);
-                        typedHistory.add(toolMessage(appRecord.toolCallId(), appRecord.toolName(), denMsg,
-                                appRecord.status().name(), Map.of("denied", true)));
-                        emitter.flush();
-                    }
-                }
-            }
-
-            StringBuilder toolDescriptions = new StringBuilder();
-            List<ModelToolDefinition> toolDefinitions = new ArrayList<>();
-            for (AgentTool tool : toolRegistry.tools()) {
-                String toolName = tool.name();
-                if (toolPolicy != null && !toolPolicy.evaluateTool(toolName, activeSkills, runConfig.mode()).allowed()) {
-                    continue;
-                }
-                toolDescriptions.append("- ").append(toolName).append(": ").append(tool.description()).append("\n");
-                toolDefinitions.add(new ModelToolDefinition(toolName, tool.description(), tool.inputSchema()));
-            }
-
-            String promptReinforcement = "\nIf a user asks for information that can be measured from the local runtime or workspace, and a sandbox execution tool is available, do not claim you lack access. Use the smallest appropriate script, inspect the tool result, then answer from observed output. If the tool is disabled or denied, explain the configuration limitation.";
-            String fullSystemPrompt = systemPrompt + "\n\nAvailable tools:\n" + toolDescriptions
-                    + "\nWhen you need to use a tool, use the model provider's structured tool-call channel. "
-                    + "Do not write tool calls manually as XML, JSON blocks, or prose.\n"
-                    + "When no further tool call is needed, respond with the final answer directly in normal assistant text."
-                    + promptReinforcement;
+            ToolEnvironment toolEnvironment = buildToolEnvironment(
+                    systemPrompt, toolPolicy, activeSkills, runConfig.mode());
+            String fullSystemPrompt = toolEnvironment.systemPrompt();
+            List<ModelToolDefinition> toolDefinitions = toolEnvironment.toolDefinitions();
 
             boolean stopped = false;
             String stopReason = null;
@@ -349,42 +222,7 @@ public class AgentLoop {
                 }
                 ModelResponse modelResponse;
                 try {
-                    StringBuilder fullContent = new StringBuilder();
-                    List<ModelToolCall> accumulatedToolCalls = new ArrayList<>();
-                    java.util.concurrent.atomic.AtomicReference<String> finishReasonRef = new java.util.concurrent.atomic.AtomicReference<>();
-
-                    final int currentStep = step;
-                    reactor.core.publisher.Flux<ModelResponse> stream = this.modelClient.streamGenerate(prompt);
-                    if (stream == null) {
-                        stream = this.modelClient.generate(prompt).flux();
-                    }
-                    stream
-                            .doOnNext(response -> {
-                                String chunk = response.content();
-                                if (chunk != null && !chunk.isEmpty()) {
-                                    fullContent.append(chunk);
-                                    emitter.emit(event(seq, runConfig, AgentEventType.MODEL_DELTA,
-                                            chunk,
-                                            Map.of("step", currentStep + 1)
-                                    ));
-                                }
-                                if (response.toolCalls() != null && !response.toolCalls().isEmpty()) {
-                                    accumulatedToolCalls.addAll(response.toolCalls());
-                                }
-                                if (response.finishReason() != null) {
-                                    finishReasonRef.set(response.finishReason());
-                                }
-                            })
-                            .then()
-                            .block();
-
-                    modelResponse = new ModelResponse(
-                            fullContent.toString(),
-                            accumulatedToolCalls,
-                            List.of(),
-                            finishReasonRef.get(),
-                            Map.of()
-                    );
+                    modelResponse = invokeModel(prompt, step, seq, runConfig, emitter);
                 } catch (Exception ex) {
                     log.error("Model call failed at step {}. runId={}", step, runConfig.runId(), ex);
                     stopReason = "ERROR";
@@ -484,335 +322,21 @@ public class AgentLoop {
                 }
 
                 if (loopToolCalls.isEmpty()) {
-                    if (responseContent.isBlank()) {
-                        history.add("System: The model returned no tool call and no assistant content. Continue with either a structured tool call or a normal final answer.");
-                        typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM,
-                                "The model returned no tool call and no assistant content. Continue with either a structured tool call or a normal final answer.",
-                                Map.of("emptyModelResponse", true)));
+                    NoToolAction action = handleResponseWithoutTools(runConfig, seq, history, typedHistory,
+                            events, emitter, responseContent, step + 1, totalToolCalls, modelDuration);
+                    if (action == NoToolAction.CONTINUE) {
                         continue;
-                    }
-                    if (looksLikeProgressPlaceholder(responseContent)) {
-                        String instruction = "Do not stop on progress placeholder text. Continue with the needed structured tool call or provide the actual final answer.";
-                        history.add("System: " + instruction);
-                        typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM, instruction,
-                                Map.of("progressPlaceholderRejected", true)));
-                        continue;
-                    }
-                    int historySizeBeforeContinueCheck = history.size();
-                    boolean continueAfterNoTools = observer.shouldContinue(
-                            runConfig, responseContent, events, seq, step + 1, totalToolCalls, history);
-                    appendNewHistoryEntriesToTypedHistory(history, historySizeBeforeContinueCheck, typedHistory,
-                            Map.of("observer", "shouldContinue"));
-                    emitter.flush();
-                    if (continueAfterNoTools) {
-                        continue;
-                    }
-                    stopReason = runConfig.mode() == RunMode.CHAT ? "ASSISTANT_COMPLETED" : "NO_TOOL_CALLS";
-                    FinalAnswerDecision decision = observer.onFinalAnswerProposed(
-                            runConfig, responseContent, events, seq, step + 1, totalToolCalls);
-                    emitter.flush();
-                    if (!decision.accepted()) {
-                        emitFinalAnswerRejected(seq, runConfig, emitter, history, decision, step + 1, totalToolCalls);
-                        typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM, retryInstruction(decision),
-                                Map.of("todoGateBlocked", true)));
-                        continue;
-                    }
-                    FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
-                            runConfig, decision.answer(), events, seq, step + 1, totalToolCalls);
-                    emitter.flush();
-
-                    java.util.Map<String, Object> metadata = new java.util.HashMap<>();
-                    metadata.put("step", step + 1);
-                    metadata.put("modelDurationMs", modelDuration);
-                    metadata.put("stopReason", stopReason);
-                    if (finalResult.extraMetadata() != null) {
-                        metadata.putAll(finalResult.extraMetadata());
-                    }
-
-                    emitter.emit(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
-                            finalResult.finalAnswer(),
-                            metadata));
-                    emitter.emit(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
-                            "Run completed",
-                            Map.of("stopReason", stopReason, "steps", step + 1, "totalToolCalls", totalToolCalls)));
-                    if (agentLoopRunStore != null) {
-                        agentLoopRunStore.markCompleted(runConfig.runId(), stopReason);
                     }
                     stopped = true;
                     break;
                 }
 
-                // Execute tool calls. Calls from the same model response are independent, so
-                // launch them together and merge observations back in the original order.
-                List<PendingToolExecution> pendingExecutions = new ArrayList<>();
-                for (ToolCall toolCall : loopToolCalls) {
-                    totalToolCalls++;
-                    if (totalToolCalls > config.maxToolCalls()) {
-                        break;
-                    }
-
-                    emitter.emit(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
-                            "Tool call requested: " + toolCall.toolName(),
-                            Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(), "arguments", toolCall.arguments())));
-
-                    // Persist tool call request
-                    if (toolCallStore != null) {
-                        try {
-                            toolCallStore.saveRequested(toolCall, runConfig.runId(), runConfig.threadId());
-                        } catch (Exception e) {
-                            log.warn("Failed to persist tool call request: {}", e.getMessage());
-                        }
-                    }
-
-                    // Resolve normalized target tool name
-                    AgentTool targetTool = findTool(toolCall.toolName());
-                    String targetToolName = targetTool != null ? targetTool.name() : toolCall.toolName();
-
-                    // Policy check
-                    ToolPolicyDecision toolDecision = toolPolicy == null
-                            ? ToolPolicyDecision.allow()
-                            : toolPolicy.evaluateTool(targetToolName, activeSkills, runConfig.mode());
-                    if (!toolDecision.allowed()) {
-                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
-                                "Policy denied " + targetToolName,
-                                Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
-                        String deniedMessage = "Tool denied by policy: " + toolDecision.reason();
-                        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
-                                deniedMessage,
-                                Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
-                                        "status", "DENIED", "denied", true, "reason", toolDecision.reason())));
-                        history.add("Tool result (" + targetToolName + "): " + deniedMessage);
-                        typedHistory.add(toolMessage(toolCall.id(), targetToolName, deniedMessage,
-                                "DENIED", Map.of("denied", true, "reason", toolDecision.reason())));
-                        continue;
-                    }
-
-                    // Approval Policy check
-                    if (approvalPolicyService != null && approvalStore != null) {
-                        ModelToolCall modelToolCall = new ModelToolCall(toolCall.id(), targetToolName, toolCall.arguments());
-                        ApprovalPolicyDecision approvalDecision = approvalPolicyService.evaluate(modelToolCall, targetTool, runConfig);
-                        
-                        if (approvalDecision.type() == ApprovalPolicyDecisionType.DENY) {
-                            String denMsg = "POLICY_BLOCKED: " + approvalDecision.reason() + ". This action was not executed. Do not retry this action, rephrase it, switch tools, or bypass the user's decision.";
-                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
-                                    "Policy denied " + targetToolName + ": " + approvalDecision.reason(),
-                                    Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
-                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
-                                    denMsg,
-                                    Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
-                                            "status", "DENIED", "denied", true,
-                                            "reason", approvalDecision.reason() == null ? "" : approvalDecision.reason())));
-                            history.add("Tool result (" + targetToolName + "): " + denMsg);
-                            Map<String, Object> deniedMetadata = new HashMap<>();
-                            deniedMetadata.put("denied", true);
-                            deniedMetadata.put("reason", approvalDecision.reason() == null ? "" : approvalDecision.reason());
-                            typedHistory.add(toolMessage(toolCall.id(), targetToolName, denMsg,
-                                    "DENIED", deniedMetadata));
-                            continue;
-                        }
-                        
-                        if (approvalDecision.type() == ApprovalPolicyDecisionType.REQUIRE_APPROVAL) {
-                            String calculatedHash = approvalPolicyService.hashArgs(targetToolName, toolCall.arguments());
-                            ApprovalCreateRequest createReq = new ApprovalCreateRequest(
-                                    runConfig.runId(),
-                                    runConfig.threadId(),
-                                    toolCall.id(),
-                                    targetToolName,
-                                    toolCall.arguments(),
-                                    calculatedHash,
-                                    approvalDecision.riskKey(),
-                                    approvalDecision.riskLevel(),
-                                    approvalDecision.reason(),
-                                    "",
-                                    approvalDecision.preview(),
-                                    approvalDecision.metadata()
-                            );
-                            
-                            // Try to extract purpose from arguments
-                            try {
-                                JsonNode node = objectMapper.readTree(toolCall.arguments());
-                                if (node.has("purpose")) {
-                                    createReq = new ApprovalCreateRequest(
-                                            runConfig.runId(),
-                                            runConfig.threadId(),
-                                            toolCall.id(),
-                                            targetToolName,
-                                            toolCall.arguments(),
-                                            calculatedHash,
-                                            approvalDecision.riskKey(),
-                                            approvalDecision.riskLevel(),
-                                            approvalDecision.reason(),
-                                            node.get("purpose").asText(),
-                                            approvalDecision.preview(),
-                                            approvalDecision.metadata()
-                                    );
-                                }
-                            } catch (Exception e) {}
-                            
-                            ApprovalRequestRecord record = approvalStore.create(createReq);
-                            
-                            // Emit APPROVAL_REQUIRED event
-                            emitter.emit(event(seq, runConfig, AgentEventType.APPROVAL_REQUIRED,
-                                    "Approval required: " + record.reason(),
-                                    Map.of(
-                                            "approvalId", record.approvalId(),
-                                            "toolCallId", record.toolCallId(),
-                                            "toolName", record.toolName(),
-                                            "riskLevel", record.riskLevel().name(),
-                                            "reason", record.reason(),
-                                            "purpose", record.purpose(),
-                                            "preview", record.preview(),
-                                            "argsHash", record.argsHash(),
-                                            "expiresAt", record.expiresAt().toString()
-                                    )));
-                            
-                            // Emit RUN_SUSPENDED event
-                            emitter.emit(event(seq, runConfig, AgentEventType.RUN_SUSPENDED,
-                                    "Run suspended waiting for human approval.",
-                                    Map.of(
-                                            "suspendReason", "APPROVAL_REQUIRED",
-                                            "approvalId", record.approvalId(),
-                                            "resumeThreadId", runConfig.threadId(),
-                                            "resumeRunId", runConfig.runId()
-                                    )));
-                            
-                            if (agentLoopRunStore != null) {
-                                agentLoopRunStore.markSuspended(runConfig.runId(), "APPROVAL_REQUIRED");
-                            }
-                            
-                            stopped = true;
-                            break;
-                        }
-                    }
-
-                    long toolStartTime = System.currentTimeMillis();
-                    emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
-                            "Executing " + targetToolName,
-                            Map.of("toolCallId", toolCall.id(), "toolName", targetToolName)));
-
-                    if ("task".equals(targetToolName)) {
-                        emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_STARTED,
-                                "Subagent task started",
-                                Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
-                                        "arguments", toolCall.arguments())));
-                    }
-
-                    CompletableFuture<ToolCallResult> future = CompletableFuture.supplyAsync(
-                            () -> executeTool(toolCall, runConfig, uploadedFileIds, activeSkills));
-                    pendingExecutions.add(new PendingToolExecution(toolCall, targetToolName, toolStartTime, future));
-                }
-
-                for (PendingToolExecution pending : pendingExecutions) {
-                    ToolCall toolCall = pending.toolCall();
-                    ToolCallResult rawToolResult;
-                    try {
-                        rawToolResult = pending.resultFuture().join();
-                    } catch (RuntimeException ex) {
-                        long duration = System.currentTimeMillis() - pending.startedAtMs();
-                        rawToolResult = ToolCallResult.fromError(toolCall,
-                                "Tool failed: " + ex.getMessage(), duration);
-                    }
-                    long toolDuration = rawToolResult.durationMs();
-
-                    // --- Intercept ask_clarification and suspend the run ---
-                    if (rawToolResult.metadata() != null && Boolean.TRUE.equals(rawToolResult.metadata().get("clarificationRequired"))) {
-                        String question = (String) rawToolResult.metadata().get("question");
-                        String clarificationId = (String) rawToolResult.metadata().get("clarificationId");
-                        String type = (String) rawToolResult.metadata().getOrDefault("clarificationType", "missing_info");
-                        Object options = rawToolResult.metadata().getOrDefault("options", java.util.List.of());
-                        Object questions = rawToolResult.metadata().getOrDefault("questions", java.util.List.of());
-
-                        Map<String, Object> clarificationMetadata = new HashMap<>();
-                        clarificationMetadata.put("question", question);
-                        clarificationMetadata.put("clarificationType", type);
-                        clarificationMetadata.put("clarificationId", clarificationId);
-                        clarificationMetadata.put("resumeThreadId", runConfig.threadId());
-                        clarificationMetadata.put("resumeRunId", runConfig.runId());
-                        clarificationMetadata.put("options", options);
-                        clarificationMetadata.put("questions", questions);
-
-                        emitter.emit(event(seq, runConfig, AgentEventType.CLARIFICATION_REQUIRED,
-                                "Clarification required: " + question,
-                                clarificationMetadata));
-                        emitter.emit(event(seq, runConfig, AgentEventType.RUN_SUSPENDED,
-                                "Run suspended waiting for user clarification.",
-                                clarificationMetadata));
-                        if (agentLoopRunStore != null) {
-                            agentLoopRunStore.markSuspended(runConfig.runId(), "CLARIFICATION_REQUIRED");
-                        }
-                        stopped = true;
-                        break;
-                    }
-
-
-                    // Persist raw tool call result for audit/debug
-                    if (toolCallStore != null) {
-                        try {
-                            toolCallStore.saveResult(toolCall.id(), rawToolResult);
-                        } catch (Exception e) {
-                            log.warn("Failed to persist tool call result: {}", e.getMessage());
-                        }
-                    }
-
-                    emitTodoMutationEventIfNeeded(seq, runConfig, emitter, pending, rawToolResult);
-
-                    // Add raw history entry for observer source/evidence processing
-                    history.add("Tool result (" + toolCall.toolName() + "): " + rawToolResult.result());
-
-                    // Observer processes source/evidence (uses raw toolResult, does NOT compress)
-                    int historySizeBeforeObserver = history.size();
-                    String observation = observer.onToolCompleted(runConfig, toolCall, rawToolResult, events, seq, history);
-                    emitter.flush();
-                    if (observation != null && !observation.isBlank()) {
-                        history.add(observation);
-                    }
-                    appendNewHistoryEntriesToTypedHistory(history, historySizeBeforeObserver, typedHistory,
-                            Map.of("observer", "onToolCompleted", "tool", pending.targetToolName()));
-
-                    // Compress tool output BEFORE emitting TOOL_COMPLETED event and MessageStore persistence
-                    String compressedResult = rawToolResult.result();
-                    if (toolOutputBudgetMiddleware != null && rawToolResult.status() == ToolCallResult.Status.SUCCESS) {
-                        String processed = toolOutputBudgetMiddleware.processToolOutput(
-                                toolCall.toolName(), rawToolResult.result(), runConfig.threadId(), runConfig.runId(), null, null, null);
-                        if (processed != null && processed.length() < rawToolResult.result().length()) {
-                            compressedResult = processed;
-                            int lastIdx = history.size() - 1;
-                            if (lastIdx >= 0 && history.get(lastIdx).startsWith("Tool result (" + toolCall.toolName() + "): ")) {
-                                history.set(lastIdx, "Tool result (" + toolCall.toolName() + "): " + compressedResult);
-                            }
-                            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_OUTPUT_BUDGET_EXCEEDED,
-                                    "Tool output budget exceeded for: " + toolCall.toolName() + ". Compressed.",
-                                    Map.of("toolName", toolCall.toolName(), "compressed", true)));
-                        }
-                    }
-
-                    // Emit TOOL_COMPLETED event with compressed content (ensures MessageStore/toolExecutionStore also see compressed)
-                    String eventContent = compressedResult;
-                    if (rawToolResult.status() == ToolCallResult.Status.FAILED && rawToolResult.error() != null) {
-                        eventContent = rawToolResult.error();
-                    }
-
-                    Map<String, Object> completionMetadata = new HashMap<>(rawToolResult.metadata());
-                    completionMetadata.put("toolCallId", toolCall.id());
-                    completionMetadata.put("toolName", toolCall.toolName());
-                    completionMetadata.put("status", rawToolResult.status().name());
-                    completionMetadata.put("durationMs", toolDuration);
-                    completionMetadata.put("error", rawToolResult.error() != null ? rawToolResult.error() : "");
-
-                    if ("task".equals(pending.targetToolName())) {
-                        Object subagentStatus = completionMetadata.getOrDefault("subagentStatus", rawToolResult.status().name());
-                        emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_COMPLETED,
-                                "COMPLETED".equals(subagentStatus) || "SUCCESS".equals(subagentStatus)
-                                        ? "Subagent task completed"
-                                        : "Subagent task failed",
-                                completionMetadata));
-                    }
-
-                    emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
-                            eventContent,
-                            completionMetadata));
-                    typedHistory.add(toolMessage(toolCall.id(), pending.targetToolName(), eventContent,
-                            rawToolResult.status().name(), completionMetadata));
+                ToolBatchOutcome toolBatch = executeToolBatch(
+                        config, runConfig, seq, toolPolicy, activeSkills, uploadedFileIds,
+                        history, typedHistory, events, emitter, loopToolCalls, totalToolCalls);
+                totalToolCalls = toolBatch.totalToolCalls();
+                if (toolBatch.stopped()) {
+                    stopped = true;
                 }
 
                 if (stopped) {
@@ -855,10 +379,280 @@ public class AgentLoop {
             }
 
             sink.complete();
-            } catch (Exception ex) {
-                sink.error(ex);
+        } catch (Exception ex) {
+            sink.error(ex);
+        }
+    }
+
+    private NoToolAction handleResponseWithoutTools(AgentRunConfig runConfig, AtomicInteger seq,
+            List<String> history, List<ModelMessage> typedHistory, List<AgentEvent> events,
+            EventEmitter emitter, String responseContent, int step, int totalToolCalls,
+            long modelDuration) {
+        if (responseContent.isBlank()) {
+            String instruction = "The model returned no tool call and no assistant content. Continue with either a structured tool call or a normal final answer.";
+            history.add("System: " + instruction);
+            typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM, instruction,
+                    Map.of("emptyModelResponse", true)));
+            return NoToolAction.CONTINUE;
+        }
+        if (looksLikeProgressPlaceholder(responseContent)) {
+            String instruction = "Do not stop on progress placeholder text. Continue with the needed structured tool call or provide the actual final answer.";
+            history.add("System: " + instruction);
+            typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM, instruction,
+                    Map.of("progressPlaceholderRejected", true)));
+            return NoToolAction.CONTINUE;
+        }
+
+        int historySizeBeforeContinueCheck = history.size();
+        boolean shouldContinue = observer.shouldContinue(
+                runConfig, responseContent, events, seq, step, totalToolCalls, history);
+        appendNewHistoryEntriesToTypedHistory(history, historySizeBeforeContinueCheck, typedHistory,
+                Map.of("observer", "shouldContinue"));
+        emitter.flush();
+        if (shouldContinue) {
+            return NoToolAction.CONTINUE;
+        }
+
+        String stopReason = runConfig.mode() == RunMode.CHAT ? "ASSISTANT_COMPLETED" : "NO_TOOL_CALLS";
+        FinalAnswerDecision decision = observer.onFinalAnswerProposed(
+                runConfig, responseContent, events, seq, step, totalToolCalls);
+        emitter.flush();
+        if (!decision.accepted()) {
+            emitFinalAnswerRejected(seq, runConfig, emitter, history, decision, step, totalToolCalls);
+            typedHistory.add(new ModelMessage(ModelMessage.Role.SYSTEM, retryInstruction(decision),
+                    Map.of("todoGateBlocked", true)));
+            return NoToolAction.CONTINUE;
+        }
+
+        FinalAnswerResult finalResult = observer.onFinalAnswerAccepted(
+                runConfig, decision.answer(), events, seq, step, totalToolCalls);
+        emitter.flush();
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("step", step);
+        metadata.put("modelDurationMs", modelDuration);
+        metadata.put("stopReason", stopReason);
+        if (finalResult.extraMetadata() != null) {
+            metadata.putAll(finalResult.extraMetadata());
+        }
+
+        emitter.emit(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
+                finalResult.finalAnswer(), metadata));
+        emitter.emit(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
+                "Run completed",
+                Map.of("stopReason", stopReason, "steps", step, "totalToolCalls", totalToolCalls)));
+        if (agentLoopRunStore != null) {
+            agentLoopRunStore.markCompleted(runConfig.runId(), stopReason);
+        }
+        return NoToolAction.STOP;
+    }
+
+    private int resumeFromApprovalIfPresent(AgentRunConfig runConfig, AtomicInteger seq,
+            List<Skill> activeSkills, List<String> uploadedFileIds, List<String> history,
+            List<ModelMessage> typedHistory, EventEmitter emitter) {
+        if (runConfig.metadata() == null || !runConfig.metadata().containsKey("approvalId")
+                || approvalStore == null || approvalPolicyService == null) {
+            return 0;
+        }
+
+        String approvalId = (String) runConfig.metadata().get("approvalId");
+        Optional<ApprovalRequestRecord> approval = approvalStore.find(approvalId);
+        if (approval.isEmpty()) {
+            return 0;
+        }
+
+        ApprovalRequestRecord record = approval.get();
+        history.add("Assistant requested tool " + record.toolName() + " with id " + record.toolCallId());
+        typedHistory.add(new ModelMessage(
+                ModelMessage.Role.ASSISTANT,
+                "",
+                List.of(new ModelToolCall(record.toolCallId(), record.toolName(), record.argsJson())),
+                null,
+                null,
+                Map.of("resumedApproval", true)));
+
+        if (record.status() == ApprovalStatus.PENDING && record.expiresAt() != null
+                && Instant.now().isAfter(record.expiresAt())) {
+            record = approvalStore.markExpired(approvalId);
+        }
+
+        if (record.status() == ApprovalStatus.APPROVED) {
+            return resumeApprovedTool(approvalId, record, runConfig, seq, activeSkills,
+                    uploadedFileIds, history, typedHistory, emitter);
+        }
+
+        appendRejectedApproval(record, runConfig, seq, history, typedHistory, emitter);
+        return 0;
+    }
+
+    private int resumeApprovedTool(String approvalId, ApprovalRequestRecord record,
+            AgentRunConfig runConfig, AtomicInteger seq, List<Skill> activeSkills,
+            List<String> uploadedFileIds, List<String> history, List<ModelMessage> typedHistory,
+            EventEmitter emitter) {
+        String calculatedHash = approvalPolicyService.hashArgs(record.toolName(), record.argsJson());
+        if (!record.argsHash().equals(calculatedHash)) {
+            approvalStore.markInvalidated(approvalId,
+                    "Args hash mismatch: expected " + record.argsHash() + " but got " + calculatedHash);
+            String error = "Error: args hash mismatch. Tool call parameter modification detected.";
+            history.add("Tool result (" + record.toolName() + "): " + error);
+            typedHistory.add(toolMessage(record.toolCallId(), record.toolName(), error,
+                    "FAILED", Map.of("approvalInvalidated", true)));
+            return 0;
+        }
+
+        approvalStore.markExecuted(approvalId);
+        long toolStartTime = System.currentTimeMillis();
+        ToolCall toolCall = ToolCall.of(record.toolCallId(), record.toolName(), record.argsJson());
+        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                "Executing " + record.toolName() + " (Approved)",
+                Map.of("toolCallId", record.toolCallId(), "toolName", record.toolName())));
+
+        ToolCallResult rawToolResult;
+        try {
+            rawToolResult = executeTool(toolCall, runConfig, uploadedFileIds, activeSkills);
+        } catch (Exception ex) {
+            long duration = System.currentTimeMillis() - toolStartTime;
+            rawToolResult = ToolCallResult.fromError(toolCall, "Tool failed: " + ex.getMessage(), duration);
+        }
+
+        persistToolResult(toolCall, rawToolResult);
+        String compressedResult = compressToolResult(toolCall, rawToolResult, runConfig, seq, emitter);
+        Map<String, Object> completionMetadata = completionMetadata(toolCall, rawToolResult);
+        String eventContent = toolEventContent(rawToolResult, compressedResult);
+        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED, eventContent, completionMetadata));
+
+        history.add("Tool result (" + record.toolName() + "): " + compressedResult);
+        typedHistory.add(toolMessage(toolCall.id(), record.toolName(), compressedResult,
+                rawToolResult.status().name(), rawToolResult.metadata()));
+        emitter.flush();
+        return 1;
+    }
+
+    private void appendRejectedApproval(ApprovalRequestRecord record, AgentRunConfig runConfig,
+            AtomicInteger seq, List<String> history, List<ModelMessage> typedHistory, EventEmitter emitter) {
+        String deniedMessage = "APPROVAL_DENIED: This action was not executed. Do not retry this action, rephrase it, switch tools, or bypass the user's decision.";
+        if (record.status() == ApprovalStatus.EXPIRED) {
+            deniedMessage = "APPROVAL_EXPIRED: This action was not executed. Do not retry this action, rephrase it, switch tools, or bypass the user's decision.";
+            emitter.emit(event(seq, runConfig, AgentEventType.APPROVAL_EXPIRED,
+                    "Approval expired for " + record.toolName(),
+                    Map.of("approvalId", record.approvalId(), "toolCallId", record.toolCallId(),
+                            "toolName", record.toolName(), "reason", "Approval timeout")));
+        }
+
+        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                "Policy denied " + record.toolName() + " (" + record.status() + ")",
+                Map.of("toolCallId", record.toolCallId(), "toolName", record.toolName(), "denied", true)));
+        emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
+                deniedMessage,
+                Map.of("toolCallId", record.toolCallId(), "toolName", record.toolName(),
+                        "status", "DENIED", "denied", true, "reason", record.status().name())));
+        history.add("Tool result (" + record.toolName() + "): " + deniedMessage);
+        typedHistory.add(toolMessage(record.toolCallId(), record.toolName(), deniedMessage,
+                record.status().name(), Map.of("denied", true)));
+        emitter.flush();
+    }
+
+    private ModelResponse invokeModel(ModelPrompt prompt, int step, AtomicInteger seq,
+            AgentRunConfig runConfig, EventEmitter emitter) {
+        StringBuilder fullContent = new StringBuilder();
+        List<ModelToolCall> accumulatedToolCalls = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicReference<String> finishReasonRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+
+        Flux<ModelResponse> stream = this.modelClient.streamGenerate(prompt);
+        if (stream == null) {
+            stream = this.modelClient.generate(prompt).flux();
+        }
+        stream.doOnNext(response -> {
+            String chunk = response.content();
+            if (chunk != null && !chunk.isEmpty()) {
+                fullContent.append(chunk);
+                emitter.emit(event(seq, runConfig, AgentEventType.MODEL_DELTA,
+                        chunk, Map.of("step", step + 1)));
             }
-        }).subscribeOn(Schedulers.boundedElastic());
+            if (response.toolCalls() != null && !response.toolCalls().isEmpty()) {
+                accumulatedToolCalls.addAll(response.toolCalls());
+            }
+            if (response.finishReason() != null) {
+                finishReasonRef.set(response.finishReason());
+            }
+        }).then().block();
+
+        return new ModelResponse(
+                fullContent.toString(),
+                accumulatedToolCalls,
+                List.of(),
+                finishReasonRef.get(),
+                Map.of());
+    }
+
+    private ToolEnvironment buildToolEnvironment(String systemPrompt, ToolPolicyService toolPolicy,
+            List<Skill> activeSkills, RunMode runMode) {
+        StringBuilder toolDescriptions = new StringBuilder();
+        List<ModelToolDefinition> toolDefinitions = new ArrayList<>();
+        for (AgentTool tool : toolRegistry.tools()) {
+            String toolName = tool.name();
+            if (toolPolicy != null && !toolPolicy.evaluateTool(toolName, activeSkills, runMode).allowed()) {
+                continue;
+            }
+            toolDescriptions.append("- ").append(toolName).append(": ")
+                    .append(tool.description()).append("\n");
+            toolDefinitions.add(new ModelToolDefinition(toolName, tool.description(), tool.inputSchema()));
+        }
+
+        String promptReinforcement = "\nIf a user asks for information that can be measured from the local runtime or workspace, and a sandbox execution tool is available, do not claim you lack access. Use the smallest appropriate script, inspect the tool result, then answer from observed output. If the tool is disabled or denied, explain the configuration limitation.";
+        String fullSystemPrompt = systemPrompt + "\n\nAvailable tools:\n" + toolDescriptions
+                + "\nWhen you need to use a tool, use the model provider's structured tool-call channel. "
+                + "Do not write tool calls manually as XML, JSON blocks, or prose.\n"
+                + "When no further tool call is needed, respond with the final answer directly in normal assistant text."
+                + promptReinforcement;
+        return new ToolEnvironment(fullSystemPrompt, List.copyOf(toolDefinitions));
+    }
+
+    private void persistToolResult(ToolCall toolCall, ToolCallResult result) {
+        if (toolCallStore == null) {
+            return;
+        }
+        try {
+            toolCallStore.saveResult(toolCall.id(), result);
+        } catch (Exception e) {
+            log.warn("Failed to persist tool call result: {}", e.getMessage());
+        }
+    }
+
+    private String compressToolResult(ToolCall toolCall, ToolCallResult result,
+            AgentRunConfig runConfig, AtomicInteger seq, EventEmitter emitter) {
+        String compressedResult = result.result();
+        if (toolOutputBudgetMiddleware == null || result.status() != ToolCallResult.Status.SUCCESS) {
+            return compressedResult;
+        }
+
+        String processed = toolOutputBudgetMiddleware.processToolOutput(
+                toolCall.toolName(), result.result(), runConfig.threadId(), runConfig.runId(),
+                null, null, null);
+        if (processed != null && processed.length() < result.result().length()) {
+            compressedResult = processed;
+            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_OUTPUT_BUDGET_EXCEEDED,
+                    "Tool output budget exceeded for: " + toolCall.toolName() + ". Compressed.",
+                    Map.of("toolName", toolCall.toolName(), "compressed", true)));
+        }
+        return compressedResult;
+    }
+
+    private static String toolEventContent(ToolCallResult result, String compressedResult) {
+        if (result.status() == ToolCallResult.Status.FAILED && result.error() != null) {
+            return result.error();
+        }
+        return compressedResult;
+    }
+
+    private static Map<String, Object> completionMetadata(ToolCall toolCall, ToolCallResult result) {
+        Map<String, Object> metadata = new HashMap<>(result.metadata());
+        metadata.put("toolCallId", toolCall.id());
+        metadata.put("toolName", toolCall.toolName());
+        metadata.put("status", result.status().name());
+        metadata.put("durationMs", result.durationMs());
+        metadata.put("error", result.error() != null ? result.error() : "");
+        return metadata;
     }
 
     private ToolCallResult executeTool(ToolCall toolCall, AgentRunConfig runConfig, List<String> uploadedFileIds,
@@ -1082,6 +876,21 @@ public class AgentLoop {
             CompletableFuture<ToolCallResult> resultFuture
     ) {}
 
+    private record ToolEnvironment(
+            String systemPrompt,
+            List<ModelToolDefinition> toolDefinitions
+    ) {}
+
+    private record ToolBatchOutcome(
+            int totalToolCalls,
+            boolean stopped
+    ) {}
+
+    private enum NoToolAction {
+        CONTINUE,
+        STOP
+    }
+
     private static class EventEmitter {
         private final List<AgentEvent> events;
         private final FluxSink<AgentEvent> sink;
@@ -1105,4 +914,265 @@ public class AgentLoop {
             }
         }
     }
+
+    private ToolBatchOutcome executeToolBatch(LoopConfig config, AgentRunConfig runConfig,
+            AtomicInteger seq, ToolPolicyService toolPolicy, List<Skill> activeSkills,
+            List<String> uploadedFileIds, List<String> history, List<ModelMessage> typedHistory,
+            List<AgentEvent> events, EventEmitter emitter, List<ToolCall> loopToolCalls,
+            int initialTotalToolCalls) {
+        int totalToolCalls = initialTotalToolCalls;
+        boolean stopped = false;
+
+        // Execute tool calls. Calls from the same model response are independent, so
+        // launch them together and merge observations back in the original order.
+        List<PendingToolExecution> pendingExecutions = new ArrayList<>();
+        for (ToolCall toolCall : loopToolCalls) {
+            totalToolCalls++;
+            if (totalToolCalls > config.maxToolCalls()) {
+                break;
+            }
+
+            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_CALL_REQUESTED,
+                    "Tool call requested: " + toolCall.toolName(),
+                    Map.of("toolCallId", toolCall.id(), "toolName", toolCall.toolName(), "arguments", toolCall.arguments())));
+
+            // Persist tool call request
+            if (toolCallStore != null) {
+                try {
+                    toolCallStore.saveRequested(toolCall, runConfig.runId(), runConfig.threadId());
+                } catch (Exception e) {
+                    log.warn("Failed to persist tool call request: {}", e.getMessage());
+                }
+            }
+
+            // Resolve normalized target tool name
+            AgentTool targetTool = findTool(toolCall.toolName());
+            String targetToolName = targetTool != null ? targetTool.name() : toolCall.toolName();
+
+            // Policy check
+            ToolPolicyDecision toolDecision = toolPolicy == null
+                    ? ToolPolicyDecision.allow()
+                    : toolPolicy.evaluateTool(targetToolName, activeSkills, runConfig.mode());
+            if (!toolDecision.allowed()) {
+                emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                        "Policy denied " + targetToolName,
+                        Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
+                String deniedMessage = "Tool denied by policy: " + toolDecision.reason();
+                emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
+                        deniedMessage,
+                        Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
+                                "status", "DENIED", "denied", true, "reason", toolDecision.reason())));
+                history.add("Tool result (" + targetToolName + "): " + deniedMessage);
+                typedHistory.add(toolMessage(toolCall.id(), targetToolName, deniedMessage,
+                        "DENIED", Map.of("denied", true, "reason", toolDecision.reason())));
+                continue;
+            }
+
+            // Approval Policy check
+            if (approvalPolicyService != null && approvalStore != null) {
+                ModelToolCall modelToolCall = new ModelToolCall(toolCall.id(), targetToolName, toolCall.arguments());
+                ApprovalPolicyDecision approvalDecision = approvalPolicyService.evaluate(modelToolCall, targetTool, runConfig);
+
+                if (approvalDecision.type() == ApprovalPolicyDecisionType.DENY) {
+                    String denMsg = "POLICY_BLOCKED: " + approvalDecision.reason() + ". This action was not executed. Do not retry this action, rephrase it, switch tools, or bypass the user's decision.";
+                    emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                            "Policy denied " + targetToolName + ": " + approvalDecision.reason(),
+                            Map.of("toolCallId", toolCall.id(), "toolName", targetToolName, "denied", true)));
+                    emitter.emit(event(seq, runConfig, AgentEventType.TOOL_DENIED,
+                            denMsg,
+                            Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
+                                    "status", "DENIED", "denied", true,
+                                    "reason", approvalDecision.reason() == null ? "" : approvalDecision.reason())));
+                    history.add("Tool result (" + targetToolName + "): " + denMsg);
+                    Map<String, Object> deniedMetadata = new HashMap<>();
+                    deniedMetadata.put("denied", true);
+                    deniedMetadata.put("reason", approvalDecision.reason() == null ? "" : approvalDecision.reason());
+                    typedHistory.add(toolMessage(toolCall.id(), targetToolName, denMsg,
+                            "DENIED", deniedMetadata));
+                    continue;
+                }
+
+                if (approvalDecision.type() == ApprovalPolicyDecisionType.REQUIRE_APPROVAL) {
+                    String calculatedHash = approvalPolicyService.hashArgs(targetToolName, toolCall.arguments());
+                    ApprovalCreateRequest createReq = new ApprovalCreateRequest(
+                            runConfig.runId(),
+                            runConfig.threadId(),
+                            toolCall.id(),
+                            targetToolName,
+                            toolCall.arguments(),
+                            calculatedHash,
+                            approvalDecision.riskKey(),
+                            approvalDecision.riskLevel(),
+                            approvalDecision.reason(),
+                            "",
+                            approvalDecision.preview(),
+                            approvalDecision.metadata()
+                    );
+
+                    // Try to extract purpose from arguments
+                    try {
+                        JsonNode node = objectMapper.readTree(toolCall.arguments());
+                        if (node.has("purpose")) {
+                            createReq = new ApprovalCreateRequest(
+                                    runConfig.runId(),
+                                    runConfig.threadId(),
+                                    toolCall.id(),
+                                    targetToolName,
+                                    toolCall.arguments(),
+                                    calculatedHash,
+                                    approvalDecision.riskKey(),
+                                    approvalDecision.riskLevel(),
+                                    approvalDecision.reason(),
+                                    node.get("purpose").asText(),
+                                    approvalDecision.preview(),
+                                    approvalDecision.metadata()
+                            );
+                        }
+                    } catch (Exception e) {}
+
+                    ApprovalRequestRecord record = approvalStore.create(createReq);
+
+                    // Emit APPROVAL_REQUIRED event
+                    emitter.emit(event(seq, runConfig, AgentEventType.APPROVAL_REQUIRED,
+                            "Approval required: " + record.reason(),
+                            Map.of(
+                                    "approvalId", record.approvalId(),
+                                    "toolCallId", record.toolCallId(),
+                                    "toolName", record.toolName(),
+                                    "riskLevel", record.riskLevel().name(),
+                                    "reason", record.reason(),
+                                    "purpose", record.purpose(),
+                                    "preview", record.preview(),
+                                    "argsHash", record.argsHash(),
+                                    "expiresAt", record.expiresAt().toString()
+                            )));
+
+                    // Emit RUN_SUSPENDED event
+                    emitter.emit(event(seq, runConfig, AgentEventType.RUN_SUSPENDED,
+                            "Run suspended waiting for human approval.",
+                            Map.of(
+                                    "suspendReason", "APPROVAL_REQUIRED",
+                                    "approvalId", record.approvalId(),
+                                    "resumeThreadId", runConfig.threadId(),
+                                    "resumeRunId", runConfig.runId()
+                            )));
+
+                    if (agentLoopRunStore != null) {
+                        agentLoopRunStore.markSuspended(runConfig.runId(), "APPROVAL_REQUIRED");
+                    }
+
+                    stopped = true;
+                    break;
+                }
+            }
+
+            long toolStartTime = System.currentTimeMillis();
+            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                    "Executing " + targetToolName,
+                    Map.of("toolCallId", toolCall.id(), "toolName", targetToolName)));
+
+            if ("task".equals(targetToolName)) {
+                emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_STARTED,
+                        "Subagent task started",
+                        Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
+                                "arguments", toolCall.arguments())));
+            }
+
+            CompletableFuture<ToolCallResult> future = CompletableFuture.supplyAsync(
+                    () -> executeTool(toolCall, runConfig, uploadedFileIds, activeSkills));
+            pendingExecutions.add(new PendingToolExecution(toolCall, targetToolName, toolStartTime, future));
+        }
+
+        for (PendingToolExecution pending : pendingExecutions) {
+            ToolCall toolCall = pending.toolCall();
+            ToolCallResult rawToolResult;
+            try {
+                rawToolResult = pending.resultFuture().join();
+            } catch (RuntimeException ex) {
+                long duration = System.currentTimeMillis() - pending.startedAtMs();
+                rawToolResult = ToolCallResult.fromError(toolCall,
+                        "Tool failed: " + ex.getMessage(), duration);
+            }
+            // --- Intercept ask_clarification and suspend the run ---
+            if (rawToolResult.metadata() != null && Boolean.TRUE.equals(rawToolResult.metadata().get("clarificationRequired"))) {
+                String question = (String) rawToolResult.metadata().get("question");
+                String clarificationId = (String) rawToolResult.metadata().get("clarificationId");
+                String type = (String) rawToolResult.metadata().getOrDefault("clarificationType", "missing_info");
+                Object options = rawToolResult.metadata().getOrDefault("options", java.util.List.of());
+                Object questions = rawToolResult.metadata().getOrDefault("questions", java.util.List.of());
+
+                Map<String, Object> clarificationMetadata = new HashMap<>();
+                clarificationMetadata.put("question", question);
+                clarificationMetadata.put("clarificationType", type);
+                clarificationMetadata.put("clarificationId", clarificationId);
+                clarificationMetadata.put("resumeThreadId", runConfig.threadId());
+                clarificationMetadata.put("resumeRunId", runConfig.runId());
+                clarificationMetadata.put("options", options);
+                clarificationMetadata.put("questions", questions);
+
+                emitter.emit(event(seq, runConfig, AgentEventType.CLARIFICATION_REQUIRED,
+                        "Clarification required: " + question,
+                        clarificationMetadata));
+                emitter.emit(event(seq, runConfig, AgentEventType.RUN_SUSPENDED,
+                        "Run suspended waiting for user clarification.",
+                        clarificationMetadata));
+                if (agentLoopRunStore != null) {
+                    agentLoopRunStore.markSuspended(runConfig.runId(), "CLARIFICATION_REQUIRED");
+                }
+                stopped = true;
+                break;
+            }
+
+
+            // Persist raw tool call result for audit/debug
+            persistToolResult(toolCall, rawToolResult);
+
+            emitTodoMutationEventIfNeeded(seq, runConfig, emitter, pending, rawToolResult);
+
+            // Add raw history entry for observer source/evidence processing
+            history.add("Tool result (" + toolCall.toolName() + "): " + rawToolResult.result());
+
+            // Observer processes source/evidence (uses raw toolResult, does NOT compress)
+            int historySizeBeforeObserver = history.size();
+            String observation = observer.onToolCompleted(runConfig, toolCall, rawToolResult, events, seq, history);
+            emitter.flush();
+            if (observation != null && !observation.isBlank()) {
+                history.add(observation);
+            }
+            appendNewHistoryEntriesToTypedHistory(history, historySizeBeforeObserver, typedHistory,
+                    Map.of("observer", "onToolCompleted", "tool", pending.targetToolName()));
+
+            // Compress tool output BEFORE emitting TOOL_COMPLETED event and MessageStore persistence
+            String compressedResult = compressToolResult(toolCall, rawToolResult, runConfig, seq, emitter);
+            if (!compressedResult.equals(rawToolResult.result())) {
+                int lastIdx = history.size() - 1;
+                if (lastIdx >= 0 && history.get(lastIdx).startsWith("Tool result (" + toolCall.toolName() + "): ")) {
+                    history.set(lastIdx, "Tool result (" + toolCall.toolName() + "): " + compressedResult);
+                }
+            }
+
+            // Emit TOOL_COMPLETED event with compressed content (ensures MessageStore/toolExecutionStore also see compressed)
+            String eventContent = toolEventContent(rawToolResult, compressedResult);
+            Map<String, Object> completionMetadata = completionMetadata(toolCall, rawToolResult);
+
+            if ("task".equals(pending.targetToolName())) {
+                Object subagentStatus = completionMetadata.getOrDefault("subagentStatus", rawToolResult.status().name());
+                emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_COMPLETED,
+                        "COMPLETED".equals(subagentStatus) || "SUCCESS".equals(subagentStatus)
+                                ? "Subagent task completed"
+                                : "Subagent task failed",
+                        completionMetadata));
+            }
+
+            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_COMPLETED,
+                    eventContent,
+                    completionMetadata));
+            typedHistory.add(toolMessage(toolCall.id(), pending.targetToolName(), eventContent,
+                    rawToolResult.status().name(), completionMetadata));
+        }
+
+
+        return new ToolBatchOutcome(totalToolCalls, stopped);
+    }
+
 }

@@ -15,6 +15,7 @@ import reactor.core.scheduler.Schedulers;
 
 @Component
 @MiddlewareOrder(15)
+@MiddlewareLifecycle(MiddlewarePhase.RUN_PREPARATION)
 public class StructuredMemoryMiddleware implements AgentMiddleware {
 
     private final MemoryFactStore factStore;

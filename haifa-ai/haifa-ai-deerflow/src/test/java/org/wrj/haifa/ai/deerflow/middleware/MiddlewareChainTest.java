@@ -1,8 +1,12 @@
 package org.wrj.haifa.ai.deerflow.middleware;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
@@ -14,6 +18,36 @@ import reactor.test.StepVerifier;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class MiddlewareChainTest {
+
+    @Test
+    void logsMiddlewareEntryAndExitWithMiddlewareLayer() {
+        Logger logger = (Logger) LoggerFactory.getLogger(MiddlewareChain.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            DeerFlowProperties properties = new DeerFlowProperties();
+            properties.setSystemPrompt("test");
+            properties.setWorkspaceRoot(".");
+            AgentRunConfig config = new AgentRunConfig(
+                    "thread-log", "run-log", "model", false, false, 4, Path.of("."), java.util.Map.of());
+            AgentRuntimeContext context = AgentRuntimeContext.of(
+                    config, new AgentRequest("thread-log", "hello", null), List.of(), properties);
+
+            new MiddlewareChain(List.of(new DynamicContextMiddleware())).next(context).block();
+
+            List<String> messages = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .toList();
+            assertThat(messages).anyMatch(message -> message.contains(
+                    "layer=middleware phase=enter middleware=DynamicContextMiddleware method=apply runId=run-log threadId=thread-log"));
+            assertThat(messages).anyMatch(message -> message.contains(
+                    "layer=middleware phase=exit middleware=DynamicContextMiddleware method=apply status=onComplete"));
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
 
     @Test
     void middlewaresExecuteInOrder() {

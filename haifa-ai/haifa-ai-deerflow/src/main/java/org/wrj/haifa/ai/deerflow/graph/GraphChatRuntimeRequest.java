@@ -16,8 +16,6 @@ public record GraphChatRuntimeRequest(
         LoopConfig loopConfig,
         AgentRunConfig runConfig,
         AgentRequest agentRequest,
-        String systemPrompt,
-        String userPrompt,
         AtomicInteger eventSequence,
         ToolPolicyService toolPolicyService,
         List<Skill> activeSkills,

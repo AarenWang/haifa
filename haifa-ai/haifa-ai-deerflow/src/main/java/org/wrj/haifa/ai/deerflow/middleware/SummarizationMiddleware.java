@@ -45,6 +45,7 @@ import reactor.core.publisher.Mono;
  */
 @Component
 @MiddlewareOrder(8)
+@MiddlewareLifecycle(MiddlewarePhase.RUN_PREPARATION)
 public class SummarizationMiddleware implements AgentMiddleware {
 
     private static final Logger log = LoggerFactory.getLogger(SummarizationMiddleware.class);
@@ -99,7 +100,7 @@ public class SummarizationMiddleware implements AgentMiddleware {
         long totalChars = activeMessages.stream().mapToLong(m -> m.content() == null ? 0 : m.content().length()).sum();
 
         if (config.isEnabled() && (activeMessages.size() > messageCountThreshold || totalChars > charLengthThreshold)) {
-            log.info("Thread history exceeds threshold (count={}, chars={}). Compressing...", activeMessages.size(), totalChars);
+            log.info("layer=middleware Thread history exceeds threshold (count={}, chars={}). Compressing...", activeMessages.size(), totalChars);
 
             // Separate messages to summarize from messages to keep
             int keepIndex = Math.max(0, activeMessages.size() - keepLastN);
@@ -184,7 +185,7 @@ public class SummarizationMiddleware implements AgentMiddleware {
                             metadata);
                 })
                 .onErrorResume(ex -> {
-                    log.warn("Summary model call failed, creating degraded summary. Error: {}", ex.getMessage());
+                    log.warn("layer=middleware Summary model call failed, creating degraded summary. Error: {}", ex.getMessage());
                     String degradedSummary = createDegradedSummary(messages);
                     Map<String, Object> metadata = Map.of(
                             "isSummary", true,
@@ -261,7 +262,7 @@ public class SummarizationMiddleware implements AgentMiddleware {
         }
 
         if (!rescued.isEmpty()) {
-            log.info("Skill rescue: preserving {} skill-loading messages from summarization", rescued.size());
+            log.info("layer=middleware Skill rescue: preserving {} skill-loading messages from summarization", rescued.size());
         }
 
         List<MessageRecord> newToKeep = new ArrayList<>(toKeep);
@@ -298,7 +299,7 @@ public class SummarizationMiddleware implements AgentMiddleware {
         }
 
         if (!rescued.isEmpty()) {
-            log.info("Dynamic context preservation: rescuing {} reminder messages from summarization", rescued.size());
+            log.info("layer=middleware Dynamic context preservation: rescuing {} reminder messages from summarization", rescued.size());
         }
 
         List<MessageRecord> newToKeep = new ArrayList<>(toKeep);

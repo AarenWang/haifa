@@ -17,6 +17,7 @@ import reactor.core.publisher.Mono;
  */
 @Component
 @MiddlewareOrder(18) // after persona, before todo injection
+@MiddlewareLifecycle(MiddlewarePhase.RUN_PREPARATION)
 public class ClarificationMiddleware implements AgentMiddleware {
 
     private final ClarificationStore clarificationStore;

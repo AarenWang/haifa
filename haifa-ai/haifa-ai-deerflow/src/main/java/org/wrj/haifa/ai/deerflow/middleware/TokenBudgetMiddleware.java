@@ -6,6 +6,7 @@ import reactor.core.publisher.Mono;
 
 @Component
 @MiddlewareOrder(1)
+@MiddlewareLifecycle(MiddlewarePhase.MODEL_INPUT)
 public class TokenBudgetMiddleware implements AgentMiddleware {
 
     @Override

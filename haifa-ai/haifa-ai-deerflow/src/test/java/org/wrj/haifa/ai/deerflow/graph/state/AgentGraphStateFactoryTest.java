@@ -50,6 +50,9 @@ class AgentGraphStateFactoryTest {
                 .extracting(message -> message.get("content"))
                 .containsExactly("middle", "newer ");
         assertThat(view.map(AgentGraphStateKeys.MODEL_PROMPT).get("systemPrompt")).isEqualTo("system");
+        assertThat(view.map(AgentGraphStateKeys.RUN_PROMPT_BASE)).isEmpty();
+        assertThat(state.get(AgentGraphStateKeys.RUN_PREPARED)).isEqualTo(false);
+        assertThat(state.get(AgentGraphStateKeys.PROMPT_REVISION)).isEqualTo(0);
         assertThat(view.map(AgentGraphStateKeys.REQUEST_METADATA).get("requestId")).isEqualTo("req-1");
         assertThat(view.activeSkills()).isEmpty();
         assertThat(view.toolCalls()).isEmpty();

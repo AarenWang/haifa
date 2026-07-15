@@ -50,7 +50,19 @@ public class SubagentLimitMiddleware implements AgentLoopObserver {
     @Override
     public List<FilteredToolCall> afterToolCallsParsed(org.wrj.haifa.ai.deerflow.agent.AgentRunConfig runConfig,
                                                         List<ToolCall> toolCalls) {
+        long startedAt = System.nanoTime();
         String runId = runConfig.runId();
+        log.info("layer=middleware phase=enter middleware=SubagentLimitMiddleware method=afterToolCallsParsed runId={} threadId={} toolCallCount={}",
+                runId, runConfig.threadId(), toolCalls == null ? 0 : toolCalls.size());
+        try {
+            return filterToolCalls(runId, toolCalls);
+        } finally {
+            log.info("layer=middleware phase=exit middleware=SubagentLimitMiddleware method=afterToolCallsParsed durationMs={} runId={} threadId={}",
+                    (System.nanoTime() - startedAt) / 1_000_000, runId, runConfig.threadId());
+        }
+    }
+
+    private List<FilteredToolCall> filterToolCalls(String runId, List<ToolCall> toolCalls) {
         List<FilteredToolCall> result = new ArrayList<>();
         int taskCount = 0;
         int activeCount = subagentRuntime != null ? subagentRuntime.activeCount(runId) : 0;
@@ -64,7 +76,7 @@ public class SubagentLimitMiddleware implements AgentLoopObserver {
             // Check per-response limit
             taskCount++;
             if (taskCount > maxPerResponse) {
-                log.warn("SubagentLimitMiddleware: rejecting task call {} for run {}. "
+                log.warn("layer=middleware SubagentLimitMiddleware: rejecting task call {} for run {}. "
                         + "Exceeded per-response limit ({}/{})",
                         tc.id(), runId, taskCount, maxPerResponse);
                 incrementRejections(runId);
@@ -77,7 +89,7 @@ public class SubagentLimitMiddleware implements AgentLoopObserver {
 
             // Check concurrent limit (including this one)
             if (activeCount + taskCount > maxConcurrent) {
-                log.warn("SubagentLimitMiddleware: rejecting task call {} for run {}. "
+                log.warn("layer=middleware SubagentLimitMiddleware: rejecting task call {} for run {}. "
                         + "Exceeded concurrent limit (active={}, new={}, max={})",
                         tc.id(), runId, activeCount, taskCount, maxConcurrent);
                 incrementRejections(runId);
@@ -90,7 +102,6 @@ public class SubagentLimitMiddleware implements AgentLoopObserver {
 
             result.add(new FilteredToolCall(tc, true, null));
         }
-
         return result;
     }
 

@@ -9,6 +9,7 @@ import reactor.core.publisher.Mono;
 
 @Component
 @MiddlewareOrder(12)
+@MiddlewareLifecycle(MiddlewarePhase.RUN_PREPARATION)
 public class PersonaMiddleware implements AgentMiddleware {
 
     private final AgentPersonaStore personaStore;

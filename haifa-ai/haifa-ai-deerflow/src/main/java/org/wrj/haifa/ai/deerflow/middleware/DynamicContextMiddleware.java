@@ -9,6 +9,7 @@ import reactor.core.publisher.Mono;
 
 @Component
 @MiddlewareOrder(10)
+@MiddlewareLifecycle(MiddlewarePhase.MODEL_INPUT)
 public class DynamicContextMiddleware implements AgentMiddleware {
 
     @Override

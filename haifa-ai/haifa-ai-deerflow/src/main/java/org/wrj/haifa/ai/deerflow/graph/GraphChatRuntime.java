@@ -17,7 +17,6 @@ import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateFactory;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateStrategies;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
-import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.run.RunCancellationService;
 import org.wrj.haifa.ai.deerflow.run.RunCancelledException;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
@@ -34,8 +33,9 @@ import java.util.concurrent.CompletableFuture;
 public class GraphChatRuntime {
 
     private static final String GRAPH_NAME = "haifa-active-chat";
+    private static final String PREPARE_RUN = "prepare_run";
     private static final String LOAD_CONTEXT = "load_context";
-    private static final String APPLY_PROMPT_MIDDLEWARES = "apply_prompt_middlewares";
+    private static final String ASSEMBLE_MODEL_INPUT = "assemble_model_input";
     private static final String CALL_MODEL = "call_model";
     private static final String PARSE_MODEL_OUTPUT = "parse_model_output";
     private static final String EXECUTE_TOOLS = "execute_tools";
@@ -49,8 +49,9 @@ public class GraphChatRuntime {
     private final AgentGraphStateFactory stateFactory;
     private final SQLiteCheckpointSaver sqliteCheckpointSaver;
 
+    private final ChatPrepareRunNode prepareRunNode;
     private final ChatLoadContextNode loadContextNode;
-    private final ChatApplyMiddlewaresNode applyMiddlewaresNode;
+    private final ChatAssembleModelInputNode assembleModelInputNode;
     private final ChatCallModelNode callModelNode;
     private final ChatParseModelOutputNode parseModelOutputNode;
     private final ChatExecuteToolsNode executeToolsNode;
@@ -60,11 +61,11 @@ public class GraphChatRuntime {
     private final ClarificationGateNode clarificationGateNode;
 
     public GraphChatRuntime() {
-        this(new DeerFlowProperties(), null, new AgentGraphStateFactory(), null, null, null, null, null, null, null, null, null, null);
+        this(new DeerFlowProperties(), null, new AgentGraphStateFactory(), null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public GraphChatRuntime(DeerFlowProperties properties, GraphCheckpointRecorder checkpointRecorder) {
-        this(properties, checkpointRecorder, new AgentGraphStateFactory(), null, null, null, null, null, null, null, null, null, null);
+        this(properties, checkpointRecorder, new AgentGraphStateFactory(), null, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -72,8 +73,9 @@ public class GraphChatRuntime {
                             GraphCheckpointRecorder checkpointRecorder,
                             AgentGraphStateFactory stateFactory,
                             SQLiteCheckpointSaver sqliteCheckpointSaver,
+                            ChatPrepareRunNode prepareRunNode,
                             ChatLoadContextNode loadContextNode,
-                            ChatApplyMiddlewaresNode applyMiddlewaresNode,
+                            ChatAssembleModelInputNode assembleModelInputNode,
                             ChatCallModelNode callModelNode,
                             ChatParseModelOutputNode parseModelOutputNode,
                             ChatExecuteToolsNode executeToolsNode,
@@ -85,8 +87,9 @@ public class GraphChatRuntime {
         this.checkpointRecorder = checkpointRecorder;
         this.stateFactory = stateFactory == null ? new AgentGraphStateFactory() : stateFactory;
         this.sqliteCheckpointSaver = sqliteCheckpointSaver;
+        this.prepareRunNode = prepareRunNode;
         this.loadContextNode = loadContextNode;
-        this.applyMiddlewaresNode = applyMiddlewaresNode;
+        this.assembleModelInputNode = assembleModelInputNode;
         this.callModelNode = callModelNode;
         this.parseModelOutputNode = parseModelOutputNode;
         this.executeToolsNode = executeToolsNode;
@@ -116,6 +119,7 @@ public class GraphChatRuntime {
                 throwIfCancelled(runId);
                 GraphChatLifecycleRegistry.register(runId, new GraphChatLifecycleContext(
                         request.runConfig(),
+                        request.agentRequest(),
                         request.loopConfig(),
                         request.agentLoop() == null ? null : request.agentLoop().observer(),
                         request.eventSequence(),
@@ -127,7 +131,7 @@ public class GraphChatRuntime {
                         request.runConfig(),
                         request.agentRequest(),
                         request.threadHistory(),
-                        new ModelPrompt(request.systemPrompt(), request.userPrompt(), request.runConfig().modelName()),
+                        null,
                         request.activeSkills()
                 ));
                 initialState.put("chat_steps", 0);
@@ -212,8 +216,9 @@ public class GraphChatRuntime {
 
     private StateGraph chatGraph(int maxSteps) throws Exception {
         StateGraph graph = new StateGraph(GRAPH_NAME, AgentGraphStateStrategies.keyStrategyFactory());
+        graph.addNode(PREPARE_RUN, prepareRunNode);
         graph.addNode(LOAD_CONTEXT, loadContextNode);
-        graph.addNode(APPLY_PROMPT_MIDDLEWARES, applyMiddlewaresNode);
+        graph.addNode(ASSEMBLE_MODEL_INPUT, assembleModelInputNode);
         graph.addNode(CALL_MODEL, callModelNode);
         graph.addNode(PARSE_MODEL_OUTPUT, parseModelOutputNode);
         graph.addNode(EXECUTE_TOOLS, executeToolsNode);
@@ -222,9 +227,10 @@ public class GraphChatRuntime {
         graph.addNode(APPROVAL_GATE, approvalGateNode);
         graph.addNode(CLARIFICATION_GATE, clarificationGateNode);
 
-        graph.addEdge(StateGraph.START, LOAD_CONTEXT)
-                .addEdge(LOAD_CONTEXT, APPLY_PROMPT_MIDDLEWARES)
-                .addEdge(APPLY_PROMPT_MIDDLEWARES, CALL_MODEL)
+        graph.addEdge(StateGraph.START, PREPARE_RUN)
+                .addEdge(PREPARE_RUN, LOAD_CONTEXT)
+                .addEdge(LOAD_CONTEXT, ASSEMBLE_MODEL_INPUT)
+                .addEdge(ASSEMBLE_MODEL_INPUT, CALL_MODEL)
                 .addEdge(CALL_MODEL, PARSE_MODEL_OUTPUT);
 
         graph.addConditionalEdges(PARSE_MODEL_OUTPUT, state -> {
@@ -241,26 +247,29 @@ public class GraphChatRuntime {
             if ("SUSPEND".equals(status)) {
                 return CompletableFuture.completedFuture(StateGraph.END);
             } else if ("DENIED".equals(status)) {
-                return CompletableFuture.completedFuture(CALL_MODEL);
+                return CompletableFuture.completedFuture(ASSEMBLE_MODEL_INPUT);
             }
             return CompletableFuture.completedFuture(EXECUTE_TOOLS);
-        }, Map.of(StateGraph.END, StateGraph.END, CALL_MODEL, CALL_MODEL, EXECUTE_TOOLS, EXECUTE_TOOLS));
+        }, Map.of(StateGraph.END, StateGraph.END,
+                ASSEMBLE_MODEL_INPUT, ASSEMBLE_MODEL_INPUT,
+                EXECUTE_TOOLS, EXECUTE_TOOLS));
 
         graph.addConditionalEdges(EXECUTE_TOOLS, state -> {
             Map<String, Object> clarMeta = (Map<String, Object>) state.data().get("clarification_metadata");
             if (clarMeta != null && !clarMeta.isEmpty()) {
                 return CompletableFuture.completedFuture(CLARIFICATION_GATE);
             }
-            return CompletableFuture.completedFuture(CALL_MODEL);
-        }, Map.of(CLARIFICATION_GATE, CLARIFICATION_GATE, CALL_MODEL, CALL_MODEL));
+            return CompletableFuture.completedFuture(ASSEMBLE_MODEL_INPUT);
+        }, Map.of(CLARIFICATION_GATE, CLARIFICATION_GATE,
+                ASSEMBLE_MODEL_INPUT, ASSEMBLE_MODEL_INPUT));
 
         graph.addConditionalEdges(FINAL_ANSWER_GATE, state -> {
             String status = (String) state.data().get("final_answer_gate_status");
             if ("CONTINUE".equals(status)) {
-                return CompletableFuture.completedFuture(CALL_MODEL);
+                return CompletableFuture.completedFuture(ASSEMBLE_MODEL_INPUT);
             }
             return CompletableFuture.completedFuture(FINALIZE);
-        }, Map.of(CALL_MODEL, CALL_MODEL, FINALIZE, FINALIZE));
+        }, Map.of(ASSEMBLE_MODEL_INPUT, ASSEMBLE_MODEL_INPUT, FINALIZE, FINALIZE));
 
         graph.addEdge(CLARIFICATION_GATE, StateGraph.END);
         graph.addEdge(FINALIZE, StateGraph.END);

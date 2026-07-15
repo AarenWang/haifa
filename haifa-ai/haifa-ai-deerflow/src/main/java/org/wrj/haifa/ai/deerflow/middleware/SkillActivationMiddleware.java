@@ -11,6 +11,7 @@ import reactor.core.publisher.Mono;
 
 @Component
 @MiddlewareOrder(5)
+@MiddlewareLifecycle(MiddlewarePhase.RUN_PREPARATION)
 public class SkillActivationMiddleware implements AgentMiddleware {
 
     private final SlashSkillResolver slashSkillResolver;

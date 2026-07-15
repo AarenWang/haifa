@@ -63,6 +63,19 @@ public class ToolOutputBudgetMiddleware {
      * @return the processed output (may be compressed, externalized, or truncated)
      */
     public String processToolOutput(String toolName, String output, String threadId, String runId, String url, String sourceId, String title) {
+        long startedAt = System.nanoTime();
+        log.info("layer=middleware phase=enter middleware=ToolOutputBudgetMiddleware method=processToolOutput runId={} threadId={} toolName={} outputChars={}",
+                runId, threadId, toolName, output == null ? 0 : output.length());
+        try {
+            return processToolOutputInternal(toolName, output, threadId, runId, url, sourceId, title);
+        } finally {
+            log.info("layer=middleware phase=exit middleware=ToolOutputBudgetMiddleware method=processToolOutput durationMs={} runId={} threadId={} toolName={}",
+                    (System.nanoTime() - startedAt) / 1_000_000, runId, threadId, toolName);
+        }
+    }
+
+    private String processToolOutputInternal(String toolName, String output, String threadId, String runId,
+            String url, String sourceId, String title) {
         if (output == null) {
             return "";
         }
@@ -84,7 +97,7 @@ public class ToolOutputBudgetMiddleware {
             return output;
         }
 
-        log.info("Tool output budget exceeded for tool: {}. length={}, externalizeMin={}, fallbackMax={}",
+        log.info("layer=middleware Tool output budget exceeded for tool: {}. length={}, externalizeMin={}, fallbackMax={}",
                 toolName, output.length(), externalizeMin, fallbackMax);
 
         // 3. For web_fetch, try LLM compression first (Java existing path, retained)
@@ -92,9 +105,9 @@ public class ToolOutputBudgetMiddleware {
         if ("web_fetch".equalsIgnoreCase(toolName) && evidenceCompressor != null) {
             try {
                 processed = evidenceCompressor.compressFetchContent(title, url, sourceId, output);
-                log.info("LLM compressed web_fetch output from {} to {} chars", output.length(), processed.length());
+                log.info("layer=middleware LLM compressed web_fetch output from {} to {} chars", output.length(), processed.length());
             } catch (Exception e) {
-                log.warn("LLM compression failed for web_fetch, falling back to truncation. Error: {}", e.getMessage());
+                log.warn("layer=middleware LLM compression failed for web_fetch, falling back to truncation. Error: {}", e.getMessage());
             }
         }
 
@@ -103,20 +116,19 @@ public class ToolOutputBudgetMiddleware {
             String virtualPath = externalizeToDisk(processed, toolName, threadId, runId, config);
             if (virtualPath != null) {
                 String preview = buildPreview(processed, toolName, virtualPath, config.getPreviewHeadChars(), config.getPreviewTailChars());
-                log.info("Externalized {} output ({} chars) to {}. Preview length={}",
+                log.info("layer=middleware Externalized {} output ({} chars) to {}. Preview length={}",
                         toolName, processed.length(), virtualPath, preview.length());
                 return preview;
             }
-            log.warn("Disk externalization failed for {}. Falling back to truncation.", toolName);
+            log.warn("layer=middleware Disk externalization failed for {}. Falling back to truncation.", toolName);
         }
 
         // 5. Fallback head+tail truncation (Python _build_fallback)
         if (processed.length() > fallbackMax) {
             String truncated = buildFallback(processed, toolName, fallbackMax, config.getFallbackHeadChars(), config.getFallbackTailChars());
-            log.warn("Fallback-truncated {} output: {} chars -> {} chars", toolName, processed.length(), truncated.length());
+            log.warn("layer=middleware Fallback-truncated {} output: {} chars -> {} chars", toolName, processed.length(), truncated.length());
             return truncated;
         }
-
         return processed;
     }
 
@@ -173,7 +185,7 @@ public class ToolOutputBudgetMiddleware {
         try {
             Files.createDirectories(storageDir);
         } catch (IOException e) {
-            log.warn("Failed to create externalization directory: {}", storageDir, e);
+            log.warn("layer=middleware Failed to create externalization directory: {}", storageDir, e);
             return null;
         }
 
@@ -182,12 +194,12 @@ public class ToolOutputBudgetMiddleware {
         try {
             // Validate that resolved path stays under storageDir
             if (!filepath.toAbsolutePath().normalize().startsWith(storageDir.toAbsolutePath().normalize())) {
-                log.warn("Externalization path escapes storage directory: {}", filepath);
+                log.warn("layer=middleware Externalization path escapes storage directory: {}", filepath);
                 return null;
             }
             Files.writeString(filepath, content);
         } catch (IOException e) {
-            log.warn("Failed to write externalized tool output to {}", filepath, e);
+            log.warn("layer=middleware Failed to write externalized tool output to {}", filepath, e);
             return null;
         }
 

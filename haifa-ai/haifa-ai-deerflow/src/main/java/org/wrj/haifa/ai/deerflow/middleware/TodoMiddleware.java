@@ -13,6 +13,7 @@ import reactor.core.publisher.Mono;
  */
 @Component
 @MiddlewareOrder(25)
+@MiddlewareLifecycle(MiddlewarePhase.MODEL_INPUT)
 public class TodoMiddleware implements AgentMiddleware {
 
     private final TodoStore todoStore;

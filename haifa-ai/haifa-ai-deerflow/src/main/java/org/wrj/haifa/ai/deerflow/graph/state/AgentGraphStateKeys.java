@@ -12,6 +12,9 @@ public final class AgentGraphStateKeys {
     public static final String UPLOADED_FILE_IDS = "uploadedFileIds";
     public static final String REQUEST_METADATA = "requestMetadata";
     public static final String MESSAGE_WINDOW = "messageWindow";
+    public static final String RUN_PROMPT_BASE = "runPromptBase";
+    public static final String RUN_PREPARED = "runPrepared";
+    public static final String PROMPT_REVISION = "promptRevision";
     public static final String MODEL_PROMPT = "modelPrompt";
     public static final String MODEL_STEPS = "modelSteps";
     public static final String TOOL_CALLS = "toolCalls";

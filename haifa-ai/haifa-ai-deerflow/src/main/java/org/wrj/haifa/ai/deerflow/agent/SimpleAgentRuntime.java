@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -402,12 +403,19 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 }}
 
             List<ToolResult> toolResults = List.of();
-            AgentRuntimeContext runtimeContext = AgentRuntimeContext.of(config, effectiveRequest, toolResults, this.properties, activeSkills);
-            Mono<ModelPrompt> promptMono = new MiddlewareChain(this.middlewares).next(runtimeContext);
+            boolean activeChatGraph = shouldUseActiveChatGraph(this.properties, this.graphChatRuntime, effectiveRequest);
+            boolean activeResearchGraph = false;
+            AgentRuntimeContext runtimeContext = AgentRuntimeContext.of(
+                    config, effectiveRequest, toolResults, this.properties, activeSkills);
+            Mono<Optional<ModelPrompt>> preparedPrompt = activeChatGraph
+                    ? Mono.just(Optional.empty())
+                    : new MiddlewareChain(this.middlewares).next(runtimeContext).map(Optional::of);
 
             long modelStartTime = System.currentTimeMillis();
-            Flux<AgentEvent> modelAndTerminalEvents = promptMono.flatMapMany(prompt -> {
-                if (prompt.userPrompt() != null && prompt.userPrompt().startsWith("BUDGET_EXCEEDED:")) {
+            Flux<AgentEvent> modelAndTerminalEvents = preparedPrompt.flatMapMany(promptSelection -> {
+                ModelPrompt prompt = promptSelection.orElse(null);
+                if (prompt != null && prompt.userPrompt() != null
+                        && prompt.userPrompt().startsWith("BUDGET_EXCEEDED:")) {
                     this.runManager.markCompleted(run.runId());
                     this.threadManager.touch(threadId);
                     this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
@@ -428,8 +436,6 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 LoopConfig loopConfig = new LoopConfig(
                         maxSteps, maxToolCalls, this.properties.getResearchTimeout(), researchOptions);
 
-                boolean activeChatGraph = shouldUseActiveChatGraph(this.properties, this.graphChatRuntime, effectiveRequest);
-                boolean activeResearchGraph = false;
                 if (!activeChatGraph && !activeResearchGraph) {
                     triggerGraphShadow(config, effectiveRequest, prompt);
                 }
@@ -440,8 +446,6 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 loopConfig,
                                 config,
                                 effectiveRequest,
-                                prompt.systemPrompt(),
-                                prompt.userPrompt(),
                                 seq,
                                 this.toolPolicyService,
                                 activeSkills,
