@@ -7,6 +7,27 @@ description: Create deterministic charts, comparison dashboards, and data infogr
 
 Use deterministic rendering for charts. Never call `chart-visualization` as a Tool; this Skill provides instructions and scripts that run through generic `bash` or `run_script` capabilities.
 
+## Intelligent Chart Selection
+
+Analyze the data features, choose the most suitable chart type, and consult the matching file in `references/` for its detailed specification:
+
+- **Time Series**: Use `generate_line_chart` (trends) or `generate_area_chart` (accumulated trends). Use `generate_dual_axes_chart` for two different scales.
+- **Comparisons**: Use `generate_bar_chart` (categorical) or `generate_column_chart`. Use `generate_histogram_chart` for frequency distributions.
+- **Part-to-Whole**: Use `generate_pie_chart` or `generate_treemap_chart` (hierarchical).
+- **Relationships & Flow**: Use `generate_scatter_chart` (correlation), `generate_sankey_chart` (flow), or `generate_venn_chart` (overlap).
+- **Maps**: Use `generate_district_map` (regions), `generate_pin_map` (points), or `generate_path_map` (routes).
+- **Hierarchies & Trees**: Use `generate_organization_chart` or `generate_mind_map`.
+- **Specialized**:
+  - `generate_radar_chart`: Multi-dimensional comparison.
+  - `generate_funnel_chart`: Process stages.
+  - `generate_liquid_chart`: Percentage/Progress.
+  - `generate_word_cloud_chart`: Text frequency.
+  - `generate_boxplot_chart` or `generate_violin_chart`: Statistical distribution.
+  - `generate_network_graph`: Complex node-edge relationships.
+  - `generate_fishbone_diagram`: Cause-effect analysis.
+  - `generate_flow_diagram`: Process flow.
+  - `generate_spreadsheet`: Tabular data or pivot tables for structured data display and cross-tabulation.
+
 ## Workflow
 
 1. Choose a chart type that matches the data. Consult the matching file in `references/` when its schema is useful.
