@@ -124,7 +124,7 @@ public class DeerFlowProperties {
 
     public static class Sandbox {
         private boolean enabled = false;
-        private String backend = "local";
+        private String backend = "local-restricted";
         private String dockerImage = "ubuntu:24.04";
         private boolean networkEnabled = false;
         private long timeoutMs = 30_000;
@@ -135,6 +135,9 @@ public class DeerFlowProperties {
         private String allowedScriptLanguages = "python,powershell,bash";
         private String scriptWorkdirSubdir = "scripts";
         private boolean runScriptLocalUnsafeAllowed = false;
+        private boolean allowHostExecution = false;
+        private Map<String, String> executables = new LinkedHashMap<>();
+        private LocalTrusted localTrusted = new LocalTrusted();
         private Map<String, String> environment = new LinkedHashMap<>();
 
         public boolean isEnabled() {
@@ -233,12 +236,129 @@ public class DeerFlowProperties {
             this.runScriptLocalUnsafeAllowed = runScriptLocalUnsafeAllowed;
         }
 
+        public boolean isAllowHostExecution() {
+            return allowHostExecution;
+        }
+
+        public void setAllowHostExecution(boolean allowHostExecution) {
+            this.allowHostExecution = allowHostExecution;
+        }
+
+        public Map<String, String> getExecutables() {
+            return executables;
+        }
+
+        public void setExecutables(Map<String, String> executables) {
+            this.executables = executables == null ? new LinkedHashMap<>() : new LinkedHashMap<>(executables);
+        }
+
+        public LocalTrusted getLocalTrusted() {
+            return localTrusted;
+        }
+
+        public void setLocalTrusted(LocalTrusted localTrusted) {
+            this.localTrusted = localTrusted == null ? new LocalTrusted() : localTrusted;
+        }
+
         public Map<String, String> getEnvironment() {
             return environment;
         }
 
         public void setEnvironment(Map<String, String> environment) {
             this.environment = environment == null ? new LinkedHashMap<>() : new LinkedHashMap<>(environment);
+        }
+
+        public static class LocalTrusted {
+            private boolean enabled = false;
+            private boolean inheritEnvironment = true;
+            private boolean inheritPath = true;
+            private boolean loadUserProfile = false;
+            private boolean isolateHome = false;
+            private String shellExecutable = "";
+            private java.util.List<String> shellInitFiles = new java.util.ArrayList<>();
+            private java.util.List<String> passthroughEnvironmentNames = new java.util.ArrayList<>();
+            private java.util.List<String> deniedEnvironmentNames = new java.util.ArrayList<>();
+            private java.util.List<String> deniedEnvironmentPatterns = new java.util.ArrayList<>();
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public boolean isInheritEnvironment() {
+                return inheritEnvironment;
+            }
+
+            public void setInheritEnvironment(boolean inheritEnvironment) {
+                this.inheritEnvironment = inheritEnvironment;
+            }
+
+            public boolean isInheritPath() {
+                return inheritPath;
+            }
+
+            public void setInheritPath(boolean inheritPath) {
+                this.inheritPath = inheritPath;
+            }
+
+            public boolean isLoadUserProfile() {
+                return loadUserProfile;
+            }
+
+            public void setLoadUserProfile(boolean loadUserProfile) {
+                this.loadUserProfile = loadUserProfile;
+            }
+
+            public boolean isIsolateHome() {
+                return isolateHome;
+            }
+
+            public void setIsolateHome(boolean isolateHome) {
+                this.isolateHome = isolateHome;
+            }
+
+            public String getShellExecutable() {
+                return shellExecutable;
+            }
+
+            public void setShellExecutable(String shellExecutable) {
+                this.shellExecutable = shellExecutable == null ? "" : shellExecutable;
+            }
+
+            public java.util.List<String> getShellInitFiles() {
+                return shellInitFiles;
+            }
+
+            public void setShellInitFiles(java.util.List<String> shellInitFiles) {
+                this.shellInitFiles = shellInitFiles == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(shellInitFiles);
+            }
+
+            public java.util.List<String> getPassthroughEnvironmentNames() {
+                return passthroughEnvironmentNames;
+            }
+
+            public void setPassthroughEnvironmentNames(java.util.List<String> passthroughEnvironmentNames) {
+                this.passthroughEnvironmentNames = passthroughEnvironmentNames == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(passthroughEnvironmentNames);
+            }
+
+            public java.util.List<String> getDeniedEnvironmentNames() {
+                return deniedEnvironmentNames;
+            }
+
+            public void setDeniedEnvironmentNames(java.util.List<String> deniedEnvironmentNames) {
+                this.deniedEnvironmentNames = deniedEnvironmentNames == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(deniedEnvironmentNames);
+            }
+
+            public java.util.List<String> getDeniedEnvironmentPatterns() {
+                return deniedEnvironmentPatterns;
+            }
+
+            public void setDeniedEnvironmentPatterns(java.util.List<String> deniedEnvironmentPatterns) {
+                this.deniedEnvironmentPatterns = deniedEnvironmentPatterns == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(deniedEnvironmentPatterns);
+            }
         }
     }
 

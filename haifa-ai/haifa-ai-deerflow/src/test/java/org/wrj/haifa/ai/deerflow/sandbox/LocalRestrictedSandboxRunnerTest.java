@@ -28,7 +28,7 @@ class LocalRestrictedSandboxRunnerTest {
         ));
 
         assertThat(result.exitCode()).isEqualTo(0);
-        assertThat(result.metadata()).containsEntry("sandboxBackend", "local");
+        assertThat(result.metadata()).containsEntry("sandboxBackend", "local-restricted");
         assertThat(result.metadata()).containsEntry("strongIsolation", false);
         assertThat(result.metadata()).containsEntry("workspaceMounted", false);
         assertThat(result.metadata()).containsKey("isolationWarning");
@@ -123,9 +123,7 @@ class LocalRestrictedSandboxRunnerTest {
         LocalRestrictedSandboxRunner runner = new LocalRestrictedSandboxRunner(properties);
 
         // Verify that path resolution maps virtual paths in the command
-        String echoCmd = isWindows()
-                ? "echo /mnt/user-data/workspace/test.txt"
-                : "echo /mnt/user-data/workspace/test.txt";
+        String echoCmd = "echo /mnt/user-data/workspace/test.txt";
         SandboxResult result = runner.run(new SandboxRequest(
                 echoCmd,
                 tmp.resolve("workspace"),
@@ -141,7 +139,7 @@ class LocalRestrictedSandboxRunnerTest {
         assertThat(result.stdout().trim()).contains("/mnt/user-data/workspace/test.txt");
 
         // Verify basic environment variable settings like PATH exist
-        String envCmd = isWindows() ? "set PATH" : "env";
+        String envCmd = "printf '%s' \"$PATH\"";
         SandboxResult envResult = runner.run(new SandboxRequest(
                 envCmd,
                 tmp.resolve("workspace"),
@@ -163,18 +161,15 @@ class LocalRestrictedSandboxRunnerTest {
     }
 
     private static String slowCommand() {
-        return isWindows() ? "ping -n 3 127.0.0.1 > nul" : "sleep 2";
+        return "sleep 2";
     }
 
     private static String currentDirectoryCommand() {
-        return isWindows() ? "cd" : "pwd";
+        return "pwd";
     }
 
     private static String largeOutputCommand() {
-        if (isWindows()) {
-            return "for /L %i in (1,1,300) do @echo 0123456789";
-        }
-        return "yes 0123456789 | head -n 300";
+        return "for i in {1..300}; do echo 0123456789; done";
     }
 
     private static boolean isWindows() {

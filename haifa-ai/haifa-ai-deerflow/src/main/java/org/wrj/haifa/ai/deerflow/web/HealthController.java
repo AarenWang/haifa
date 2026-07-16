@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxCapabilityService;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.thread.ThreadManager;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
@@ -26,16 +27,19 @@ public class HealthController {
     private final ThreadManager threadManager;
     private final MessageStore messageStore;
     private final UploadStorageService uploadStorageService;
+    private final SandboxCapabilityService sandboxCapabilityService;
 
     public HealthController(DeerFlowProperties properties, ToolRegistry toolRegistry,
                             RunManager runManager, ThreadManager threadManager, MessageStore messageStore,
-                            UploadStorageService uploadStorageService) {
+                            UploadStorageService uploadStorageService,
+                            SandboxCapabilityService sandboxCapabilityService) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.runManager = runManager;
         this.threadManager = threadManager;
         this.messageStore = messageStore;
         this.uploadStorageService = uploadStorageService;
+        this.sandboxCapabilityService = sandboxCapabilityService;
     }
 
     @GetMapping("/health")
@@ -51,6 +55,7 @@ public class HealthController {
         body.put("threadCount", threadManager.count());
         body.put("messageCount", messageStore.count());
         body.put("uploadCount", uploadStorageService.count());
+        body.put("sandbox", sandboxCapabilityService.health());
         return Mono.just(body);
     }
 }

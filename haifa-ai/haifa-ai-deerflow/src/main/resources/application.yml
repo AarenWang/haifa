@@ -60,13 +60,33 @@ haifa:
       run-script-enabled: true
       sandbox:
         enabled: true
-        backend: local
+        # local is retained as a compatibility alias for local-restricted.
+        # local-trusted executes host processes and requires both explicit gates below.
+        backend: local-restricted
+        allow-host-execution: true
         allowed-script-languages: python,python3,powershell,node,bash
-        run-script-local-unsafe-allowed: true
+        run-script-local-unsafe-allowed: false
         network-enabled: true
         allowed-commands:
         denied-patterns: rm -rf,format,shutdown,reboot,del /s,Remove-Item -Recurse
         script-workdir-subdir: scripts
+        executables:
+          node: ${HAIFA_DEERFLOW_NODE_EXECUTABLE:}
+          python: ${HAIFA_DEERFLOW_PYTHON_EXECUTABLE:}
+          python3: ${HAIFA_DEERFLOW_PYTHON3_EXECUTABLE:}
+          bash: ${HAIFA_DEERFLOW_BASH_EXECUTABLE:}
+          powershell: ${HAIFA_DEERFLOW_POWERSHELL_EXECUTABLE:}
+        local-trusted:
+          enabled: false
+          inherit-environment: true
+          inherit-path: true
+          load-user-profile: false
+          isolate-home: false
+          shell-executable: ${HAIFA_DEERFLOW_TRUSTED_SHELL:}
+          shell-init-files: []
+          passthrough-environment-names: []
+          denied-environment-names: []
+          denied-environment-patterns: []
         # Explicit sandbox environment allowlist. Values are injected into the
         # generic bash/run_script runtime and are never included in tool metadata.
         environment:

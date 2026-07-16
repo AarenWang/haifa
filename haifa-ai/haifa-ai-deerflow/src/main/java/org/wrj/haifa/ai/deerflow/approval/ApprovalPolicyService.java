@@ -14,6 +14,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.sandbox.CommandPolicy;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxBackend;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 
 @Component
@@ -120,7 +121,8 @@ public class ApprovalPolicyService {
 
         // 5. Default approval rules evaluation
         String preview = generatePreview(toolName, arguments);
-        boolean isLocal = properties.getSandbox() != null && "local".equalsIgnoreCase(properties.getSandbox().getBackend());
+        boolean isLocal = properties.getSandbox() != null
+                && SandboxBackend.from(properties.getSandbox().getBackend()) != SandboxBackend.DOCKER;
         boolean isNetwork = properties.getSandbox() != null && properties.getSandbox().isNetworkEnabled();
 
         if ("run_script".equals(toolName)) {

@@ -57,11 +57,11 @@ public class LsTool implements AgentTool {
                     : pathResolver.resolveReadable(requestedPath, request.workspaceRoot());
 
             if (!Files.exists(resolved)) {
-                return ToolResult.of(name(), "Error: path does not exist: " + requestedPath);
+                return ToolResult.notFound(name(), "Error: path does not exist: " + requestedPath);
             }
 
             if (!Files.isDirectory(resolved)) {
-                return ToolResult.of(name(), "Path is a file: " + requestedPath + "\nSize: " + Files.size(resolved) + " bytes");
+                return ToolResult.success(name(), "Path is a file: " + requestedPath + "\nSize: " + Files.size(resolved) + " bytes", java.util.Map.of());
             }
 
             try (Stream<Path> paths = Files.list(resolved)) {
@@ -73,12 +73,13 @@ public class LsTool implements AgentTool {
                             return resolved.relativize(path).toString().replace('\\', '/') + suffix;
                         })
                         .collect(Collectors.joining("\n"));
-                return ToolResult.of(name(), content.isBlank() ? "(directory is empty)" : content);
+                return ToolResult.success(name(), content.isBlank() ? "(directory is empty)" : content, java.util.Map.of());
             }
         } catch (IllegalArgumentException e) {
-            return ToolResult.of(name(), "Security Exception: " + e.getMessage());
+            return ToolResult.denied(name(), "Security Exception: " + e.getMessage(),
+                    java.util.Map.of("denied", true, "reason", e.getMessage()));
         } catch (Exception e) {
-            return ToolResult.of(name(), "Error: " + e.getMessage());
+            return ToolResult.failed(name(), "Error: " + e.getMessage());
         }
     }
 }

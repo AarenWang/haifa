@@ -13,6 +13,7 @@ import org.wrj.haifa.ai.deerflow.sandbox.LocalRestrictedSandboxRunner;
 import org.wrj.haifa.ai.deerflow.sandbox.SandboxRequest;
 import org.wrj.haifa.ai.deerflow.sandbox.SandboxResult;
 import org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxExecutionPolicy;
 
 @Component
 public class BashTool implements AgentTool {
@@ -57,6 +58,11 @@ public class BashTool implements AgentTool {
         if (properties.getSandbox() == null || !properties.getSandbox().isEnabled()) {
             return ToolResult.denied(name(), "Tool bash sandbox is disabled by security configuration.",
                     Map.of("denied", true, "reason", "sandbox disabled"));
+        }
+        SandboxExecutionPolicy.Decision executionDecision = SandboxExecutionPolicy.evaluate(properties, false);
+        if (!executionDecision.allowed()) {
+            return ToolResult.denied(name(), "Execution denied: " + executionDecision.reason(),
+                    Map.of("denied", true, "reason", executionDecision.reason()));
         }
         try {
             String jsonInput = request.userMessage();

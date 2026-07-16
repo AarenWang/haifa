@@ -48,6 +48,7 @@ class BashToolSandboxTest {
         properties.setBashEnabled(true);
         properties.setOutputsRoot(tmp.resolve("outputs").toString());
         properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setAllowHostExecution(true);
         FakeSandboxRunner runner = new FakeSandboxRunner();
 
         ToolResult result = new BashTool(properties, runner, new CommandPolicy(properties))
@@ -68,6 +69,7 @@ class BashToolSandboxTest {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setBashEnabled(true);
         properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setAllowHostExecution(true);
         FakeSandboxRunner runner = new FakeSandboxRunner();
 
         ToolResult result = new BashTool(properties, runner, new CommandPolicy(properties))
@@ -84,6 +86,7 @@ class BashToolSandboxTest {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setBashEnabled(true);
         properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setAllowHostExecution(true);
         FakeSandboxRunner runner = new FakeSandboxRunner();
         runner.nextResult = new SandboxResult("sandbox-test", 7, "", "provider failed", 12,
                 false, false, Map.of("sandboxBackend", "local"));
@@ -103,6 +106,7 @@ class BashToolSandboxTest {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setBashEnabled(true);
         properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setAllowHostExecution(true);
         properties.getSandbox().setEnvironment(Map.of(
                 "GEMINI_API_KEY", "secret", "EMPTY_VALUE", ""));
         FakeSandboxRunner runner = new FakeSandboxRunner();

@@ -53,13 +53,13 @@ class RunScriptToolTest {
         ToolResult result = new RunScriptTool(properties, runner, new CommandPolicy(properties))
                 .execute(new ToolRequest("{\"language\":\"python\",\"code\":\"print(1)\"}", tmp));
 
-        assertThat(result.content()).contains("Execution denied: run_script requires docker sandbox backend");
+        assertThat(result.content()).contains("Local host execution is disabled");
         assertThat(result.metadata()).containsEntry("denied", true);
         assertThat(runner.calls).isEqualTo(0);
     }
 
     @Test
-    void unknownBackendFallsBackToLocalAndFailsByDefault(@TempDir Path tmp) {
+    void unknownBackendFailsClosed(@TempDir Path tmp) {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setRunScriptEnabled(true);
         properties.getSandbox().setEnabled(true);
@@ -70,7 +70,7 @@ class RunScriptToolTest {
         ToolResult result = new RunScriptTool(properties, runner, new CommandPolicy(properties))
                 .execute(new ToolRequest("{\"language\":\"python\",\"code\":\"print(1)\"}", tmp));
 
-        assertThat(result.content()).contains("Execution denied: run_script requires docker sandbox backend");
+        assertThat(result.content()).contains("Unsupported sandbox backend: dockr");
         assertThat(result.metadata()).containsEntry("denied", true);
         assertThat(runner.calls).isEqualTo(0);
     }
@@ -161,7 +161,8 @@ class RunScriptToolTest {
 
         assertThat(runner.calls).isEqualTo(1);
         assertThat(runner.lastRequest.runWorkingDirectory()).isNotNull();
-        assertThat(runner.lastRequest.cmdArgs()).containsExactly("python", "script.py", "arg1");
+        assertThat(Path.of(runner.lastRequest.cmdArgs().get(0))).isAbsolute();
+        assertThat(runner.lastRequest.cmdArgs().subList(1, 3)).containsExactly("script.py", "arg1");
 
         Path scriptFolder = runner.lastRequest.runWorkingDirectory();
         assertThat(Files.exists(scriptFolder.resolve("script.py"))).isTrue();
@@ -198,12 +199,9 @@ class RunScriptToolTest {
         );
         tool.execute(request);
 
-        boolean isWin = System.getProperty("os.name").toLowerCase().contains("win");
-        String expectedShell = isWin ? "powershell" : "pwsh";
-
-        assertThat(runner.lastRequest.cmdArgs()).containsExactly(
-                expectedShell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "script.ps1"
-        );
+        assertThat(Path.of(runner.lastRequest.cmdArgs().get(0))).isAbsolute();
+        assertThat(runner.lastRequest.cmdArgs().subList(1, 6)).containsExactly(
+                "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "script.ps1");
     }
 
     @Test
@@ -225,9 +223,8 @@ class RunScriptToolTest {
         );
         tool.execute(request);
 
-        assertThat(runner.lastRequest.cmdArgs()).containsExactly(
-                "bash", "script.sh"
-        );
+        assertThat(Path.of(runner.lastRequest.cmdArgs().get(0))).isAbsolute();
+        assertThat(runner.lastRequest.cmdArgs().get(1)).isEqualTo("script.sh");
     }
 
     private static class FakeSandboxRunner implements SandboxRunner {

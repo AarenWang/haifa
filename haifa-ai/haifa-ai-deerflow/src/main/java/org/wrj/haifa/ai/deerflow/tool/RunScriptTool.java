@@ -18,6 +18,8 @@ import org.wrj.haifa.ai.deerflow.sandbox.SandboxBackend;
 import org.wrj.haifa.ai.deerflow.sandbox.SandboxRequest;
 import org.wrj.haifa.ai.deerflow.sandbox.SandboxResult;
 import org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner;
+import org.wrj.haifa.ai.deerflow.sandbox.RuntimeExecutableResolver;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxExecutionPolicy;
 
 @Component
 public class RunScriptTool implements AgentTool {
@@ -27,13 +29,20 @@ public class RunScriptTool implements AgentTool {
     private final SandboxRunner sandboxRunner;
     private final CommandPolicy commandPolicy;
     private final UserDataPathResolver pathResolver;
+    private final RuntimeExecutableResolver runtimeResolver;
 
     @Autowired
     public RunScriptTool(DeerFlowProperties properties, SandboxRunner sandboxRunner, CommandPolicy commandPolicy) {
+        this(properties, sandboxRunner, commandPolicy, new RuntimeExecutableResolver(properties));
+    }
+
+    public RunScriptTool(DeerFlowProperties properties, SandboxRunner sandboxRunner, CommandPolicy commandPolicy,
+            RuntimeExecutableResolver runtimeResolver) {
         this.properties = properties;
         this.sandboxRunner = sandboxRunner;
         this.commandPolicy = commandPolicy;
         this.pathResolver = new UserDataPathResolver(properties);
+        this.runtimeResolver = runtimeResolver;
     }
 
     @Override
@@ -62,28 +71,30 @@ public class RunScriptTool implements AgentTool {
     @Override
     public ToolResult execute(ToolRequest request) {
         if (!properties.isRunScriptEnabled()) {
-            return ToolResult.of(name(), "Tool run_script is disabled by security configuration.");
+            return ToolResult.denied(name(), "Tool run_script is disabled by security configuration.",
+                    Map.of("denied", true, "reason", "run_script disabled"));
         }
         if (properties.getSandbox() == null || !properties.getSandbox().isEnabled()) {
-            return ToolResult.of(name(), "Tool run_script sandbox is disabled by security configuration.",
+            return ToolResult.denied(name(), "Tool run_script sandbox is disabled by security configuration.",
                     Map.of("denied", true, "reason", "sandbox disabled"));
         }
-        SandboxBackend backend = SandboxBackend.from(properties.getSandbox().getBackend());
-        if (backend == SandboxBackend.LOCAL && !properties.getSandbox().isRunScriptLocalUnsafeAllowed()) {
-            return ToolResult.of(name(), "Execution denied: run_script requires docker sandbox backend for strong isolation. To override this for local unsafe development, set haifa.ai.deerflow.sandbox.run-script-local-unsafe-allowed=true.",
-                    Map.of("denied", true, "reason", "local backend execution not allowed"));
+        SandboxExecutionPolicy.Decision executionDecision = SandboxExecutionPolicy.evaluate(properties, true);
+        if (!executionDecision.allowed()) {
+            return ToolResult.denied(name(), "Execution denied: " + executionDecision.reason(),
+                    Map.of("denied", true, "reason", executionDecision.reason()));
         }
+        SandboxBackend backend = executionDecision.backend();
 
         try {
             String jsonInput = request.userMessage();
             if (jsonInput == null || jsonInput.isBlank()) {
-                return ToolResult.of(name(), "Error: arguments JSON required");
+                return ToolResult.failed(name(), "Error: arguments JSON required");
             }
             JsonNode node;
             try {
                 node = MAPPER.readTree(jsonInput);
             } catch (Exception jsonEx) {
-                return ToolResult.of(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
+                return ToolResult.failed(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
             }
 
             String language = node.has("language") ? node.get("language").asText() : null;
@@ -99,23 +110,23 @@ public class RunScriptTool implements AgentTool {
             }
 
             if (language == null || language.isBlank()) {
-                return ToolResult.of(name(), "Error: language is required");
+                return ToolResult.failed(name(), "Error: language is required");
             }
             if (code == null || code.isBlank()) {
-                return ToolResult.of(name(), "Error: code is required");
+                return ToolResult.failed(name(), "Error: code is required");
             }
             if (code.length() > 65536) {
-                return ToolResult.of(name(), "Error: code exceeds maximum size of 64 KB");
+                return ToolResult.failed(name(), "Error: code exceeds maximum size of 64 KB");
             }
             CommandPolicy.Decision bodyDecision = commandPolicy.evaluateScriptBody(code);
             if (!bodyDecision.allowed()) {
-                return ToolResult.of(name(), "Script execution denied: " + bodyDecision.reason(),
+                return ToolResult.denied(name(), "Script execution denied: " + bodyDecision.reason(),
                         Map.of("denied", true, "reason", bodyDecision.reason()));
             }
             if (args != null) {
                 for (String arg : args) {
                     if (arg != null && arg.length() > 2048) {
-                        return ToolResult.of(name(), "Error: argument exceeds maximum size of 2 KB");
+                        return ToolResult.failed(name(), "Error: argument exceeds maximum size of 2 KB");
                     }
                 }
             }
@@ -126,7 +137,7 @@ public class RunScriptTool implements AgentTool {
                     .map(String::toLowerCase)
                     .toList();
             if (!allowedList.contains(language.toLowerCase())) {
-                return ToolResult.of(name(), "Error: language '" + language + "' is not allowed by security configuration. Allowed: " + allowedLangs,
+                return ToolResult.denied(name(), "Error: language '" + language + "' is not allowed by security configuration. Allowed: " + allowedLangs,
                         Map.of("denied", true, "reason", "language not allowed"));
             }
 
@@ -134,7 +145,7 @@ public class RunScriptTool implements AgentTool {
             try {
                 ext = getExtensionFor(language);
             } catch (IllegalArgumentException ex) {
-                return ToolResult.of(name(), ex.getMessage());
+                return ToolResult.failed(name(), ex.getMessage());
             }
 
             String runId = request.runId() == null || request.runId().isBlank() ? "adhoc" : request.runId();
@@ -149,32 +160,34 @@ public class RunScriptTool implements AgentTool {
             ));
             Path normalizedDir = baseDir.toAbsolutePath().normalize();
             if (!normalizedDir.startsWith(workspaceRootPath)) {
-                return ToolResult.of(name(), "Error: destination directory is outside allowed workspace root");
+                return ToolResult.failed(name(), "Error: destination directory is outside allowed workspace root");
             }
 
             Path scriptFile = normalizedDir.resolve("script" + ext).normalize();
             if (!scriptFile.startsWith(workspaceRootPath)) {
-                return ToolResult.of(name(), "Error: script file path is outside allowed workspace root");
+                return ToolResult.failed(name(), "Error: script file path is outside allowed workspace root");
             }
 
             try {
                 Files.createDirectories(normalizedDir);
-                String rewrittenCode = pathResolver.rewriteContainerPathsToLocal(code);
+                String rewrittenCode = pathResolver.rewriteContainerPathsToLocal(normalizeCode(language, code));
                 Files.writeString(scriptFile, rewrittenCode, StandardCharsets.UTF_8);
             } catch (IOException ex) {
-                return ToolResult.of(name(), "Error writing script file: " + ex.getMessage());
+                return ToolResult.failed(name(), "Error writing script file: " + ex.getMessage());
             }
 
             java.util.List<String> cmdArgs;
             try {
-                cmdArgs = commandArgsFor(language, "script" + ext, args);
-            } catch (IllegalArgumentException ex) {
-                return ToolResult.of(name(), ex.getMessage());
+                cmdArgs = commandArgsFor(language, "script" + ext, args, backend);
+            } catch (IllegalArgumentException | IllegalStateException ex) {
+                return ToolResult.failed(name(), ex.getMessage(),
+                        Map.of("language", language, "backend", backend.id(), "capabilityAvailable", false));
             }
             String commandToRun = String.join(" ", cmdArgs);
-            CommandPolicy.Decision policyDecision = commandPolicy.evaluate(commandToRun, pathResolver.workspaceRoot());
+            CommandPolicy.Decision policyDecision = commandPolicy.evaluate(language + " script" + ext,
+                    pathResolver.workspaceRoot());
             if (!policyDecision.allowed()) {
-                return ToolResult.of(name(), "Command denied by policy: " + policyDecision.reason(),
+                return ToolResult.denied(name(), "Command denied by policy: " + policyDecision.reason(),
                         Map.of("denied", true, "reason", policyDecision.reason()));
             }
 
@@ -229,25 +242,19 @@ public class RunScriptTool implements AgentTool {
         };
     }
 
-    private java.util.List<String> commandArgsFor(String language, String scriptFileName, java.util.List<String> args) {
+    private java.util.List<String> commandArgsFor(String language, String scriptFileName, java.util.List<String> args,
+            SandboxBackend backend) {
         java.util.List<String> cmd = new java.util.ArrayList<>();
+        String executable = runtimeResolver.resolve(language, backend);
         switch (language.toLowerCase()) {
-            case "python" -> cmd.add("python");
-            case "python3" -> cmd.add("python3");
+            case "python", "python3", "node", "bash" -> cmd.add(executable);
             case "powershell" -> {
-                String os = System.getProperty("os.name").toLowerCase();
-                if (os.contains("win")) {
-                    cmd.add("powershell");
-                } else {
-                    cmd.add("pwsh");
-                }
+                cmd.add(executable);
                 cmd.add("-NoProfile");
                 cmd.add("-ExecutionPolicy");
                 cmd.add("Bypass");
                 cmd.add("-File");
             }
-            case "node" -> cmd.add("node");
-            case "bash" -> cmd.add("bash");
             default -> throw new IllegalArgumentException("Unsupported language: " + language);
         }
         cmd.add(scriptFileName);
@@ -255,6 +262,15 @@ public class RunScriptTool implements AgentTool {
             cmd.addAll(args);
         }
         return cmd;
+    }
+
+    private static String normalizeCode(String language, String code) {
+        if (!"powershell".equalsIgnoreCase(language)) {
+            return code;
+        }
+        return "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
+                + "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
+                + "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n" + code;
     }
 
     private static String render(SandboxResult result, String language) {

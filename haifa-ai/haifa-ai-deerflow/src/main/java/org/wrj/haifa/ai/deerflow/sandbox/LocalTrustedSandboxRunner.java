@@ -3,15 +3,15 @@ package org.wrj.haifa.ai.deerflow.sandbox;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.tool.UserDataPathResolver;
 
 @Component
-public class LocalRestrictedSandboxRunner extends AbstractLocalSandboxRunner {
+public class LocalTrustedSandboxRunner extends AbstractLocalSandboxRunner {
 
-    public LocalRestrictedSandboxRunner(DeerFlowProperties properties) {
+    public LocalTrustedSandboxRunner(DeerFlowProperties properties) {
         this(properties, new UserDataPathResolver(properties),
                 new SandboxEnvironmentBuilder(properties, new TrustedEnvironmentPolicy(properties),
                         new HostShellResolver(properties)),
@@ -20,7 +20,7 @@ public class LocalRestrictedSandboxRunner extends AbstractLocalSandboxRunner {
     }
 
     @Autowired
-    public LocalRestrictedSandboxRunner(DeerFlowProperties properties, UserDataPathResolver pathResolver,
+    public LocalTrustedSandboxRunner(DeerFlowProperties properties, UserDataPathResolver pathResolver,
             SandboxEnvironmentBuilder environmentBuilder, HostShellResolver shellResolver,
             ProcessOutputDecoder outputDecoder, SandboxSecretRedactor secretRedactor) {
         super(properties, pathResolver, environmentBuilder, shellResolver, outputDecoder, secretRedactor);
@@ -29,31 +29,26 @@ public class LocalRestrictedSandboxRunner extends AbstractLocalSandboxRunner {
     @Override
     protected Map<String, String> buildEnvironment(Map<String, String> explicitEnvironment,
             List<String> commandArgs, Path workdir) {
-        return environmentBuilder().buildRestricted(explicitEnvironment, commandArgs, workdir);
+        return environmentBuilder().buildTrusted(explicitEnvironment, commandArgs, workdir);
     }
 
     @Override
     protected String backendId() {
-        return SandboxBackend.LOCAL_RESTRICTED.id();
+        return SandboxBackend.LOCAL_TRUSTED.id();
     }
 
     @Override
     protected String isolationLevel() {
-        return "local-restricted";
+        return "trusted-host";
     }
 
     @Override
     protected String environmentPolicy() {
-        return "restricted-allowlist";
+        return "inherit-filtered";
     }
 
     @Override
     protected String isolationWarning() {
-        return "Local Restricted runs a host process with a controlled cwd and environment; use Docker for untrusted workloads.";
-    }
-
-    @Override
-    protected boolean exposePhysicalWorkdir() {
-        return true;
+        return "Local Trusted executes host processes and is intended only for trusted single-user development. Use Docker for untrusted workloads.";
     }
 }

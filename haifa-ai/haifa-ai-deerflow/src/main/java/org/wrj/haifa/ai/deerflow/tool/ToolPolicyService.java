@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.sandbox.SandboxBackend;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxExecutionPolicy;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 
 @Component
@@ -101,7 +102,8 @@ public class ToolPolicyService {
         if (properties.getSandbox() == null || !properties.getSandbox().isEnabled()) {
             return ToolPolicyDecision.deny("bash requires haifa.ai.deerflow.sandbox.enabled=true");
         }
-        return ToolPolicyDecision.allow();
+        SandboxExecutionPolicy.Decision decision = SandboxExecutionPolicy.evaluate(properties, false);
+        return decision.allowed() ? ToolPolicyDecision.allow() : ToolPolicyDecision.deny(decision.reason());
     }
 
     private ToolPolicyDecision runScriptDecision() {
@@ -111,11 +113,8 @@ public class ToolPolicyService {
         if (properties.getSandbox() == null || !properties.getSandbox().isEnabled()) {
             return ToolPolicyDecision.deny("run_script requires haifa.ai.deerflow.sandbox.enabled=true");
         }
-        SandboxBackend backend = SandboxBackend.from(properties.getSandbox().getBackend());
-        if (backend == SandboxBackend.LOCAL && !properties.getSandbox().isRunScriptLocalUnsafeAllowed()) {
-            return ToolPolicyDecision.deny("run_script local backend requires haifa.ai.deerflow.sandbox.run-script-local-unsafe-allowed=true");
-        }
-        return ToolPolicyDecision.allow();
+        SandboxExecutionPolicy.Decision decision = SandboxExecutionPolicy.evaluate(properties, true);
+        return decision.allowed() ? ToolPolicyDecision.allow() : ToolPolicyDecision.deny(decision.reason());
     }
 
     public Set<String> allowedToolsForSkills(List<Skill> activeSkills) {

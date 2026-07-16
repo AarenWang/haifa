@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 
@@ -17,9 +18,20 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 public class DockerSandboxRunner implements SandboxRunner {
 
     private final DeerFlowProperties properties;
+    private final ProcessOutputDecoder outputDecoder;
+    private final SandboxSecretRedactor secretRedactor;
 
     public DockerSandboxRunner(DeerFlowProperties properties) {
+        this(properties, new ProcessOutputDecoder(),
+                new SandboxSecretRedactor(new TrustedEnvironmentPolicy(properties)));
+    }
+
+    @Autowired
+    public DockerSandboxRunner(DeerFlowProperties properties, ProcessOutputDecoder outputDecoder,
+            SandboxSecretRedactor secretRedactor) {
         this.properties = properties;
+        this.outputDecoder = outputDecoder;
+        this.secretRedactor = secretRedactor;
     }
 
     @Override
@@ -47,6 +59,11 @@ public class DockerSandboxRunner implements SandboxRunner {
             ProcessBuilder processBuilder = new ProcessBuilder(command);
             processBuilder.environment().clear();
             processBuilder.environment().put("PATH", System.getenv().getOrDefault("PATH", ""));
+            request.environment().forEach((key, value) -> {
+                if (key != null && key.matches("[A-Za-z_][A-Za-z0-9_]*") && value != null) {
+                    processBuilder.environment().put(key, value);
+                }
+            });
             process = processBuilder.start();
 
             ByteArrayOutputStream stdout = new ByteArrayOutputStream();
@@ -64,8 +81,10 @@ public class DockerSandboxRunner implements SandboxRunner {
             stderrThread.join(1_000);
 
             int exitCode = timedOut ? -1 : process.exitValue();
-            LocalRestrictedSandboxRunner.TruncatedOutput truncated = LocalRestrictedSandboxRunner.truncate(
-                    stdout.toString(), stderr.toString(), properties.getSandbox().getMaxOutputChars());
+            String decodedStdout = secretRedactor.redact(outputDecoder.decode(stdout.toByteArray()), request.environment());
+            String decodedStderr = secretRedactor.redact(outputDecoder.decode(stderr.toByteArray()), request.environment());
+            AbstractLocalSandboxRunner.TruncatedOutput truncated = AbstractLocalSandboxRunner.truncate(
+                    decodedStdout, decodedStderr, properties.getSandbox().getMaxOutputChars());
             return new SandboxResult(sandboxId, exitCode, truncated.stdout(), truncated.stderr(),
                     System.currentTimeMillis() - start, timedOut, truncated.truncated(), Map.of(
                             "sandboxBackend", SandboxBackend.DOCKER.id(),
@@ -82,7 +101,8 @@ public class DockerSandboxRunner implements SandboxRunner {
             if (process != null) {
                 process.destroyForcibly();
             }
-            return new SandboxResult(sandboxId, -1, "", "Docker sandbox execution failed: " + ex.getMessage(),
+            String message = secretRedactor.redact("Docker sandbox execution failed: " + ex.getMessage(), request.environment());
+            return new SandboxResult(sandboxId, -1, "", message,
                     System.currentTimeMillis() - start, false, false, Map.of(
                             "sandboxBackend", SandboxBackend.DOCKER.id(),
                             "isolationLevel", "docker",
@@ -128,7 +148,7 @@ public class DockerSandboxRunner implements SandboxRunner {
         request.environment().forEach((key, value) -> {
             if (key != null && key.matches("[A-Za-z_][A-Za-z0-9_]*") && value != null) {
                 command.add("-e");
-                command.add(key + "=" + value);
+                command.add(key);
             }
         });
         command.add(properties.getSandbox().getDockerImage());
