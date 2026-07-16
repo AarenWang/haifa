@@ -58,6 +58,14 @@ public class RunScriptTool implements AgentTool {
     }
 
     @Override
+    public java.util.List<org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract> completionContracts() {
+        return java.util.List.of(new org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract(
+                org.wrj.haifa.ai.deerflow.completion.CompletionRequirementType.COMMAND_EXECUTION,
+                org.wrj.haifa.ai.deerflow.completion.EvidenceType.COMMAND_RESULT,
+                "sandbox script"));
+    }
+
+    @Override
     public boolean supports(String userMessage) {
         if (userMessage == null) {
             return false;

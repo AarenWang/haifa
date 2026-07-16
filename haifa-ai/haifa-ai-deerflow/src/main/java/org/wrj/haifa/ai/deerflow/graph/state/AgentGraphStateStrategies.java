@@ -28,6 +28,8 @@ public final class AgentGraphStateStrategies {
                 .addStrategy(AgentGraphStateKeys.MODEL_STEPS, KeyStrategy.APPEND)
                 .addStrategy(AgentGraphStateKeys.TOOL_CALLS, KeyStrategy.APPEND)
                 .addStrategy(AgentGraphStateKeys.TOOL_RESULTS, KeyStrategy.APPEND)
+                .addStrategy(AgentGraphStateKeys.COMPLETION_REQUIREMENTS, KeyStrategy.APPEND)
+                .addStrategy(AgentGraphStateKeys.EVIDENCE_LEDGER, KeyStrategy.APPEND)
                 .addStrategy(AgentGraphStateKeys.PENDING_TOOL_CALLS, KeyStrategy.REPLACE)
                 .addStrategy(AgentGraphStateKeys.RESEARCH_PLAN_REF, KeyStrategy.REPLACE)
                 .addStrategy(AgentGraphStateKeys.RESEARCH_PHASE, KeyStrategy.REPLACE)

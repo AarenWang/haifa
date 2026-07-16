@@ -44,6 +44,14 @@ public class WriteFileTool implements AgentTool {
     }
 
     @Override
+    public java.util.List<org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract> completionContracts() {
+        return java.util.List.of(new org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract(
+                org.wrj.haifa.ai.deerflow.completion.CompletionRequirementType.FILE_MUTATION,
+                org.wrj.haifa.ai.deerflow.completion.EvidenceType.FILE_CHANGE,
+                "workspace file write"));
+    }
+
+    @Override
     public boolean supports(String userMessage) {
         return userMessage != null && userMessage.toLowerCase().contains("write_file");
     }
@@ -51,19 +59,20 @@ public class WriteFileTool implements AgentTool {
     @Override
     public ToolResult execute(ToolRequest request) {
         if (!properties.isWriteFileEnabled()) {
-            return ToolResult.of(name(), "Tool write_file is disabled by security configuration.");
+            return ToolResult.denied(name(), "Tool write_file is disabled by security configuration.",
+                    Map.of("denied", true, "reason", "write_file disabled"));
         }
         try {
             String jsonInput = request.userMessage();
             if (jsonInput == null || jsonInput.isBlank()) {
-                return ToolResult.of(name(), "Error: arguments JSON required");
+                return ToolResult.failed(name(), "Error: arguments JSON required");
             }
             JsonNode node;
             try {
                 node = MAPPER.readTree(jsonInput);
             } catch (Exception jsonEx) {
                 // Natural language fallback
-                return ToolResult.of(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
+                return ToolResult.failed(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
             }
             String requestedPath = null;
             if (node.has("path")) {
@@ -77,10 +86,10 @@ public class WriteFileTool implements AgentTool {
             }
             String content = node.has("content") ? node.get("content").asText() : "";
             if (requestedPath == null || requestedPath.isBlank()) {
-                return ToolResult.of(name(), "Error: path is required");
+                return ToolResult.failed(name(), "Error: path is required");
             }
             if (hasBinaryExtension(requestedPath)) {
-                return ToolResult.of(name(), "Error: write_file only writes UTF-8 text and cannot create binary file '"
+                return ToolResult.failed(name(), "Error: write_file only writes UTF-8 text and cannot create binary file '"
                         + requestedPath + "'. Use a format-specific generator and verify the resulting file instead.",
                         Map.of("error", true, "reason", "BINARY_FORMAT_REQUIRES_GENERATOR"));
             }
@@ -101,16 +110,17 @@ public class WriteFileTool implements AgentTool {
                 metadata.put("mimeType", artifact.mimeType());
                 metadata.put("size", artifact.size());
                 metadata.put("downloadUrl", downloadUrl);
-                return ToolResult.of(name(),
+                return ToolResult.success(name(),
                         "File written and registered for download: " + artifact.filename()
                                 + " (" + downloadUrl + ")",
                         metadata);
             }
-            return ToolResult.of(name(), "File written successfully: " + requestedPath, metadata);
+            return ToolResult.success(name(), "File written successfully: " + requestedPath, metadata);
         } catch (IllegalArgumentException e) {
-            return ToolResult.of(name(), "Security Exception: " + e.getMessage());
+            return ToolResult.denied(name(), "Security Exception: " + e.getMessage(),
+                    Map.of("denied", true, "reason", e.getMessage()));
         } catch (Exception e) {
-            return ToolResult.of(name(), "Error: " + e.getMessage());
+            return ToolResult.failed(name(), "Error: " + e.getMessage());
         }
     }
 

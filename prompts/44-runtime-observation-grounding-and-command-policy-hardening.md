@@ -59,6 +59,10 @@ Requirement 采用双层触发：
 1. 请求入口或规划阶段根据结构化意图登记 Requirement；
 2. 实际工具行为自动追加 Requirement，避免规划遗漏。例如本机采集工具追加 `LOCAL_OBSERVATION`，绘图行为追加 `ARTIFACT_DELIVERY`。
 
+规划阶段通过 `declare_completion_requirements` Tool 登记结构化 Requirement。该 Tool 只能增加约束，不得生成任何 Evidence。受信任 Tool 通过代码级 `ToolCompletionContract` 声明其 Requirement 与成功 Evidence 类型；失败调用仍登记 Requirement，但不生成 Evidence。
+
+通用 `run_script` 和 `bash` 成功最多生成 `COMMAND_RESULT`，不能因为 stdout 看起来像 JSON 或包含数字就升级为 `MEASUREMENT`。仅允许受信任的领域适配器根据已验证的命令级规则追加动态 contract。例如直接执行并在 stdout 返回系统状态的 `powercfg /getactivescheme`、`/query`、`/requests` 等查询可生成 `MEASUREMENT`；仅生成报告文件的 `/batteryreport`、`/energy`、`/srumutil` 不得仅凭命令成功生成测量 Evidence。
+
 Tool 执行成功后由受信任运行时生成 `EvidenceRecord`，模型不得自行声明证据类型。至少记录：
 
 ```text

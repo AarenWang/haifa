@@ -2,6 +2,7 @@ package org.wrj.haifa.ai.deerflow.graph.state;
 
 import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
+import org.wrj.haifa.ai.deerflow.completion.CompletionRequirements;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
@@ -64,6 +65,11 @@ public class AgentGraphStateFactory {
         state.put(AgentGraphStateKeys.MODEL_STEPS, List.of());
         state.put(AgentGraphStateKeys.TOOL_CALLS, List.of());
         state.put(AgentGraphStateKeys.TOOL_RESULTS, List.of());
+        state.put(AgentGraphStateKeys.COMPLETION_REQUIREMENTS,
+                CompletionRequirements.fromRequestMetadata(request.metadata()).stream()
+                        .map(org.wrj.haifa.ai.deerflow.completion.CompletionRequirement::toMap)
+                        .toList());
+        state.put(AgentGraphStateKeys.EVIDENCE_LEDGER, List.of());
         state.put(AgentGraphStateKeys.PENDING_TOOL_CALLS, List.of());
         state.put(AgentGraphStateKeys.TODOS, Map.of());
         state.put(AgentGraphStateKeys.RESEARCH_PLAN_REF, Map.of());

@@ -19,6 +19,8 @@ public final class AgentGraphStateKeys {
     public static final String MODEL_STEPS = "modelSteps";
     public static final String TOOL_CALLS = "toolCalls";
     public static final String TOOL_RESULTS = "toolResults";
+    public static final String COMPLETION_REQUIREMENTS = "completionRequirements";
+    public static final String EVIDENCE_LEDGER = "evidenceLedger";
     public static final String PENDING_TOOL_CALLS = "pendingToolCalls";
     public static final String TODOS = "todos";
     public static final String RESEARCH_PLAN_REF = "researchPlanRef";

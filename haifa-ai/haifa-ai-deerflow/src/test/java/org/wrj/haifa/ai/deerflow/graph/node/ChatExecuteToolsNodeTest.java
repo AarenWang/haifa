@@ -6,11 +6,15 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.completion.CompletionRequirementType;
+import org.wrj.haifa.ai.deerflow.completion.EvidenceType;
+import org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.tool.DeclareCompletionRequirementsTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
@@ -149,6 +153,78 @@ class ChatExecuteToolsNodeTest {
     }
 
     @Test
+    void trustedToolContractCreatesRequirementAndEvidenceOnSuccess() {
+        ToolCompletionContract contract = new ToolCompletionContract(
+                CompletionRequirementType.COMMAND_EXECUTION, EvidenceType.COMMAND_RESULT, "test command");
+        AgentTool tool = tool("contract_tool", request -> ToolResult.of("contract_tool", "real output"),
+                List.of(contract));
+        ChatExecuteToolsNode node = new ChatExecuteToolsNode(
+                new ToolRegistry(List.of(tool)), new DeerFlowProperties(), new ToolPolicyService(List.of(tool)));
+
+        Map<String, Object> update = node.apply(state("contract_tool")).join();
+
+        assertThat((List<Map<String, Object>>) update.get(AgentGraphStateKeys.COMPLETION_REQUIREMENTS))
+                .singleElement().satisfies(requirement -> assertThat(requirement)
+                        .containsEntry("type", "COMMAND_EXECUTION"));
+        assertThat((List<Map<String, Object>>) update.get(AgentGraphStateKeys.EVIDENCE_LEDGER))
+                .singleElement().satisfies(evidence -> assertThat(evidence)
+                        .containsEntry("type", "COMMAND_RESULT")
+                        .containsEntry("sourceToolCallId", "call-1")
+                        .containsEntry("runId", "run-1"));
+    }
+
+    @Test
+    void failedToolContractCreatesNoRequirementAndNoEvidence() {
+        ToolCompletionContract contract = new ToolCompletionContract(
+                CompletionRequirementType.LOCAL_OBSERVATION, EvidenceType.MEASUREMENT, "local snapshot");
+        AgentTool tool = tool("measurement_tool",
+                request -> ToolResult.failed("measurement_tool", "collection failed"), List.of(contract));
+        ChatExecuteToolsNode node = new ChatExecuteToolsNode(
+                new ToolRegistry(List.of(tool)), new DeerFlowProperties(), new ToolPolicyService(List.of(tool)));
+
+        Map<String, Object> update = node.apply(state("measurement_tool")).join();
+
+        assertThat((List<?>) update.get(AgentGraphStateKeys.COMPLETION_REQUIREMENTS)).isEmpty();
+        assertThat((List<?>) update.get(AgentGraphStateKeys.EVIDENCE_LEDGER)).isEmpty();
+    }
+
+    @Test
+    void appendsRequirementsDeclaredByTrustedToolMetadata() {
+        AgentTool tool = new DeclareCompletionRequirementsTool();
+        ChatExecuteToolsNode node = new ChatExecuteToolsNode(
+                new ToolRegistry(List.of(tool)), new DeerFlowProperties(), new ToolPolicyService(List.of(tool)));
+        OverAllState state = state("declare_completion_requirements", List.of(),
+                "{\"requirements\":[{\"type\":\"LOCAL_OBSERVATION\",\"subject\":\"battery\"}]}");
+
+        Map<String, Object> update = node.apply(state).join();
+
+        assertThat((List<Map<String, Object>>) update.get(AgentGraphStateKeys.COMPLETION_REQUIREMENTS))
+                .singleElement().satisfies(requirement -> assertThat(requirement)
+                        .containsEntry("type", "LOCAL_OBSERVATION")
+                        .containsEntry("subject", "battery"));
+        assertThat((List<?>) update.get(AgentGraphStateKeys.EVIDENCE_LEDGER)).isEmpty();
+    }
+
+    @Test
+    void appendsRuntimeContractProducedByToolImplementation() {
+        ToolCompletionContract measurement = new ToolCompletionContract(
+                CompletionRequirementType.LOCAL_OBSERVATION, EvidenceType.MEASUREMENT, "powercfg query");
+        AgentTool tool = tool("dynamic_tool", request -> ToolResult.success("dynamic_tool", "scheme data",
+                Map.of("runtimeCompletionContracts", List.of(measurement.toMap()))));
+        ChatExecuteToolsNode node = new ChatExecuteToolsNode(
+                new ToolRegistry(List.of(tool)), new DeerFlowProperties(), new ToolPolicyService(List.of(tool)));
+
+        Map<String, Object> update = node.apply(state("dynamic_tool")).join();
+
+        assertThat((List<Map<String, Object>>) update.get(AgentGraphStateKeys.COMPLETION_REQUIREMENTS))
+                .extracting(requirement -> requirement.get("type"))
+                .containsExactly("LOCAL_OBSERVATION");
+        assertThat((List<Map<String, Object>>) update.get(AgentGraphStateKeys.EVIDENCE_LEDGER))
+                .extracting(evidence -> evidence.get("type"))
+                .containsExactly("MEASUREMENT");
+    }
+
+    @Test
     void publishesTodoSnapshotImmediatelyAfterWriteTodosMutation() {
         Map<String, Object> snapshot = Map.of(
                 "threadId", "thread-1",
@@ -190,6 +266,10 @@ class ChatExecuteToolsNodeTest {
     }
 
     private static OverAllState state(String toolName, List<Skill> activeSkills) {
+        return state(toolName, activeSkills, "{\"value\":1}");
+    }
+
+    private static OverAllState state(String toolName, List<Skill> activeSkills, String arguments) {
         return new OverAllState(Map.of(
                 AgentGraphStateKeys.RUN_ID, "run-1",
                 AgentGraphStateKeys.THREAD_ID, "thread-1",
@@ -207,7 +287,7 @@ class ChatExecuteToolsNodeTest {
                 AgentGraphStateKeys.PENDING_TOOL_CALLS, List.of(Map.of(
                         "id", "call-1",
                         "name", toolName,
-                        "arguments", "{\"value\":1}"
+                        "arguments", arguments
                 ))
         ));
     }
@@ -242,6 +322,10 @@ class ChatExecuteToolsNodeTest {
     }
 
     private static AgentTool tool(String name, ToolBehavior behavior) {
+        return tool(name, behavior, List.of());
+    }
+
+    private static AgentTool tool(String name, ToolBehavior behavior, List<ToolCompletionContract> contracts) {
         return new AgentTool() {
             @Override
             public String name() {
@@ -251,6 +335,11 @@ class ChatExecuteToolsNodeTest {
             @Override
             public String description() {
                 return name + " description";
+            }
+
+            @Override
+            public List<ToolCompletionContract> completionContracts() {
+                return contracts;
             }
 
             @Override

@@ -31,6 +31,14 @@ public class PresentFilesTool implements AgentTool {
     }
 
     @Override
+    public java.util.List<org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract> completionContracts() {
+        return java.util.List.of(new org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract(
+                org.wrj.haifa.ai.deerflow.completion.CompletionRequirementType.ARTIFACT_DELIVERY,
+                org.wrj.haifa.ai.deerflow.completion.EvidenceType.ARTIFACT,
+                "presented files"));
+    }
+
+    @Override
     public boolean supports(String userMessage) {
         return userMessage != null && userMessage.toLowerCase().contains("present_files");
     }

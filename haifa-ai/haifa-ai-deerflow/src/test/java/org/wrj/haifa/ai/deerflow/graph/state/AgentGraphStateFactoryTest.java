@@ -56,7 +56,27 @@ class AgentGraphStateFactoryTest {
         assertThat(view.map(AgentGraphStateKeys.REQUEST_METADATA).get("requestId")).isEqualTo("req-1");
         assertThat(view.activeSkills()).isEmpty();
         assertThat(view.toolCalls()).isEmpty();
+        assertThat(view.listOfMaps(AgentGraphStateKeys.COMPLETION_REQUIREMENTS)).isEmpty();
+        assertThat(view.listOfMaps(AgentGraphStateKeys.EVIDENCE_LEDGER)).isEmpty();
         assertThat(view.finalAnswer()).isEmpty();
+    }
+
+    @Test
+    void seedsStructuredCompletionRequirementsFromRequestMetadata() {
+        AgentGraphStateFactory factory = new AgentGraphStateFactory();
+        AgentRunConfig config = new AgentRunConfig("thread-1", "run-1", "model-a", false, false, 4,
+                Path.of("."), RunMode.CHAT, ResearchOptions.defaults(), Map.of());
+        AgentRequest request = new AgentRequest("thread-1", "collect local data", "model-a",
+                List.of(), RunMode.CHAT, ResearchOptions.defaults(), "user-1",
+                Map.of("completionRequirements", List.of(
+                        "LOCAL_OBSERVATION",
+                        Map.of("type", "ARTIFACT_DELIVERY", "subject", "energy chart"))));
+
+        AgentGraphStateView view = AgentGraphStateView.of(factory.create(config, request, List.of()));
+
+        assertThat(view.listOfMaps(AgentGraphStateKeys.COMPLETION_REQUIREMENTS))
+                .extracting(requirement -> requirement.get("type"))
+                .containsExactly("LOCAL_OBSERVATION", "ARTIFACT_DELIVERY");
     }
 
     @Test

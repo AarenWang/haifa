@@ -19,6 +19,11 @@ import org.wrj.haifa.ai.deerflow.sandbox.SandboxExecutionPolicy;
 public class BashTool implements AgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final java.util.regex.Pattern POWERCFG_COMMAND = java.util.regex.Pattern.compile(
+            "(?i)^\\s*powercfg(?:\\.exe)?\\s+/(?<option>[a-z]+)(?=\\s|$)");
+    private static final java.util.Set<String> POWERCFG_STDOUT_OBSERVATION_OPTIONS = java.util.Set.of(
+            "a", "availablesleepstates", "getactivescheme", "query", "q", "requests", "waketimers",
+            "lastwake", "devicequery", "aliases");
     private final DeerFlowProperties properties;
     private final SandboxRunner sandboxRunner;
     private final CommandPolicy commandPolicy;
@@ -42,6 +47,14 @@ public class BashTool implements AgentTool {
     @Override
     public String description() {
         return "Run one shell command inside the configured sandbox. The pipe character | is forbidden everywhere; use separate tool calls instead. Arguments: {\"description\": \"optional summary\", \"command\": \"command to run\"}. Use /mnt/skills and /mnt/user-data virtual paths.";
+    }
+
+    @Override
+    public java.util.List<org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract> completionContracts() {
+        return java.util.List.of(new org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract(
+                org.wrj.haifa.ai.deerflow.completion.CompletionRequirementType.COMMAND_EXECUTION,
+                org.wrj.haifa.ai.deerflow.completion.EvidenceType.COMMAND_RESULT,
+                "sandbox command"));
     }
 
     @Override
@@ -80,11 +93,17 @@ public class BashTool implements AgentTool {
                 return ToolResult.failed(name(), "Error: command is required");
             }
             command = normalizeLineContinuations(command);
+            java.util.List<org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract> runtimeContracts =
+                    runtimeCompletionContracts(command);
 
             CommandPolicy.Decision decision = commandPolicy.evaluate(command, request.workspaceRoot());
             if (!decision.allowed()) {
+                Map<String, Object> deniedMetadata = new HashMap<>();
+                deniedMetadata.put("denied", true);
+                deniedMetadata.put("reason", decision.reason());
+                addRuntimeContracts(deniedMetadata, runtimeContracts);
                 return ToolResult.denied(name(), "Command denied: " + decision.reason(),
-                        Map.of("denied", true, "reason", decision.reason()));
+                        deniedMetadata);
             }
 
             SandboxResult result = sandboxRunner.run(new SandboxRequest(
@@ -97,6 +116,7 @@ public class BashTool implements AgentTool {
                     request.runId()
             ));
             Map<String, Object> metadata = metadata(result);
+            addRuntimeContracts(metadata, runtimeContracts);
             if (result.timedOut()) {
                 return ToolResult.timedOut(name(), render(result), metadata);
             }
@@ -126,6 +146,28 @@ public class BashTool implements AgentTool {
 
     private static String normalizeLineContinuations(String command) {
         return command.replaceAll("\\\\\\r?\\n\\s*", " ").trim();
+    }
+
+    private static java.util.List<org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract>
+            runtimeCompletionContracts(String command) {
+        java.util.regex.Matcher matcher = POWERCFG_COMMAND.matcher(command == null ? "" : command);
+        if (!matcher.find() || !POWERCFG_STDOUT_OBSERVATION_OPTIONS.contains(
+                matcher.group("option").toLowerCase(java.util.Locale.ROOT))) {
+            return java.util.List.of();
+        }
+        return java.util.List.of(new org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract(
+                org.wrj.haifa.ai.deerflow.completion.CompletionRequirementType.LOCAL_OBSERVATION,
+                org.wrj.haifa.ai.deerflow.completion.EvidenceType.MEASUREMENT,
+                "Windows powercfg observation"));
+    }
+
+    private static void addRuntimeContracts(Map<String, Object> metadata,
+            java.util.List<org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract> contracts) {
+        if (contracts != null && !contracts.isEmpty()) {
+            metadata.put("runtimeCompletionContracts", contracts.stream()
+                    .map(org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract::toMap)
+                    .toList());
+        }
     }
 
     private static String render(SandboxResult result) {

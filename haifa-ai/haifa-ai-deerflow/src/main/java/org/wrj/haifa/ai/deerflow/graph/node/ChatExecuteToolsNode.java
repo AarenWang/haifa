@@ -2,7 +2,10 @@ package org.wrj.haifa.ai.deerflow.graph.node;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -18,6 +21,10 @@ import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver;
 import org.wrj.haifa.ai.deerflow.agent.loop.ToolCall;
 import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallResult;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.completion.CompletionRequirement;
+import org.wrj.haifa.ai.deerflow.completion.EvidenceRecord;
+import org.wrj.haifa.ai.deerflow.completion.Freshness;
+import org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract;
 import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleContext;
 import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
@@ -84,6 +91,8 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             List<AgentLoopObserver.FilteredToolCall> filteredCalls = filterToolCalls(lifecycle, pending);
             List<Map<String, Object>> toolMessages = new ArrayList<>();
             List<Map<String, Object>> toolResultsList = new ArrayList<>();
+            List<Map<String, Object>> completionRequirements = new ArrayList<>();
+            List<Map<String, Object>> evidenceRecords = new ArrayList<>();
 
             for (AgentLoopObserver.FilteredToolCall filtered : filteredCalls) {
 
@@ -91,6 +100,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                 ToolCall toolCall = filtered.toolCall();
                 String safeName = nullToEmpty(toolCall.toolName());
                 String safeArguments = nullToEmpty(toolCall.arguments());
+                List<ToolCompletionContract> completionContracts = completionContracts(safeName);
                 persistToolCallRequested(toolCall.id(), safeName, safeArguments, runId, threadId);
 
                 if (!filtered.allowed()) {
@@ -101,6 +111,8 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                     publishToolEvent(runId, threadId, AgentEventType.TOOL_DENIED, reason, metadata);
                     toolMessages.add(toolMessage(threadId, runId, safeName, toolCall.id(), reason, metadata));
                     toolResultsList.add(toolResultMap(safeName, reason, metadata));
+                    appendCompletionRecords(runId, toolCall.id(), safeName, "REJECTED", reason, metadata,
+                            completionContracts, completionRequirements, evidenceRecords);
                     continue;
                 }
 
@@ -109,6 +121,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                 Map<String, Object> metadata = resultMetadata(execution.status(), safeName, toolCall.id(),
                         rawResult.durationMs(), execution.deniedByPolicy(), execution.deniedReason(), execution.errorType());
                 metadata.putAll(rawResult.metadata());
+                completionContracts = mergeCompletionContracts(completionContracts, runtimeCompletionContracts(metadata));
                 persistToolCallResult(rawResult, metadata);
 
                 String eventContent = rawResult.status() == ToolCallResult.Status.SUCCESS ? rawResult.result() : rawResult.error();
@@ -132,6 +145,11 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                             Map.of("observer", "onToolCompleted", "tool", safeName)));
                 }
                 toolResultsList.add(toolResultMap(safeName, eventContent, metadata));
+                if ("SUCCESS".equalsIgnoreCase(execution.status())) {
+                    appendDeclaredRequirements(metadata, completionRequirements);
+                }
+                appendCompletionRecords(runId, toolCall.id(), safeName, execution.status(), eventContent, metadata,
+                        completionContracts, completionRequirements, evidenceRecords);
             }
 
             Map<String, Object> clarificationMeta = null;
@@ -147,11 +165,122 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             Map<String, Object> update = new HashMap<>();
             update.put(AgentGraphStateKeys.MESSAGE_WINDOW, toolMessages);
             update.put(AgentGraphStateKeys.TOOL_RESULTS, toolResultsList);
+            update.put(AgentGraphStateKeys.COMPLETION_REQUIREMENTS, completionRequirements);
+            update.put(AgentGraphStateKeys.EVIDENCE_LEDGER, evidenceRecords);
             update.put(AgentGraphStateKeys.PENDING_TOOL_CALLS, List.of());
             update.put("clarification_metadata", clarificationMeta == null ? Map.of() : clarificationMeta);
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "execute_tools", "status", "completed")));
             return update;
         }, executor);
+    }
+
+    private List<ToolCompletionContract> completionContracts(String toolName) {
+        return toolRegistry.tools().stream()
+                .filter(tool -> tool.name().equals(toolName))
+                .findFirst()
+                .map(AgentTool::completionContracts)
+                .orElse(List.of());
+    }
+
+    private static void appendDeclaredRequirements(Map<String, Object> metadata,
+            List<Map<String, Object>> completionRequirements) {
+        if (metadata == null || !(metadata.get("declaredCompletionRequirements") instanceof List<?> values)) {
+            return;
+        }
+        for (Object value : values) {
+            if (value instanceof Map<?, ?> raw) {
+                Map<String, Object> normalized = new LinkedHashMap<>();
+                raw.forEach((key, item) -> normalized.put(String.valueOf(key), item));
+                CompletionRequirement.fromMap(normalized).ifPresent(requirement ->
+                        completionRequirements.add(requirement.toMap()));
+            }
+        }
+    }
+
+    private static List<ToolCompletionContract> runtimeCompletionContracts(Map<String, Object> metadata) {
+        if (metadata == null || !(metadata.get("runtimeCompletionContracts") instanceof List<?> values)) {
+            return List.of();
+        }
+        List<ToolCompletionContract> result = new ArrayList<>();
+        for (Object value : values) {
+            if (value instanceof Map<?, ?> map) {
+                ToolCompletionContract.fromMap(map).ifPresent(result::add);
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<ToolCompletionContract> mergeCompletionContracts(List<ToolCompletionContract> base,
+            List<ToolCompletionContract> runtime) {
+        Map<String, ToolCompletionContract> merged = new LinkedHashMap<>();
+        java.util.stream.Stream.concat(
+                        base == null ? java.util.stream.Stream.empty() : base.stream(),
+                        runtime == null ? java.util.stream.Stream.empty() : runtime.stream())
+                .forEach(contract -> merged.putIfAbsent(
+                        contract.requirementType().name() + ':' + contract.successEvidenceType().name() + ':' + contract.subject(),
+                        contract));
+        return List.copyOf(merged.values());
+    }
+
+    private static void appendCompletionRecords(String runId, String toolCallId, String toolName, String status,
+            String content, Map<String, Object> metadata, List<ToolCompletionContract> contracts,
+            List<Map<String, Object>> requirements, List<Map<String, Object>> evidence) {
+        if (contracts == null || contracts.isEmpty()) {
+            return;
+        }
+        if (!"SUCCESS".equalsIgnoreCase(status)) {
+            return;
+        }
+        for (ToolCompletionContract contract : contracts) {
+            String requirementId = "req:tool:" + toolCallId + ':' + contract.requirementType().name();
+            requirements.add(new CompletionRequirement(
+                    requirementId,
+                    contract.requirementType(),
+                    contract.subject(),
+                    Freshness.CURRENT_RUN,
+                    Map.of("source", "tool-contract", "toolName", toolName, "sourceToolCallId", toolCallId))
+                    .toMap());
+            List<String> parentIds = stringList(metadata == null ? null : metadata.get("sourceEvidenceIds"));
+            Map<String, Object> attributes = new LinkedHashMap<>();
+            attributes.put("toolName", toolName);
+            attributes.put("status", status);
+            copyIfPresent(metadata, attributes, "presentedArtifactIds");
+            copyIfPresent(metadata, attributes, "artifactDeliverySucceeded");
+            copyIfPresent(metadata, attributes, "exitCode");
+            evidence.add(new EvidenceRecord(
+                    "ev:tool:" + toolCallId + ':' + contract.successEvidenceType().name(),
+                    contract.successEvidenceType(),
+                    runId,
+                    toolCallId,
+                    "tool-result:" + toolCallId,
+                    sha256(content),
+                    Instant.now(),
+                    parentIds,
+                    attributes).toMap());
+        }
+    }
+
+    private static void copyIfPresent(Map<String, Object> source, Map<String, Object> target, String key) {
+        if (source != null && source.containsKey(key)) {
+            target.put(key, source.get(key));
+        }
+    }
+
+    private static List<String> stringList(Object value) {
+        if (!(value instanceof List<?> source)) {
+            return List.of();
+        }
+        return source.stream().map(ChatExecuteToolsNode::nullToEmpty).filter(item -> !item.isBlank()).toList();
+    }
+
+    private static String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(nullToEmpty(value).getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is unavailable", ex);
+        }
     }
 
 

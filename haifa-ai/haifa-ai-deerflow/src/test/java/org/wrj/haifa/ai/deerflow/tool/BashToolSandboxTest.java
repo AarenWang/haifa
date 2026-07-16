@@ -118,6 +118,25 @@ class BashToolSandboxTest {
                 .doesNotContainKey("EMPTY_VALUE");
     }
 
+    @Test
+    void classifiesOnlyDirectPowercfgStdoutQueriesAsLocalObservation(@TempDir Path tmp) {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setBashEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setAllowHostExecution(true);
+        properties.getSandbox().setAllowedCommands("pwd,powercfg");
+        BashTool tool = new BashTool(properties, new FakeSandboxRunner(), new CommandPolicy(properties));
+
+        ToolResult query = tool.execute(new ToolRequest("{\"command\":\"powercfg /getactivescheme\"}", tmp));
+        ToolResult report = tool.execute(new ToolRequest("{\"command\":\"powercfg /batteryreport\"}", tmp));
+
+        assertThat((java.util.List<Map<String, Object>>) query.metadata().get("runtimeCompletionContracts"))
+                .singleElement().satisfies(contract -> assertThat(contract)
+                        .containsEntry("requirementType", "LOCAL_OBSERVATION")
+                        .containsEntry("successEvidenceType", "MEASUREMENT"));
+        assertThat(report.metadata()).doesNotContainKey("runtimeCompletionContracts");
+    }
+
     private static class FakeSandboxRunner implements SandboxRunner {
         private int calls;
         private SandboxRequest lastRequest;

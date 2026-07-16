@@ -31,6 +31,14 @@ public class StrReplaceTool implements AgentTool {
     }
 
     @Override
+    public java.util.List<org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract> completionContracts() {
+        return java.util.List.of(new org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract(
+                org.wrj.haifa.ai.deerflow.completion.CompletionRequirementType.FILE_MUTATION,
+                org.wrj.haifa.ai.deerflow.completion.EvidenceType.FILE_CHANGE,
+                "workspace text replacement"));
+    }
+
+    @Override
     public boolean supports(String userMessage) {
         return userMessage != null && userMessage.toLowerCase().contains("str_replace");
     }
@@ -38,18 +46,19 @@ public class StrReplaceTool implements AgentTool {
     @Override
     public ToolResult execute(ToolRequest request) {
         if (!properties.isStrReplaceEnabled()) {
-            return ToolResult.of(name(), "Tool str_replace is disabled by security configuration.");
+            return ToolResult.denied(name(), "Tool str_replace is disabled by security configuration.",
+                    java.util.Map.of("denied", true, "reason", "str_replace disabled"));
         }
         try {
             String jsonInput = request.userMessage();
             if (jsonInput == null || jsonInput.isBlank()) {
-                return ToolResult.of(name(), "Error: arguments JSON required");
+                return ToolResult.failed(name(), "Error: arguments JSON required");
             }
             JsonNode node;
             try {
                 node = MAPPER.readTree(jsonInput);
             } catch (Exception jsonEx) {
-                return ToolResult.of(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
+                return ToolResult.failed(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
             }
             String requestedPath = null;
             if (node.has("path")) {
@@ -65,24 +74,24 @@ public class StrReplaceTool implements AgentTool {
             String newStr = node.has("new_str") ? node.get("new_str").asText() : null;
 
             if (requestedPath == null || requestedPath.isBlank()) {
-                return ToolResult.of(name(), "Error: path is required");
+                return ToolResult.failed(name(), "Error: path is required");
             }
             if (oldStr == null) {
-                return ToolResult.of(name(), "Error: old_str is required");
+                return ToolResult.failed(name(), "Error: old_str is required");
             }
             if (newStr == null) {
-                return ToolResult.of(name(), "Error: new_str is required");
+                return ToolResult.failed(name(), "Error: new_str is required");
             }
 
             Path resolved = pathResolver.resolveWritable(requestedPath, request.workspaceRoot());
 
             if (!Files.isRegularFile(resolved)) {
-                return ToolResult.of(name(), "Error: file does not exist: " + requestedPath);
+                return ToolResult.failed(name(), "Error: file does not exist: " + requestedPath);
             }
 
             String content = Files.readString(resolved, StandardCharsets.UTF_8);
             if (!content.contains(oldStr)) {
-                return ToolResult.of(name(), "Error: target string old_str not found in file.");
+                return ToolResult.failed(name(), "Error: target string old_str not found in file.");
             }
 
             // Replace exactly one occurrence or all?
@@ -90,11 +99,13 @@ public class StrReplaceTool implements AgentTool {
             // Let's replace the first occurrence, which is safer.
             String updatedContent = content.replaceFirst(java.util.regex.Pattern.quote(oldStr), java.util.regex.Matcher.quoteReplacement(newStr));
             Files.writeString(resolved, updatedContent, StandardCharsets.UTF_8);
-            return ToolResult.of(name(), "String replaced successfully in: " + requestedPath);
+            return ToolResult.success(name(), "String replaced successfully in: " + requestedPath, java.util.Map.of(
+                    "path", resolved.toString(), "virtualPath", pathResolver.toVirtualPath(resolved)));
         } catch (IllegalArgumentException e) {
-            return ToolResult.of(name(), "Security Exception: " + e.getMessage());
+            return ToolResult.denied(name(), "Security Exception: " + e.getMessage(),
+                    java.util.Map.of("denied", true, "reason", e.getMessage()));
         } catch (Exception e) {
-            return ToolResult.of(name(), "Error: " + e.getMessage());
+            return ToolResult.failed(name(), "Error: " + e.getMessage());
         }
     }
 }
