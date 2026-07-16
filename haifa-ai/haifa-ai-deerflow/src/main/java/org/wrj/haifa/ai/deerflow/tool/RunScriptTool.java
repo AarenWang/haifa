@@ -53,6 +53,7 @@ public class RunScriptTool implements AgentTool {
     @Override
     public String description() {
         return "Generate and execute short scripts for local observation, lightweight tasks, file inspection, environment checks, and output verification. Scripts run under /mnt/user-data/workspace; final deliverables should be written under /mnt/user-data/outputs. "
+                + "The pipe character | is forbidden everywhere in script code; use variables, loops, and separate statements instead. "
                 + "Arguments: {\"language\": \"python|powershell|node|bash\", \"code\": \"script code\", \"args\": [\"optional arguments\"], \"purpose\": \"short reason\"}";
     }
 

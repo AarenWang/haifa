@@ -119,7 +119,7 @@ class RunScriptToolTest {
         ToolResult result = new RunScriptTool(properties, runner, new CommandPolicy(properties))
                 .execute(new ToolRequest("{\"language\":\"python\",\"code\":\"import os\\nos.remove('test.txt')\"}", tmp));
 
-        assertThat(result.content()).contains("Script execution denied: script code contains denied pattern: os.remove");
+        assertThat(result.content()).contains("Script execution denied: script code matches denied command rule: os.remove");
         assertThat(result.metadata()).containsEntry("denied", true);
         assertThat(runner.calls).isEqualTo(0);
     }

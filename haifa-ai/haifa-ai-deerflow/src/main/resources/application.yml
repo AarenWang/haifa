@@ -67,8 +67,8 @@ haifa:
         allowed-script-languages: python,python3,powershell,node,bash
         run-script-local-unsafe-allowed: false
         network-enabled: true
-        allowed-commands:
-        denied-patterns: rm -rf,format,shutdown,reboot,del /s,Remove-Item -Recurse
+        allowed-commands: mvn,npm,node,python,python3,java,javac,ls,pwd,cat,rg,grep,powercfg,shutdown
+        denied-patterns: rm -rf,format,format-volume,reboot,del /s,Remove-Item -Recurse
         script-workdir-subdir: scripts
         executables:
           node: ${HAIFA_DEERFLOW_NODE_EXECUTABLE:}

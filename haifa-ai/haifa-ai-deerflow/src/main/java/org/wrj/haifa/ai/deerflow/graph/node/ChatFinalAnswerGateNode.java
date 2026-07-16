@@ -50,6 +50,30 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
             GraphChatLifecycleContext context = GraphChatLifecycleRegistry.get(runId).orElse(null);
             boolean maxStepsReached = context != null && context.loopConfig() != null
                     && step >= context.loopConfig().maxSteps();
+            if (hasLocalNumericObservationClaim(answer) && !hasSuccessfulLocalDataEvidence(toolResults)) {
+                Map<String, Object> evidenceMetadata = Map.of(
+                        "unsupportedLocalObservationClaim", true,
+                        "requiredEvidence", "successful current-run non-rendering tool result with data payload");
+                if (maxStepsReached) {
+                    update.put("final_answer_gate_status", "LOCAL_EVIDENCE_MISSING");
+                    update.put("accepted_final_answer",
+                            "未获得当前运行中可验证的本地观测数据；失败、拒绝或仅完成绘图的工具结果不能作为统计依据。");
+                    update.put("accepted_final_metadata", evidenceMetadata);
+                    update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of(
+                            "node", "final_answer_gate", "status", "local_evidence_missing")));
+                    return update;
+                }
+                update.put("final_answer_gate_status", "CONTINUE");
+                update.put(AgentGraphStateKeys.MESSAGE_WINDOW, List.of(systemMessage(threadId, runId,
+                        "Do not report local runtime numbers, process names, rankings, or real-time claims. "
+                                + "The current run has no successful non-rendering Tool result containing a data payload. "
+                                + "A failed/denied Tool provides zero data, and chart/file generation proves only rendering. "
+                                + "Retry a smaller safe measurement command or explicitly state that no verifiable data was obtained.",
+                        evidenceMetadata)));
+                update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of(
+                        "node", "final_answer_gate", "status", "local_evidence_rejected")));
+                return update;
+            }
             if (hasArtifactCompletionClaim(answer) && !hasSuccessfulArtifactDelivery(toolResults)) {
                 Map<String, Object> evidenceMetadata = Map.of(
                         "unsupportedCompletionClaim", true,
@@ -176,6 +200,104 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
             }
         }
         return false;
+    }
+
+    private static boolean hasLocalNumericObservationClaim(String answer) {
+        if (answer == null || answer.isBlank() || !answer.matches("(?s).*\\d.*")) {
+            return false;
+        }
+        String lower = answer.toLowerCase(java.util.Locale.ROOT);
+        String[] strongMarkers = {
+            "实时", "当前电量", "剩余电量", "预估续航", "本机", "你的设备", "你设备",
+            "系统当前", "设备当前", "进程快照", "能耗排行榜", "能耗评分", "功耗排名",
+            "cpu 时间", "cpu time", "内存占用", "memory usage", "i/o 活动", "io activity",
+            "real-time", "realtime", "current battery", "remaining battery", "your device",
+            "process snapshot", "energy ranking", "power ranking"
+        };
+        for (String marker : strongMarkers) {
+            if (lower.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasSuccessfulLocalDataEvidence(List<Map<String, Object>> toolResults) {
+        if (toolResults == null || toolResults.isEmpty()) {
+            return false;
+        }
+        for (Map<String, Object> result : toolResults) {
+            String toolName = stringValue(result.get("toolName")).toLowerCase(java.util.Locale.ROOT);
+            if (isRenderingOrMutationTool(toolName)) {
+                continue;
+            }
+            Object rawMetadata = result.get("metadata");
+            if (!(rawMetadata instanceof Map<?, ?> metadata)) {
+                continue;
+            }
+            if (!"SUCCESS".equalsIgnoreCase(stringValue(metadata.get("status")))) {
+                continue;
+            }
+            Object exitCode = metadata.get("exitCode");
+            if (exitCode instanceof Number number && number.intValue() != 0) {
+                continue;
+            }
+            String purpose = stringValue(metadata.get("purpose")).toLowerCase(java.util.Locale.ROOT);
+            if (purpose.contains("chart") || purpose.contains("plot") || purpose.contains("visualization")
+                    || purpose.contains("render") || purpose.contains("绘图") || purpose.contains("图表")) {
+                continue;
+            }
+            String payload = observedPayload(stringValue(result.get("result")));
+            if (isDataPayload(payload)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isRenderingOrMutationTool(String toolName) {
+        return toolName.isBlank()
+                || toolName.equals("present_files")
+                || toolName.equals("write_file")
+                || toolName.equals("str_replace")
+                || toolName.equals("write_todos")
+                || toolName.equals("ask_clarification")
+                || toolName.contains("chart")
+                || toolName.contains("image")
+                || toolName.startsWith("web_");
+    }
+
+    private static String observedPayload(String result) {
+        if (result == null || result.isBlank()) {
+            return "";
+        }
+        int stdout = result.indexOf("Stdout:");
+        if (stdout < 0) {
+            return result.trim();
+        }
+        int start = stdout + "Stdout:".length();
+        int stderr = result.indexOf("Stderr:", start);
+        return (stderr < 0 ? result.substring(start) : result.substring(start, stderr)).trim();
+    }
+
+    private static boolean isDataPayload(String payload) {
+        if (payload == null || payload.isBlank() || "(empty)".equalsIgnoreCase(payload.trim())
+                || !payload.matches("(?s).*\\d.*")) {
+            return false;
+        }
+        String trimmed = payload.trim();
+        String lower = trimmed.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("chart saved") || lower.contains("plot saved") || lower.contains("presented artifacts")
+                || lower.contains("图表已保存") || lower.contains("图片已保存")) {
+            return false;
+        }
+        boolean structured = trimmed.startsWith("{") || trimmed.startsWith("[")
+                || trimmed.contains("\n") || trimmed.contains("\r");
+        boolean metricText = lower.contains("battery") || lower.contains("process") || lower.contains("cpu")
+                || lower.contains("memory") || lower.contains("energy") || lower.contains("power")
+                || lower.contains("电量") || lower.contains("进程") || lower.contains("能耗")
+                || lower.contains("功耗") || lower.contains("续航") || lower.contains("内存");
+        return structured || metricText;
     }
 
     private static List<String> historyFromWindow(List<Map<String, Object>> window) {

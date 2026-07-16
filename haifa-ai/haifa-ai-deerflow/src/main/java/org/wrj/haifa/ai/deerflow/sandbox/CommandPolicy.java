@@ -14,6 +14,7 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 public class CommandPolicy {
 
     private static final Set<Character> SHELL_CONTROL_CHARS = Set.of('&', ';', '|', '`', '<', '>', '\n', '\r');
+    private static final String STATEMENT_BOUNDARY = "\u0000";
 
     private final DeerFlowProperties properties;
 
@@ -26,7 +27,9 @@ public class CommandPolicy {
             return Decision.deny("command is required");
         }
         String trimmed = command.trim();
-        String lower = trimmed.toLowerCase(Locale.ROOT);
+        if (trimmed.indexOf('|') >= 0) {
+            return Decision.deny("command contains disabled pipe character: |");
+        }
         DeerFlowProperties.Sandbox sandbox = properties.getSandbox();
 
         ShellParseResult parsed = parseTokens(trimmed);
@@ -38,8 +41,8 @@ public class CommandPolicy {
         }
 
         for (String pattern : splitCsv(sandbox.getDeniedPatterns())) {
-            if (!pattern.isBlank() && lower.contains(pattern.toLowerCase(Locale.ROOT))) {
-                return Decision.deny("command contains denied pattern: " + pattern);
+            if (matchesCommandRule(parsed.tokens(), pattern)) {
+                return Decision.deny("command matches denied command rule: " + pattern);
             }
         }
         for (String token : parsed.tokens()) {
@@ -53,15 +56,23 @@ public class CommandPolicy {
         if (executable.isBlank()) {
             return Decision.deny("command executable is required");
         }
+        if (executable.indexOf('/') >= 0 || executable.indexOf('\\') >= 0) {
+            return Decision.deny("command executable must be a bare command name: " + executable);
+        }
         Set<String> configuredAllowed = splitCsv(sandbox.getAllowedCommands());
-        if (!configuredAllowed.isEmpty()) {
-            Set<String> allowed = new java.util.HashSet<>(configuredAllowed);
-            if (properties.isRunScriptEnabled()) {
-                allowed.addAll(splitCsv(sandbox.getAllowedScriptLanguages()));
-            }
-            if (!allowed.contains(normalizeExecutable(executable))) {
-                return Decision.deny("command is not in allowed command list: " + executable);
-            }
+        if (configuredAllowed.isEmpty()) {
+            return Decision.deny("allowed command list is empty");
+        }
+        Set<String> allowed = configuredAllowed.stream()
+                .map(CommandPolicy::normalizeExecutable)
+                .collect(Collectors.toCollection(java.util.HashSet::new));
+        if (properties.isRunScriptEnabled()) {
+            splitCsv(sandbox.getAllowedScriptLanguages()).stream()
+                    .map(CommandPolicy::normalizeExecutable)
+                    .forEach(allowed::add);
+        }
+        if (!allowed.contains(normalizeExecutable(executable))) {
+            return Decision.deny("command is not in allowed command list: " + executable);
         }
         return Decision.allow();
     }
@@ -70,12 +81,15 @@ public class CommandPolicy {
         if (code == null || code.isBlank()) {
             return Decision.allow();
         }
+        if (code.indexOf('|') >= 0) {
+            return Decision.deny("script code contains disabled pipe character: |");
+        }
         String lower = code.toLowerCase(Locale.ROOT);
         DeerFlowProperties.Sandbox sandbox = properties.getSandbox();
 
         for (String pattern : splitCsv(sandbox.getDeniedPatterns())) {
-            if (!pattern.isBlank() && lower.contains(pattern.toLowerCase(Locale.ROOT))) {
-                return Decision.deny("script code contains denied pattern: " + pattern);
+            if (matchesScriptRule(code, pattern)) {
+                return Decision.deny("script code matches denied command rule: " + pattern);
             }
         }
 
@@ -94,6 +108,165 @@ public class CommandPolicy {
         }
 
         return Decision.allow();
+    }
+
+    private static boolean matchesCommandRule(List<String> commandTokens, String rule) {
+        List<String> ruleTokens = securityTokens(rule);
+        if (commandTokens == null || commandTokens.isEmpty() || ruleTokens.isEmpty()) {
+            return false;
+        }
+        List<String> normalized = commandTokens.stream()
+                .map(CommandPolicy::normalizeSecurityToken)
+                .toList();
+        if (!normalizeExecutable(normalized.get(0)).equals(normalizeExecutable(ruleTokens.get(0)))) {
+            return false;
+        }
+        if (ruleTokens.size() == 1) {
+            return true;
+        }
+        return containsOrderedRuleArguments(normalized, 1, ruleTokens);
+    }
+
+    private static boolean matchesScriptRule(String code, String rule) {
+        List<String> scriptTokens = securityTokens(code);
+        List<String> ruleTokens = securityTokens(rule);
+        if (ruleTokens.isEmpty()) {
+            return false;
+        }
+        for (int index = 0; index < scriptTokens.size(); index++) {
+            if (!normalizeSecurityToken(scriptTokens.get(index)).equals(normalizeSecurityToken(ruleTokens.get(0)))) {
+                continue;
+            }
+            if (ruleTokens.size() == 1 || containsOrderedRuleArguments(scriptTokens, index + 1, ruleTokens)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsOrderedRuleArguments(List<String> source, int sourceStart, List<String> rule) {
+        int ruleIndex = 1;
+        for (int index = sourceStart; index < source.size(); index++) {
+            String actual = source.get(index);
+            if (STATEMENT_BOUNDARY.equals(actual)) {
+                return false;
+            }
+            if (normalizeSecurityToken(actual).equals(normalizeSecurityToken(rule.get(ruleIndex)))) {
+                ruleIndex++;
+                if (ruleIndex == rule.size()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Extracts case-insensitive security tokens while ignoring quoted strings,
+     * PowerShell variables, and line/block comments. This deliberately avoids
+     * the unsafe substring matching that treated secureboot as reboot and
+     * NoTypeInformation as format.
+     */
+    private static List<String> securityTokens(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        List<String> tokens = new ArrayList<>();
+        StringBuilder token = new StringBuilder();
+        boolean singleQuoted = false;
+        boolean doubleQuoted = false;
+        boolean lineComment = false;
+        boolean blockComment = false;
+        boolean escaped = false;
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            char next = i + 1 < value.length() ? value.charAt(i + 1) : '\0';
+            if (lineComment) {
+                if (ch == '\n' || ch == '\r') {
+                    lineComment = false;
+                    addStatementBoundary(tokens);
+                }
+                continue;
+            }
+            if (blockComment) {
+                if (ch == '#' && next == '>') {
+                    blockComment = false;
+                    i++;
+                }
+                continue;
+            }
+            if (!singleQuoted && !doubleQuoted && ch == '<' && next == '#') {
+                flushSecurityToken(tokens, token);
+                blockComment = true;
+                i++;
+                continue;
+            }
+            if (!singleQuoted && !doubleQuoted && ch == '#') {
+                flushSecurityToken(tokens, token);
+                lineComment = true;
+                continue;
+            }
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (doubleQuoted && ch == '`') {
+                escaped = true;
+                continue;
+            }
+            if (ch == '\'' && !doubleQuoted) {
+                flushSecurityToken(tokens, token);
+                singleQuoted = !singleQuoted;
+                continue;
+            }
+            if (ch == '"' && !singleQuoted) {
+                flushSecurityToken(tokens, token);
+                doubleQuoted = !doubleQuoted;
+                continue;
+            }
+            if (singleQuoted || doubleQuoted) {
+                continue;
+            }
+            if (ch == '$') {
+                flushSecurityToken(tokens, token);
+                while (i + 1 < value.length() && isSecurityTokenChar(value.charAt(i + 1))) {
+                    i++;
+                }
+                continue;
+            }
+            if (isSecurityTokenChar(ch)) {
+                token.append(Character.toLowerCase(ch));
+            } else {
+                flushSecurityToken(tokens, token);
+                if (ch == ';' || ch == '\n' || ch == '\r') {
+                    addStatementBoundary(tokens);
+                }
+            }
+        }
+        flushSecurityToken(tokens, token);
+        return tokens;
+    }
+
+    private static boolean isSecurityTokenChar(char ch) {
+        return Character.isLetterOrDigit(ch) || ch == '_' || ch == '-' || ch == '/' || ch == '.';
+    }
+
+    private static void flushSecurityToken(List<String> tokens, StringBuilder token) {
+        if (!token.isEmpty()) {
+            tokens.add(normalizeSecurityToken(token.toString()));
+            token.setLength(0);
+        }
+    }
+
+    private static void addStatementBoundary(List<String> tokens) {
+        if (!tokens.isEmpty() && !STATEMENT_BOUNDARY.equals(tokens.get(tokens.size() - 1))) {
+            tokens.add(STATEMENT_BOUNDARY);
+        }
+    }
+
+    private static String normalizeSecurityToken(String token) {
+        String lower = token == null ? "" : token.toLowerCase(Locale.ROOT);
+        return normalizeExecutable(lower);
     }
 
 
@@ -220,8 +393,11 @@ public class CommandPolicy {
         if (slash >= 0) {
             normalized = normalized.substring(slash + 1);
         }
-        if (normalized.endsWith(".exe")) {
-            normalized = normalized.substring(0, normalized.length() - 4);
+        for (String extension : List.of(".exe", ".cmd", ".bat", ".com")) {
+            if (normalized.endsWith(extension)) {
+                normalized = normalized.substring(0, normalized.length() - extension.length());
+                break;
+            }
         }
         return normalized.toLowerCase(Locale.ROOT);
     }

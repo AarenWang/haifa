@@ -131,7 +131,7 @@ public class DeerFlowProperties {
         private int maxOutputChars = 20_000;
         private String workdirSubdir = "sandbox";
         private String allowedCommands = "mvn,npm,node,python,python3,java,javac,ls,pwd,cat,rg,grep";
-        private String deniedPatterns = "rm -rf,format,shutdown,reboot,del /s,Remove-Item -Recurse";
+        private String deniedPatterns = "rm -rf,format,format-volume,shutdown,reboot,del /s,Remove-Item -Recurse";
         private String allowedScriptLanguages = "python,powershell,bash";
         private String scriptWorkdirSubdir = "scripts";
         private boolean runScriptLocalUnsafeAllowed = false;

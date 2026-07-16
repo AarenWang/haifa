@@ -22,7 +22,7 @@ class CommandPolicyTest {
 
         CommandPolicy.Decision destructive = policy.evaluate("rm -rf /", Path.of("."));
         assertThat(destructive.allowed()).isFalse();
-        assertThat(destructive.reason()).contains("denied pattern");
+        assertThat(destructive.reason()).contains("denied command rule");
 
         CommandPolicy.Decision gitAccess = policy.evaluate("cat .git/config", Path.of("."));
         assertThat(gitAccess.allowed()).isFalse();
@@ -40,13 +40,13 @@ class CommandPolicyTest {
     }
 
     @Test
-    void allowsAllCommandsWhenAllowListIsEmpty() {
+    void rejectsAllCommandsWhenAllowListIsEmpty() {
         DeerFlowProperties props = new DeerFlowProperties();
         props.getSandbox().setAllowedCommands("");
         CommandPolicy policy = new CommandPolicy(props);
 
-        assertThat(policy.evaluate("curl https://example.com", Path.of(".")).allowed()).isTrue();
-        assertThat(policy.evaluate("uname -a", Path.of(".")).allowed()).isTrue();
+        assertThat(policy.evaluate("curl https://example.com", Path.of(".")).allowed()).isFalse();
+        assertThat(policy.evaluate("uname -a", Path.of(".")).reason()).contains("allowed command list is empty");
     }
 
     @Test
@@ -56,7 +56,43 @@ class CommandPolicyTest {
         assertThat(policy.evaluate("mvn -v && python -c \"print(1)\"", Path.of(".")).allowed()).isFalse();
         assertThat(policy.evaluate("mvn -v & python -c \"print(1)\"", Path.of(".")).allowed()).isFalse();
         assertThat(policy.evaluate("mvn -v | cat", Path.of(".")).allowed()).isFalse();
+        assertThat(policy.evaluate("python -c \"print('a|b')\"", Path.of(".")).allowed()).isFalse();
         assertThat(policy.evaluate("mvn -v > out.txt", Path.of(".")).allowed()).isFalse();
+    }
+
+    @Test
+    void rejectsPipeCharactersAndDeniedCommandsInScripts() {
+        CommandPolicy policy = new CommandPolicy(new DeerFlowProperties());
+
+        assertThat(policy.evaluateScriptBody("Get-Process | Select-Object Name").reason())
+                .contains("disabled pipe character");
+        assertThat(policy.evaluateScriptBody("$pattern = '^(System|Idle)$'").reason())
+                .contains("disabled pipe character");
+        assertThat(policy.evaluateScriptBody("rm -rf workspace").reason())
+                .contains("denied command rule");
+        assertThat(policy.evaluateScriptBody("Remove-Item data -Recurse").reason())
+                .contains("denied command rule");
+    }
+
+    @Test
+    void deniedRulesUseCommandTokenBoundariesInsteadOfSubstrings() {
+        CommandPolicy policy = new CommandPolicy(new DeerFlowProperties());
+
+        assertThat(policy.evaluateScriptBody("$name = 'secureboot'; Write-Output $name").allowed()).isTrue();
+        assertThat(policy.evaluateScriptBody("Export-Csv result.csv -NoTypeInformation").allowed()).isTrue();
+        assertThat(policy.evaluateScriptBody("Format-Table -AutoSize").allowed()).isTrue();
+        assertThat(policy.evaluateScriptBody("reboot").allowed()).isFalse();
+        assertThat(policy.evaluateScriptBody("format-volume -DriveLetter D").allowed()).isFalse();
+    }
+
+    @Test
+    void allowListRequiresBareNormalizedExecutableNames() {
+        CommandPolicy policy = new CommandPolicy(new DeerFlowProperties());
+
+        assertThat(policy.evaluate("mvn.exe -v", Path.of(".")).allowed()).isTrue();
+        assertThat(policy.evaluate("mvn.cmd -v", Path.of(".")).allowed()).isTrue();
+        assertThat(policy.evaluate(".\\mvn.exe -v", Path.of(".")).reason())
+                .contains("bare command name");
     }
 
     @Test
