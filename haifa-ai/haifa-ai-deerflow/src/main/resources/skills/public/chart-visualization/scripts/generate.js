@@ -231,6 +231,32 @@ function printResult(result) {
   }
 }
 
+function validateChartArgs(tool, args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new Error(`'${tool}' args must be an object`);
+  }
+  if (tool === "generate_bar_chart") {
+    if (!Array.isArray(args.data) || args.data.length === 0) {
+      throw new Error("'generate_bar_chart' requires a non-empty args.data array");
+    }
+    args.data.forEach((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        throw new Error(`generate_bar_chart args.data[${index}] must be an object`);
+      }
+      if (typeof item.category !== "string" || item.category.trim() === "") {
+        throw new Error(
+          `generate_bar_chart args.data[${index}] requires string field 'category'; 'label' is not a substitute`,
+        );
+      }
+      if (typeof item.value !== "number" || !Number.isFinite(item.value)) {
+        throw new Error(
+          `generate_bar_chart args.data[${index}] requires finite numeric field 'value'`,
+        );
+      }
+    });
+  }
+}
+
 async function runSpec(item, outputFile) {
   if (!item || typeof item !== "object" || Array.isArray(item)) {
     throw new Error("Each chart spec must be an object");
@@ -245,6 +271,7 @@ async function runSpec(item, outputFile) {
   }
 
   const args = item.args || {};
+  validateChartArgs(tool, args);
   const result = MAP_TOOLS.has(tool)
     ? await generateMap(tool, args)
     : await generateChart(chartType, args);
@@ -260,7 +287,6 @@ async function runSpec(item, outputFile) {
   }
   const destination = await downloadArtifact(url, outputFile);
   console.log(`Chart generated: ${destination}`);
-  console.log(`Source URL: ${url}`);
   return { result, destination, url };
 }
 
@@ -301,4 +327,5 @@ module.exports = {
   readSpec,
   runSpec,
   runSpecs,
+  validateChartArgs,
 };

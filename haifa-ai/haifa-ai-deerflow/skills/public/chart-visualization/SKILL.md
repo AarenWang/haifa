@@ -33,7 +33,7 @@ Analyze the data features, choose the most suitable chart type, and consult the 
 1. Choose a chart type that matches the data. Consult the matching file in `references/` when its schema is useful.
 2. For a comparison dashboard made of labeled bar panels, use the local Pillow renderer. For another supported chart, use the bundled AntV client.
 3. Write one UTF-8 JSON specification under `/mnt/user-data/workspace/` and choose an output path under `/mnt/user-data/outputs/`.
-4. Run the selected script through generic `bash` or `run_script`. Treat any non-zero exit as failure; never convert it into a success response.
+4. Run the selected script through generic `run_script` (preferred) or `bash`. Treat any non-zero exit as failure; never convert it into a success response.
 5. Check that the requested output file exists and is non-empty, then call `present_files`. A remote URL alone is not a delivered DeerFlow artifact.
 
 ## AntV remote renderer
@@ -58,6 +58,19 @@ node /mnt/skills/public/chart-visualization/scripts/generate.js \
   /mnt/user-data/workspace/monthly-revenue.json \
   --output-file /mnt/user-data/outputs/monthly-revenue.png
 ```
+
+When using `run_script(language=node)`, load `generate.js` directly in that Node process and call its exported `main(process.argv.slice(2))`. Do not use `execSync`, `spawn`, or another `node ...` command from inside the wrapper script; that creates an unnecessary second runtime lookup. Pass the spec path and `--output-file` values through the Tool's `args` array.
+
+```json
+{
+  "language": "node",
+  "code": "require('/mnt/skills/public/chart-visualization/scripts/generate.js').main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });",
+  "args": ["/mnt/user-data/workspace/monthly-revenue.json", "--output-file", "/mnt/user-data/outputs/monthly-revenue.png"],
+  "purpose": "Render the validated chart spec in the current Node process"
+}
+```
+
+For `generate_bar_chart`, every `args.data` item must contain `category` (string) and `value` (finite number). The bundled client rejects `label/value` before any network request.
 
 The script requires Node.js 18+ and outbound HTTPS. It sends the chart request, validates the API response, downloads the returned image, and exits non-zero on parse, operation, API, download, or empty-file failures. Invoke it once per output image when using `--output-file`.
 
