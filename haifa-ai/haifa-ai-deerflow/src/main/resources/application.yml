@@ -62,7 +62,7 @@ haifa:
         enabled: true
         # local is retained as a compatibility alias for local-restricted.
         # local-trusted executes host processes and requires both explicit gates below.
-        backend: local-restricted
+        backend: local-trusted
         allow-host-execution: true
         allowed-script-languages: python,python3,powershell,node,bash
         run-script-local-unsafe-allowed: false
@@ -77,7 +77,7 @@ haifa:
           bash: ${HAIFA_DEERFLOW_BASH_EXECUTABLE:}
           powershell: ${HAIFA_DEERFLOW_POWERSHELL_EXECUTABLE:}
         local-trusted:
-          enabled: false
+          enabled: true
           inherit-environment: true
           inherit-path: true
           load-user-profile: false

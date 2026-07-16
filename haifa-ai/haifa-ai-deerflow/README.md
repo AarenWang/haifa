@@ -85,7 +85,7 @@ curl http://localhost:8095/api/deerflow/health
 | `haifa.ai.deerflow.bash-enabled` | `true` |
 | `haifa.ai.deerflow.run-script-enabled` | `true` |
 | `haifa.ai.deerflow.sandbox.enabled` | `true` |
-| `haifa.ai.deerflow.sandbox.backend` | `local-restricted` |
+| `haifa.ai.deerflow.sandbox.backend` | `local-trusted` |
 | `haifa.ai.deerflow.approval.enabled` | `false` |
 
 注意：`DeerFlowProperties` 的代码默认值与 YAML 不完全相同。实际从本仓库启动时，以 YAML 和环境变量覆盖后的值为准。

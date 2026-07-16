@@ -78,7 +78,7 @@ flowchart LR
 | Graph | `enabled=true`, `mode=GRAPH_FIRST`, `checkpoint.enabled=true` |
 | Research | `enabled=true`, `max-research-steps=100`, `max-research-sources=100`, `max-fetches-per-run=200` |
 | Tools | `write_file`、`str_replace`、`bash`、`run_script`、`tool_search` 当前 YAML 均开启 |
-| Sandbox | `enabled=true`, `backend=local-restricted`, `allow-host-execution=true`, `network-enabled=true` |
+| Sandbox | `enabled=true`, `backend=local-trusted`, `allow-host-execution=true`, `local-trusted.enabled=true`, `network-enabled=true` |
 | Approval | 当前 YAML `enabled=false` |
 
 需要区分代码默认值和 YAML 值：`DeerFlowProperties` 代码默认 `bashEnabled=false`、`runScriptEnabled=false`、`sandbox.enabled=false`、`approval.enabled=true`，但当前 YAML 明确打开本地脚本/网络 sandbox，并关闭 approval。因此按仓库 YAML 启动时，本地工具能力较开放，适合开发实验，不适合直接作为公网生产默认配置。
