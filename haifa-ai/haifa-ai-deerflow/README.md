@@ -10,6 +10,8 @@ The model sees stable virtual paths. The host `skills-root` is exposed read-only
 
 Image generation is implemented by `skills/public/image-generation/scripts/generate.py`, not by an `ImageGenerationTool`. See [the Skill/Tool runtime guide](docs/skill-tool-runtime.md) for provider models and configuration.
 
+Sandbox execution supports `local-restricted`, opt-in `local-trusted`, and `docker`. Local Trusted inherits the host toolchain after filtering sensitive variables and is only for trusted single-user development; see [the sandbox runtime guide](docs/sandbox-runtime.md).
+
 `haifa-ai-deerflow` 是一个 Java / Spring Boot WebFlux 实现的 DeerFlow 风格 Agent Runtime。它把 SSE run、thread/message 持久化、工具调用、skills、deep research、uploads/artifacts、memory/persona、SQLite 审计和 Spring AI Graph 运行时组合在一个本地可运行的后端服务中。
 
 本文按当前代码事实维护。更详细的架构说明见 [docs/architecture.md](docs/architecture.md)。
@@ -83,7 +85,7 @@ curl http://localhost:8095/api/deerflow/health
 | `haifa.ai.deerflow.bash-enabled` | `true` |
 | `haifa.ai.deerflow.run-script-enabled` | `true` |
 | `haifa.ai.deerflow.sandbox.enabled` | `true` |
-| `haifa.ai.deerflow.sandbox.backend` | `local` |
+| `haifa.ai.deerflow.sandbox.backend` | `local-restricted` |
 | `haifa.ai.deerflow.approval.enabled` | `false` |
 
 注意：`DeerFlowProperties` 的代码默认值与 YAML 不完全相同。实际从本仓库启动时，以 YAML 和环境变量覆盖后的值为准。

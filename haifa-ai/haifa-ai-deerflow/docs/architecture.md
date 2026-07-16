@@ -78,7 +78,7 @@ flowchart LR
 | Graph | `enabled=true`, `mode=GRAPH_FIRST`, `checkpoint.enabled=true` |
 | Research | `enabled=true`, `max-research-steps=100`, `max-research-sources=100`, `max-fetches-per-run=200` |
 | Tools | `write_file`、`str_replace`、`bash`、`run_script`、`tool_search` 当前 YAML 均开启 |
-| Sandbox | `enabled=true`, `backend=local`, `network-enabled=true`, `run-script-local-unsafe-allowed=true` |
+| Sandbox | `enabled=true`, `backend=local-restricted`, `allow-host-execution=true`, `network-enabled=true` |
 | Approval | 当前 YAML `enabled=false` |
 
 需要区分代码默认值和 YAML 值：`DeerFlowProperties` 代码默认 `bashEnabled=false`、`runScriptEnabled=false`、`sandbox.enabled=false`、`approval.enabled=true`，但当前 YAML 明确打开本地脚本/网络 sandbox，并关闭 approval。因此按仓库 YAML 启动时，本地工具能力较开放，适合开发实验，不适合直接作为公网生产默认配置。
@@ -86,6 +86,8 @@ flowchart LR
 ## Skill/Tool runtime boundary
 
 Skills are instruction/resource packages, not Tools. The runtime never creates a Tool implementation per Skill; `tool_search` exposes callable Tools only. Executable skills use the generic `read_file -> write_file -> bash -> present_files` pipeline, stable `/mnt/skills` and `/mnt/user-data/**` virtual roots, explicit `ToolResult.Status`, and artifact delivery evidence. See [skill-tool-runtime.md](skill-tool-runtime.md) for the mount, status, image-provider, and final-answer contracts.
+
+The sandbox runtime has three explicit trust modes: `local-restricted`, `local-trusted`, and `docker`. Local Trusted requires two opt-in gates, inherits a filtered host toolchain, and never claims strong isolation. Runtime executables are resolved and probed before use, and sensitive environment values are redacted before Tool results are persisted or streamed. See [sandbox-runtime.md](sandbox-runtime.md) for the trust matrix and migration guide.
 
 ## HTTP API
 
