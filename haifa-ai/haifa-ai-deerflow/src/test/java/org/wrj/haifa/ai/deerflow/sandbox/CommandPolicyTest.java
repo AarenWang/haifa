@@ -66,8 +66,14 @@ class CommandPolicyTest {
 
         assertThat(policy.evaluateScriptBody("Get-Process | Select-Object Name").reason())
                 .contains("disabled pipe character");
-        assertThat(policy.evaluateScriptBody("$pattern = '^(System|Idle)$'").reason())
-                .contains("disabled pipe character");
+        // Safe pipes (inside quotes, comments, or part of double pipe ||) are allowed
+        assertThat(policy.evaluateScriptBody("$pattern = '^(System|Idle)$'").allowed()).isTrue();
+        assertThat(policy.evaluateScriptBody("if (a || b) {}").allowed()).isTrue();
+        assertThat(policy.evaluateScriptBody("a = 1 | 2").reason())
+                .contains("disabled pipe character"); // single pipe outside quotes is denied
+        assertThat(policy.evaluateScriptBody("# comment with | pipe").allowed()).isTrue();
+        assertThat(policy.evaluateScriptBody("/* block | comment */ a || b").allowed()).isTrue();
+
         assertThat(policy.evaluateScriptBody("rm -rf workspace").reason())
                 .contains("denied command rule");
         assertThat(policy.evaluateScriptBody("Remove-Item data -Recurse").reason())

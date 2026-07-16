@@ -81,7 +81,7 @@ public class CommandPolicy {
         if (code == null || code.isBlank()) {
             return Decision.allow();
         }
-        if (code.indexOf('|') >= 0) {
+        if (hasUnsafePipe(code)) {
             return Decision.deny("script code contains disabled pipe character: |");
         }
         String lower = code.toLowerCase(Locale.ROOT);
@@ -108,6 +108,88 @@ public class CommandPolicy {
         }
 
         return Decision.allow();
+    }
+
+    private static boolean hasUnsafePipe(String code) {
+        if (code == null || code.isEmpty()) {
+            return false;
+        }
+        boolean singleQuoted = false;
+        boolean doubleQuoted = false;
+        boolean lineComment = false;
+        boolean blockComment = false;
+        boolean escaped = false;
+
+        for (int i = 0; i < code.length(); i++) {
+            char ch = code.charAt(i);
+            char next = i + 1 < code.length() ? code.charAt(i + 1) : '\0';
+
+            if (lineComment) {
+                if (ch == '\n' || ch == '\r') {
+                    lineComment = false;
+                }
+                continue;
+            }
+            if (blockComment) {
+                if ((ch == '#' && next == '>') || (ch == '*' && next == '/')) {
+                    blockComment = false;
+                    i++;
+                }
+                continue;
+            }
+            if (!singleQuoted && !doubleQuoted) {
+                if (ch == '<' && next == '#') {
+                    blockComment = true;
+                    i++;
+                    continue;
+                }
+                if (ch == '/' && next == '*') {
+                    blockComment = true;
+                    i++;
+                    continue;
+                }
+                if (ch == '#') {
+                    lineComment = true;
+                    continue;
+                }
+                if (ch == '/' && next == '/') {
+                    lineComment = true;
+                    i++;
+                    continue;
+                }
+            }
+
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (doubleQuoted && (ch == '\\' || ch == '`')) {
+                escaped = true;
+                continue;
+            }
+
+            if (ch == '\'' && !doubleQuoted) {
+                singleQuoted = !singleQuoted;
+                continue;
+            }
+            if (ch == '"' && !singleQuoted) {
+                doubleQuoted = !doubleQuoted;
+                continue;
+            }
+
+            if (singleQuoted || doubleQuoted) {
+                continue;
+            }
+
+            if (ch == '|') {
+                if (next == '|') {
+                    i++;
+                } else {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static boolean matchesCommandRule(List<String> commandTokens, String rule) {
