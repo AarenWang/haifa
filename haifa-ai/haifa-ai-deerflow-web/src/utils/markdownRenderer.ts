@@ -1,3 +1,6 @@
+import katex from 'katex';
+import type { ArtifactRecord } from '../types';
+
 /**
  * Lightweight markdown → HTML renderer. No external dependencies.
  * Escapes HTML first, then applies markdown syntax.
@@ -84,8 +87,38 @@ function renderMarkdownTables(input: string): string {
   return out.join('\n');
 }
 
-function renderMarkdownProtected(text: string): string {
-  let html = escapeHtml(text);
+function renderMarkdownProtected(text: string, artifacts?: ArtifactRecord[]): string {
+  const mathBlocks: { placeholder: string; formula: string; isDisplay: boolean }[] = [];
+  let mathCounter = 0;
+
+  const isLikelyMath = (formula: string): boolean => {
+    const trimmed = formula.trim();
+    if (!trimmed) return false;
+    if (trimmed.includes('\\')) return true;
+    if (/[\^_+=\-*/<>~|{}]/.test(trimmed)) return true;
+    const hasBoundarySpace = formula.startsWith(' ') || formula.endsWith(' ');
+    if (!hasBoundarySpace) return true;
+    if (/^[a-zA-Z]$/.test(trimmed)) return true;
+    return false;
+  };
+
+  // Extract display math: $$...$$
+  let processedText = text.replace(/(?<!\\)\$\$([\s\S]+?)(?<!\\)\$\$/g, (match, formula) => {
+    if (!isLikelyMath(formula)) return match;
+    const placeholder = `MATHBLOCKPLACEHOLDERX${mathCounter++}`;
+    mathBlocks.push({ placeholder, formula: formula.trim(), isDisplay: true });
+    return placeholder;
+  });
+
+  // Extract inline math: $...$
+  processedText = processedText.replace(/(?<!\\)\$([^\$\n]+?)(?<!\\)\$/g, (match, formula) => {
+    if (!isLikelyMath(formula)) return match;
+    const placeholder = `MATHBLOCKPLACEHOLDERX${mathCounter++}`;
+    mathBlocks.push({ placeholder, formula: formula.trim(), isDisplay: false });
+    return placeholder;
+  });
+
+  let html = escapeHtml(processedText);
   const codeBlocks: string[] = [];
 
   html = html.replace(
@@ -120,7 +153,31 @@ function renderMarkdownProtected(text: string): string {
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
   html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
   html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, linkText, href) => {
+    const artifactMatch = href.match(/\/api\/deerflow\/artifacts\/([a-f0-9-]+)/i);
+    if (artifactMatch) {
+      const artifactId = artifactMatch[1];
+      let isImg = false;
+      let rawUrl = '';
+      if (artifacts) {
+        const artifact = artifacts.find((art) => art.artifactId === artifactId);
+        if (artifact) {
+          isImg =
+            (artifact.mimeType && artifact.mimeType.startsWith('image/')) ||
+            /\.(png|jpe?g|gif|webp|svg)$/i.test(artifact.filename || '');
+          rawUrl = artifact.rawUrl || `${href}/raw`;
+        }
+      }
+      if (!isImg) {
+        isImg = href.endsWith('/raw') || /\.(png|jpe?g|gif|webp|svg)/i.test(href);
+        rawUrl = href.endsWith('/raw') ? href : `${href.split('?')[0]}/raw`;
+      }
+      if (isImg) {
+        return `<div class="embedded-artifact-image-container"><img src="${rawUrl}" alt="${linkText}" class="embedded-artifact-image" /><div class="embedded-artifact-image-caption">${linkText}</div></div>`;
+      }
+    }
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
+  });
 
   html = renderMarkdownTables(html);
 
@@ -174,15 +231,33 @@ function renderMarkdownProtected(text: string): string {
     out.push(`<p>${buffer.trim()}</p>`);
   }
 
-  return out.join('\n').replace(
+  let result = out.join('\n').replace(
     /<div data-code-block-placeholder="(\d+)"><\/div>/g,
     (_m, index) => codeBlocks[Number(index)] || ''
   );
+
+  // Restore and render math blocks using KaTeX
+  result = result.replace(/MATHBLOCKPLACEHOLDERX(\d+)/g, (match, indexStr) => {
+    const index = parseInt(indexStr, 10);
+    const block = mathBlocks[index];
+    if (!block) return match;
+    try {
+      return katex.renderToString(block.formula, {
+        displayMode: block.isDisplay,
+        throwOnError: false,
+      });
+    } catch (err) {
+      console.error('KaTeX rendering error:', err);
+      return block.isDisplay ? `$$${block.formula}$$` : `$${block.formula}$`;
+    }
+  });
+
+  return result;
 }
 
-export function renderMarkdown(text: string): string {
+export function renderMarkdown(text: string, artifacts?: ArtifactRecord[]): string {
   if (!text) return '';
-  return renderMarkdownProtected(text);
+  return renderMarkdownProtected(text, artifacts);
 
   let html = escapeHtml(text);
 

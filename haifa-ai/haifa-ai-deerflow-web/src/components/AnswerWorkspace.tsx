@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw, RefreshCw, Brain, BookOpen, Search, Globe, Terminal, Tag, Sparkles, ChevronDown, ChevronUp, FolderOpen, FileCode, Image, Clock, Users } from 'lucide-react';
-import type { AppPhase, AppStatus, ClarificationAnswer, MessageRecord, DeerFlowEvent } from '../types';
+import type { AppPhase, AppStatus, ClarificationAnswer, MessageRecord, DeerFlowEvent, ArtifactRecord } from '../types';
 import { renderMarkdown } from '../utils/markdownRenderer';
 import ApprovalCard from './ApprovalCard';
 import ClarificationCard from './ClarificationCard';
@@ -21,6 +21,7 @@ interface AnswerWorkspaceProps {
   onAnswerClarification?: (answer: string, clarification: PendingClarification, answers?: ClarificationAnswer[]) => void;
   onSubmitQuestion?: (question: string) => void;
   onOpenCanvas?: (artifactId?: string) => void;
+  artifacts?: ArtifactRecord[];
 }
 
 interface ExecutionStep {
@@ -331,6 +332,7 @@ export default function AnswerWorkspace({
   onAnswerClarification,
   onSubmitQuestion,
   onOpenCanvas,
+  artifacts,
 }: AnswerWorkspaceProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
@@ -612,7 +614,7 @@ export default function AnswerWorkspace({
                     ) : (
                       <div
                         className="conversation-message-content"
-                        dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content, artifacts) }}
                       />
                     )}
                     {message.role === 'ASSISTANT' && (

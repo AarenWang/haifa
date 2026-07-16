@@ -753,6 +753,7 @@ function App() {
             onAnswerClarification={handleAnswerClarification}
             onSubmitQuestion={handleSubmitQuestion}
             onOpenCanvas={handleOpenCanvas}
+            artifacts={state.artifacts}
           />
           {hasResearchPanelData && (
             <ResearchInspector
