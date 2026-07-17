@@ -473,7 +473,10 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
                 final AtomicReference<String> lastEventType = new AtomicReference<>();
                 final AtomicReference<String> lastContent = new AtomicReference<>("");
-                final AtomicReference<Map<String, Object>> lastMetadata = new AtomicReference<>(Map.of());
+                final AtomicReference<Map<String, Object>> lastCompletedModelMetadata = new AtomicReference<>(Map.of());
+                final AtomicReference<org.wrj.haifa.ai.deerflow.model.ModelProtocolState>
+                        lastCompletedModelProtocolState = new AtomicReference<>(
+                                org.wrj.haifa.ai.deerflow.model.ModelProtocolState.empty());
 
                 Flux<AgentEvent> wrappedLoopEvents = loopEvents
                         .doOnNext(evt -> {
@@ -483,8 +486,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                     lastContent.set(evt.content());
                                 }
                             }
-                            if (evt.metadata() != null) {
-                                lastMetadata.set(evt.metadata());
+                            if (evt.type() == AgentEventType.MODEL_COMPLETED) {
+                                lastCompletedModelMetadata.set(evt.metadata() == null ? Map.of() : evt.metadata());
+                                lastCompletedModelProtocolState.set(evt.protocolState());
                             }
                             if (evt.type() == AgentEventType.RUN_FAILED) {
                                 this.runManager.markFailed(run.runId(), evt.content());
@@ -499,6 +503,11 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 assistantMetadata.put("step", evt.metadata().getOrDefault("step", 0));
                                 assistantMetadata.put("modelDurationMs", evt.metadata().getOrDefault("modelDurationMs", 0));
                                 assistantMetadata.put("intermediate", true);
+                                if (!evt.protocolState().isEmpty()) {
+                                    assistantMetadata.put("protocolState",
+                                            org.wrj.haifa.ai.deerflow.model.ModelProtocolState
+                                                    .serializeProtocolState(evt.protocolState()));
+                                }
                                 this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
                                         evt.content() == null ? "" : evt.content(),
                                         assistantMetadata);
@@ -658,9 +667,18 @@ public class SimpleAgentRuntime implements AgentRuntime {
                                 this.runManager.markCompleted(run.runId());
                                 this.threadManager.touch(threadId);
                                 String assistantAnswer = lastContent.get();
-                                int toolCount = (int) lastMetadata.get().getOrDefault("totalToolCalls", 0);
+                                Map<String, Object> completedMetadata = lastCompletedModelMetadata.get();
+                                int toolCount = ((Number) completedMetadata.getOrDefault("totalToolCalls", 0)).intValue();
+                                java.util.Map<String, Object> assistantMetadata = new java.util.HashMap<>();
+                                assistantMetadata.put("toolCount", toolCount);
+                                assistantMetadata.put("mode", "chat");
+                                if (!lastCompletedModelProtocolState.get().isEmpty()) {
+                                    assistantMetadata.put("protocolState",
+                                            org.wrj.haifa.ai.deerflow.model.ModelProtocolState
+                                                    .serializeProtocolState(lastCompletedModelProtocolState.get()));
+                                }
                                 this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, assistantAnswer,
-                                        Map.of("toolCount", toolCount, "mode", "chat"));
+                                        assistantMetadata);
                                 if (this.memoryReflectionService != null) {
                                     this.memoryReflectionService.reflectAsync(threadId, run.runId());
                                 }
@@ -1148,5 +1166,3 @@ public class SimpleAgentRuntime implements AgentRuntime {
         return ex.getClass().getName();
     }
 }
-
-

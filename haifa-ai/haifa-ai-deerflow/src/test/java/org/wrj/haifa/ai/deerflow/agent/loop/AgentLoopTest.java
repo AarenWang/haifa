@@ -24,6 +24,7 @@ import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
+import org.wrj.haifa.ai.deerflow.model.ModelProtocolState;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.MockFetchTool;
 import org.wrj.haifa.ai.deerflow.tool.MockSearchTool;
@@ -703,6 +704,67 @@ class AgentLoopTest {
                 .satisfies(event -> assertThat(event.metadata())
                         .containsEntry("clarificationId", "clarification-1")
                         .containsEntry("resumeRunId", "run-clarify"));
+    }
+
+    @Test
+    void keepsProtocolStateOutOfSerializedAgentEventsWhileReplayingItToTheModel() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        ModelProtocolState state = new ModelProtocolState(
+                1, "google-genai", Map.of("thoughtSignatures", List.of(Map.of(
+                        "encoding", "base64", "value", "c2ln"))), List.of());
+        AgentModelClient model = prompt -> {
+            if (calls.getAndIncrement() == 0) {
+                return Mono.just(new ModelResponse("", List.of(
+                        new ModelToolCall("call-echo", "echo", "{}")),
+                        List.of(), "tool_calls", Map.of(), state));
+            }
+            assertThat(prompt.messages())
+                    .filteredOn(message -> message.role() == ModelMessage.Role.ASSISTANT)
+                    .singleElement()
+                    .satisfies(message -> assertThat(message.protocolState()).isEqualTo(state));
+            return Mono.just(new ModelResponse("done"));
+        };
+        AgentTool echo = new AgentTool() {
+            @Override
+            public String name() {
+                return "echo";
+            }
+
+            @Override
+            public String description() {
+                return "Echo test tool";
+            }
+
+            @Override
+            public boolean supports(String userMessage) {
+                return true;
+            }
+
+            @Override
+            public ToolResult execute(ToolRequest request) {
+                return ToolResult.of(name(), "ok", Map.of());
+            }
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(echo)));
+        AgentRunConfig config = new AgentRunConfig(
+                "thread-protocol", "run-protocol", "test-model", false, false,
+                3, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT, null, Map.of());
+        List<AgentEvent> events = loop.run(
+                LoopConfig.fromDefaults(), config, "system", "echo",
+                new AtomicInteger(), null, List.of(), List.of()).collectList().block();
+
+        assertThat(events).allSatisfy(event -> assertThat(event.metadata())
+                .doesNotContainKey("protocolState"));
+        assertThat(events)
+                .filteredOn(event -> event.type() == AgentEventType.MODEL_DELTA)
+                .anySatisfy(event -> assertThat(event.metadata())
+                        .containsEntry("providerStatePresent", true));
+        String serializedEvents = new com.fasterxml.jackson.databind.ObjectMapper()
+                .findAndRegisterModules()
+                .writeValueAsString(events);
+        assertThat(serializedEvents)
+                .doesNotContain("protocolState", "thoughtSignatures", "c2ln");
     }
 }
 

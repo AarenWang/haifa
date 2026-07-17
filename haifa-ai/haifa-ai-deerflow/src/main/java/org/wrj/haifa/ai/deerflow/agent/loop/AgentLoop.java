@@ -22,6 +22,8 @@ import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.model.ModelToolDefinition;
+import org.wrj.haifa.ai.deerflow.model.ModelProtocolState;
+import org.wrj.haifa.ai.deerflow.model.ModelResponseAccumulator;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
@@ -270,16 +272,21 @@ public class AgentLoop {
                 lastModelContent = assistantContent;
                 history.add("Assistant: " + assistantContent);
                 List<ModelToolCall> assistantModelToolCalls = toModelToolCalls(assistantToolCalls);
+                java.util.Map<String, Object> msgMetadata = new java.util.LinkedHashMap<>();
+                msgMetadata.put("step", step + 1);
+                msgMetadata.put("modelDurationMs", modelDuration);
                 typedHistory.add(new ModelMessage(
                         ModelMessage.Role.ASSISTANT,
                         assistantContent,
                         assistantModelToolCalls,
                         null,
                         null,
-                        Map.of("step", step + 1, "modelDurationMs", modelDuration)));
+                        msgMetadata,
+                        modelResponse.protocolState()));
                 emitter.emit(event(seq, runConfig, AgentEventType.MODEL_DELTA,
                         assistantContent,
-                        modelDeltaMetadata(step + 1, modelDuration, assistantModelToolCalls)));
+                        modelDeltaMetadata(step + 1, modelDuration, assistantModelToolCalls, modelResponse.protocolState()),
+                        modelResponse.protocolState()));
                 // Emit events for rejected tool calls
                 for (AgentLoopObserver.FilteredToolCall ftc : filteredToolCalls) {
                     if (!ftc.allowed()) {
@@ -323,7 +330,7 @@ public class AgentLoop {
 
                 if (loopToolCalls.isEmpty()) {
                     NoToolAction action = handleResponseWithoutTools(runConfig, seq, history, typedHistory,
-                            events, emitter, responseContent, step + 1, totalToolCalls, modelDuration);
+                            events, emitter, modelResponse, step + 1, totalToolCalls, modelDuration);
                     if (action == NoToolAction.CONTINUE) {
                         continue;
                     }
@@ -386,8 +393,9 @@ public class AgentLoop {
 
     private NoToolAction handleResponseWithoutTools(AgentRunConfig runConfig, AtomicInteger seq,
             List<String> history, List<ModelMessage> typedHistory, List<AgentEvent> events,
-            EventEmitter emitter, String responseContent, int step, int totalToolCalls,
+            EventEmitter emitter, ModelResponse modelResponse, int step, int totalToolCalls,
             long modelDuration) {
+        String responseContent = modelResponse.content() == null ? "" : modelResponse.content();
         if (responseContent.isBlank()) {
             String instruction = "The model returned no tool call and no assistant content. Continue with either a structured tool call or a normal final answer.";
             history.add("System: " + instruction);
@@ -434,9 +442,12 @@ public class AgentLoop {
         if (finalResult.extraMetadata() != null) {
             metadata.putAll(finalResult.extraMetadata());
         }
+        if (modelResponse.protocolState() != null && !modelResponse.protocolState().isEmpty()) {
+            metadata.put("providerStatePresent", true);
+        }
 
         emitter.emit(event(seq, runConfig, AgentEventType.MODEL_COMPLETED,
-                finalResult.finalAnswer(), metadata));
+                finalResult.finalAnswer(), metadata, modelResponse.protocolState()));
         emitter.emit(event(seq, runConfig, AgentEventType.RUN_COMPLETED,
                 "Run completed",
                 Map.of("stopReason", stopReason, "steps", step, "totalToolCalls", totalToolCalls)));
@@ -462,13 +473,21 @@ public class AgentLoop {
 
         ApprovalRequestRecord record = approval.get();
         history.add("Assistant requested tool " + record.toolName() + " with id " + record.toolCallId());
+        ModelProtocolState protocolState = ModelProtocolState.empty();
+        if (record.metadata() != null && record.metadata().containsKey("protocolState")) {
+            protocolState = ModelProtocolState.deserializeProtocolState(record.metadata().get("protocolState"));
+        }
+
+        java.util.Map<String, Object> assistantMetadata = new java.util.HashMap<>();
+        assistantMetadata.put("resumedApproval", true);
         typedHistory.add(new ModelMessage(
                 ModelMessage.Role.ASSISTANT,
                 "",
                 List.of(new ModelToolCall(record.toolCallId(), record.toolName(), record.argsJson())),
                 null,
                 null,
-                Map.of("resumedApproval", true)));
+                assistantMetadata,
+                protocolState));
 
         if (record.status() == ApprovalStatus.PENDING && record.expiresAt() != null
                 && Instant.now().isAfter(record.expiresAt())) {
@@ -556,36 +575,22 @@ public class AgentLoop {
 
     private ModelResponse invokeModel(ModelPrompt prompt, int step, AtomicInteger seq,
             AgentRunConfig runConfig, EventEmitter emitter) {
-        StringBuilder fullContent = new StringBuilder();
-        List<ModelToolCall> accumulatedToolCalls = new ArrayList<>();
-        java.util.concurrent.atomic.AtomicReference<String> finishReasonRef =
-                new java.util.concurrent.atomic.AtomicReference<>();
+        ModelResponseAccumulator accumulator = new ModelResponseAccumulator();
 
         Flux<ModelResponse> stream = this.modelClient.streamGenerate(prompt);
         if (stream == null) {
             stream = this.modelClient.generate(prompt).flux();
         }
         stream.doOnNext(response -> {
+            accumulator.accumulate(response);
             String chunk = response.content();
             if (chunk != null && !chunk.isEmpty()) {
-                fullContent.append(chunk);
                 emitter.emit(event(seq, runConfig, AgentEventType.MODEL_DELTA,
                         chunk, Map.of("step", step + 1)));
             }
-            if (response.toolCalls() != null && !response.toolCalls().isEmpty()) {
-                accumulatedToolCalls.addAll(response.toolCalls());
-            }
-            if (response.finishReason() != null) {
-                finishReasonRef.set(response.finishReason());
-            }
         }).then().block();
 
-        return new ModelResponse(
-                fullContent.toString(),
-                accumulatedToolCalls,
-                List.of(),
-                finishReasonRef.get(),
-                Map.of());
+        return accumulator.toResponse();
     }
 
     private ToolEnvironment buildToolEnvironment(String systemPrompt, ToolPolicyService toolPolicy,
@@ -735,13 +740,16 @@ public class AgentLoop {
                 .toList();
     }
 
-    private static Map<String, Object> modelDeltaMetadata(int step, long modelDuration, List<ModelToolCall> toolCalls) {
+    private static Map<String, Object> modelDeltaMetadata(int step, long modelDuration, List<ModelToolCall> toolCalls, ModelProtocolState protocolState) {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("step", step);
         metadata.put("modelDurationMs", modelDuration);
         if (toolCalls != null && !toolCalls.isEmpty()) {
             metadata.put("tool_calls", serializeToolCalls(toolCalls));
             metadata.put("persistAssistantToolCalls", true);
+        }
+        if (protocolState != null && !protocolState.isEmpty()) {
+            metadata.put("providerStatePresent", true);
         }
         return metadata;
     }
@@ -841,6 +849,12 @@ public class AgentLoop {
             Map<String, Object> metadata) {
         return AgentEvent.of(Integer.toString(seq.incrementAndGet()), config.runId(), config.threadId(), type, content,
                 metadata);
+    }
+
+    private static AgentEvent event(AtomicInteger seq, AgentRunConfig config, AgentEventType type, String content,
+            Map<String, Object> metadata, ModelProtocolState protocolState) {
+        return AgentEvent.internal(Integer.toString(seq.incrementAndGet()), config.runId(), config.threadId(), type,
+                content, metadata, protocolState);
     }
 
     private static void emitFinalAnswerRejected(AtomicInteger seq, AgentRunConfig runConfig, EventEmitter emitter,
@@ -998,6 +1012,24 @@ public class AgentLoop {
 
                 if (approvalDecision.type() == ApprovalPolicyDecisionType.REQUIRE_APPROVAL) {
                     String calculatedHash = approvalPolicyService.hashArgs(targetToolName, toolCall.arguments());
+
+                    // Find the last assistant message and its protocolState
+                    ModelMessage lastAssistant = null;
+                    for (int i = typedHistory.size() - 1; i >= 0; i--) {
+                        if (typedHistory.get(i).role() == ModelMessage.Role.ASSISTANT) {
+                            lastAssistant = typedHistory.get(i);
+                            break;
+                        }
+                    }
+
+                    Map<String, Object> reqMetadata = new HashMap<>();
+                    if (approvalDecision.metadata() != null) {
+                        reqMetadata.putAll(approvalDecision.metadata());
+                    }
+                    if (lastAssistant != null && lastAssistant.protocolState() != null && !lastAssistant.protocolState().isEmpty()) {
+                        reqMetadata.put("protocolState", ModelProtocolState.serializeProtocolState(lastAssistant.protocolState()));
+                    }
+
                     ApprovalCreateRequest createReq = new ApprovalCreateRequest(
                             runConfig.runId(),
                             runConfig.threadId(),
@@ -1010,7 +1042,7 @@ public class AgentLoop {
                             approvalDecision.reason(),
                             "",
                             approvalDecision.preview(),
-                            approvalDecision.metadata()
+                            reqMetadata
                     );
 
                     // Try to extract purpose from arguments
@@ -1029,7 +1061,7 @@ public class AgentLoop {
                                     approvalDecision.reason(),
                                     node.get("purpose").asText(),
                                     approvalDecision.preview(),
-                                    approvalDecision.metadata()
+                                    reqMetadata
                             );
                         }
                     } catch (Exception e) {}

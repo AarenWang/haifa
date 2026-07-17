@@ -27,17 +27,21 @@ public class ApprovalController {
     @GetMapping("/pending")
     public Mono<ApprovalRequestRecord> getPending(@RequestParam String threadId) {
         return Mono.justOrEmpty(approvalStore.findPendingByThreadId(threadId))
+                .map(ApprovalController::externalView)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "No pending approval for thread")));
     }
 
     @GetMapping("/run/{runId}")
     public Mono<List<ApprovalRequestRecord>> getByRun(@PathVariable String runId) {
-        return Mono.just(approvalStore.findByRunId(runId));
+        return Mono.just(approvalStore.findByRunId(runId).stream()
+                .map(ApprovalController::externalView)
+                .toList());
     }
 
     @GetMapping("/{approvalId}")
     public Mono<ApprovalRequestRecord> get(@PathVariable String approvalId) {
         return Mono.justOrEmpty(approvalStore.find(approvalId))
+                .map(ApprovalController::externalView)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Approval record not found")));
     }
 
@@ -62,11 +66,25 @@ public class ApprovalController {
         }
         String resolvedUser = UserIdResolver.resolve(exchange);
         try {
-            return Mono.just(approvalStore.decide(approvalId, request, resolvedUser));
+            return Mono.just(externalView(approvalStore.decide(approvalId, request, resolvedUser)));
         } catch (IllegalArgumentException ex) {
             return Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage()));
         } catch (IllegalStateException ex) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage()));
         }
+    }
+
+    private static ApprovalRequestRecord externalView(ApprovalRequestRecord record) {
+        Map<String, Object> metadata = record.metadata();
+        if (metadata != null && metadata.containsKey("protocolState")) {
+            metadata = new java.util.LinkedHashMap<>(metadata);
+            metadata.remove("protocolState");
+            metadata = Map.copyOf(metadata);
+        }
+        return new ApprovalRequestRecord(
+                record.approvalId(), record.runId(), record.threadId(), record.toolCallId(), record.toolName(),
+                record.argsJson(), record.argsHash(), record.riskKey(), record.riskLevel(), record.reason(),
+                record.purpose(), record.preview(), metadata, record.status(), record.createdAt(), record.expiresAt(),
+                record.resolvedBy(), record.resolvedAt(), record.decisionType(), record.comment());
     }
 }

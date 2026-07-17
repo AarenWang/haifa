@@ -105,4 +105,23 @@ class ApprovalControllerTest {
         assertThat(response).isNotNull();
         assertThat(response.resolvedBy()).isEqualTo("alice");
     }
+
+    @Test
+    void protocolStateIsRemovedFromApprovalResponses() {
+        ApprovalRequestRecord record = new ApprovalRequestRecord(
+                "app-secret", "run-1", "thread-1", "call-1", "run_script", "{}",
+                "hash", "key", RiskLevel.MEDIUM, "reason", "purpose", "preview",
+                Map.of("protocolState", Map.of("adapter", "google-genai"), "safe", "value"),
+                ApprovalStatus.PENDING, java.time.Instant.now(), java.time.Instant.now().plusSeconds(120),
+                null, null, null, null);
+        when(approvalStore.find("app-secret")).thenReturn(Optional.of(record));
+
+        ApprovalRequestRecord response = controller.get("app-secret").block();
+
+        assertThat(response).isNotNull();
+        assertThat(response.metadata())
+                .containsEntry("safe", "value")
+                .doesNotContainKey("protocolState");
+        assertThat(record.metadata()).containsKey("protocolState");
+    }
 }

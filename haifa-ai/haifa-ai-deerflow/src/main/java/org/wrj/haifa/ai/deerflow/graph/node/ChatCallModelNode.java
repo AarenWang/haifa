@@ -19,6 +19,8 @@ import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCallSanitizer;
 import org.wrj.haifa.ai.deerflow.model.ModelToolDefinition;
+import org.wrj.haifa.ai.deerflow.model.ModelProtocolState;
+import org.wrj.haifa.ai.deerflow.model.ModelResponseAccumulator;
 import org.wrj.haifa.ai.deerflow.agent.loop.PromptAssembler;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
@@ -137,9 +139,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
             ModelPrompt prompt = assembly.prompt().withToolDefinitions(toolDefinitions);
 
             long startTime = System.currentTimeMillis();
-            StringBuilder fullContent = new StringBuilder();
-            List<ModelToolCall> accumulatedToolCalls = new ArrayList<>();
-            java.util.concurrent.atomic.AtomicReference<String> finishReasonRef = new java.util.concurrent.atomic.AtomicReference<>();
+            ModelResponseAccumulator accumulator = new ModelResponseAccumulator();
 
             reactor.core.publisher.Flux<ModelResponse> stream = modelClient.streamGenerate(prompt);
             if (stream == null) {
@@ -147,9 +147,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
             }
             stream.takeUntilOther(cancellationSignal(runId))
                     .doOnNext(response -> {
+                        accumulator.accumulate(response);
                         String chunk = response.content();
                         if (chunk != null && !chunk.isEmpty()) {
-                            fullContent.append(chunk);
                             GraphEventRegistry.publish(runId, AgentEvent.of(
                                     UUID.randomUUID().toString(),
                                     runId,
@@ -159,12 +159,6 @@ public class ChatCallModelNode implements AsyncNodeAction {
                                     Map.of("step", stepNum)
                             ));
                         }
-                        if (response.toolCalls() != null && !response.toolCalls().isEmpty()) {
-                            accumulatedToolCalls.addAll(response.toolCalls());
-                        }
-                        if (response.finishReason() != null) {
-                            finishReasonRef.set(response.finishReason());
-                        }
                     })
                     .then()
                     .block(java.time.Duration.ofMillis(properties.getModelTimeout()));
@@ -173,8 +167,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
             throwIfCancelled(runId);
 
             long duration = System.currentTimeMillis() - startTime;
-            String responseContent = fullContent.toString();
-            List<Map<String, Object>> structuredToolCalls = serializeToolCalls(accumulatedToolCalls);
+            ModelResponse modelResponse = accumulator.toResponse();
+            String responseContent = modelResponse.content() == null ? "" : modelResponse.content();
+            List<Map<String, Object>> structuredToolCalls = serializeToolCalls(modelResponse.toolCalls());
 
             // Emit final MODEL_DELTA containing the complete text for content synchronization
             GraphEventRegistry.publish(runId, AgentEvent.of(
@@ -200,6 +195,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
                 assistantMetadata.put("tool_calls", structuredToolCalls);
                 assistantMetadata.put("persistAssistantToolCalls", true);
                 assistantMsg.put("toolCalls", structuredToolCalls);
+            }
+            if (modelResponse.protocolState() != null && !modelResponse.protocolState().isEmpty()) {
+                assistantMetadata.put("protocolState", ModelProtocolState.serializeProtocolState(modelResponse.protocolState()));
             }
             if (promptFallback) {
                 assistantMetadata.put("promptFallback", true);
@@ -255,8 +253,12 @@ public class ChatCallModelNode implements AsyncNodeAction {
         if (toolCalls.isEmpty()) {
             toolCalls = readToolCalls(metadata.get("tool_calls"));
         }
+        ModelProtocolState protocolState = ModelProtocolState.empty();
+        if (metadata.containsKey("protocolState")) {
+            protocolState = ModelProtocolState.deserializeProtocolState(metadata.get("protocolState"));
+        }
         return new ModelMessage(role, content, toolCalls, toolCallId.isBlank() ? null : toolCallId,
-                name.isBlank() ? null : name, metadata);
+                name.isBlank() ? null : name, metadata, protocolState);
     }
 
     private static Map<String, Object> readMetadata(Object value) {

@@ -24,7 +24,7 @@ Sandbox execution supports `local-restricted`, opt-in `local-trusted`, and `dock
 | 运行模式 | 支持 `CHAT` 和 `RESEARCH`；research 当前是统一 agent runtime 下的模式，不是独立旧 pipeline。 |
 | Graph runtime | 默认 `haifa.ai.deerflow.graph.enabled=true`、`mode=GRAPH_FIRST`。chat/research active 路径当前都进入 `GraphChatRuntime`；`GraphResearchRuntime` 仍在代码中但 `SimpleAgentRuntime.shouldUseActiveResearchGraph()` 返回 `false`。 |
 | Legacy loop | `AgentLoop` 作为 graph 关闭或 fallback 路径保留。 |
-| 模型接入 | 通过 Spring AI `ChatClient`；`openai` Maven profile 引入 OpenAI starter；未配置真实 provider 时使用 fallback 行为。 |
+| 模型接入 | 通过 Spring AI `ChatClient`；`openai` 和 `google-genai` Maven profile 分别引入 OpenAI-compatible 与 Google 原生 starter；未配置真实 provider 时使用 fallback 行为。 |
 | 工具系统 | 内置文件、上传文件、web search/fetch、image、bash、run_script、todo、clarification、subagent、research evidence/claim/citation 等工具。 |
 | Skills | 从 `${skillsRoot}/public` 和 `${skillsRoot}/custom` 加载 Markdown skill；research mode 自动激活 `deep-research`。 |
 | Deep research | 由 `RunMode.RESEARCH`、`deep-research` skill、middleware、research observer、plan/source/evidence/claim/citation/quality/budget stores 和 report artifact 共同实现。 |
@@ -51,6 +51,19 @@ $env:LLM_NETWORK_PROXY_USERNAME = "proxy-user"         # Optional
 $env:LLM_NETWORK_PROXY_PASSWORD = "proxy-password"     # Optional
 mvn -pl haifa-ai/haifa-ai-deerflow -Popenai spring-boot:run
 ```
+
+Gemini 3 工具调用必须使用 Google 原生 profile，Spring AI 1.1.x 的 OpenAI-compatible
+adapter 不会保留 Gemini `thought_signature`：
+
+```powershell
+$env:GEMINI_API_KEY = "your-gemini-key" # OPENAI_API_KEY 也可作为兼容回退
+$env:HAIFA_DEERFLOW_MODEL = "gemini-3-flash-preview"
+$env:LLM_NETWORK_PROXY_URL = "socks5://127.0.0.1:1080" # Optional
+mvn -pl haifa-ai/haifa-ai-deerflow -Pgoogle-genai spring-boot:run
+```
+
+不要同时启用 `openai` 和 `google-genai` profile。Google 原生 SDK 使用 Google endpoint，
+不会读取 OpenAI-compatible 的完整 `OPENAI_BASE_URL`。
 
 服务默认监听：
 

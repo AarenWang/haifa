@@ -8,8 +8,10 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
+import org.wrj.haifa.ai.deerflow.model.ModelProtocolState;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
+import org.wrj.haifa.ai.deerflow.model.ToolCallProtocolState;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
@@ -167,6 +169,56 @@ class ChatCallModelNodeTest {
         assertThat(pending).singleElement().satisfies(call -> assertThat(call)
                 .containsEntry("name", "ask_clarification")
                 .containsEntry("arguments", "{}"));
+    }
+
+    @Test
+    void restoresAndPersistsProtocolStateInGraphMessageWindow() {
+        AtomicReference<ModelPrompt> capturedPrompt = new AtomicReference<>();
+        ModelProtocolState storedState = new ModelProtocolState(
+                ModelProtocolState.CURRENT_SCHEMA_VERSION,
+                "google-genai",
+                Map.of(),
+                List.of(new ToolCallProtocolState(0, "call-1", Map.of("thoughtSignature", "stored")))
+        );
+        ModelProtocolState responseState = new ModelProtocolState(
+                ModelProtocolState.CURRENT_SCHEMA_VERSION,
+                "google-genai",
+                Map.of(),
+                List.of(new ToolCallProtocolState(0, "call-2", Map.of("thoughtSignature", "response")))
+        );
+        ChatCallModelNode node = new ChatCallModelNode(
+                prompt -> {
+                    capturedPrompt.set(prompt);
+                    return Mono.just(new ModelResponse(
+                            "ok", List.of(), List.of(), "STOP", Map.of(), responseState));
+                },
+                new ToolRegistry(List.of()),
+                new DeerFlowProperties()
+        );
+
+        Map<String, Object> update = node.apply(new OverAllState(Map.of(
+                AgentGraphStateKeys.RUN_ID, "run-protocol-state",
+                AgentGraphStateKeys.THREAD_ID, "thread-protocol-state",
+                AgentGraphStateKeys.MODE, RunMode.CHAT.name(),
+                AgentGraphStateKeys.MODEL_PROMPT, Map.of("systemPrompt", "system", "userPrompt", "user"),
+                AgentGraphStateKeys.MESSAGE_WINDOW, List.of(Map.of(
+                        "role", ModelMessage.Role.ASSISTANT.name(),
+                        "content", "previous tool call",
+                        "metadata", Map.of(
+                                "protocolState", ModelProtocolState.serializeProtocolState(storedState)
+                        )
+                ))
+        ))).join();
+
+        assertThat(capturedPrompt.get().messages())
+                .filteredOn(message -> message.role() == ModelMessage.Role.ASSISTANT)
+                .singleElement()
+                .extracting(ModelMessage::protocolState)
+                .isEqualTo(storedState);
+        List<Map<String, Object>> messages = (List<Map<String, Object>>) update.get(AgentGraphStateKeys.MESSAGE_WINDOW);
+        Map<String, Object> metadata = (Map<String, Object>) messages.get(0).get("metadata");
+        assertThat(ModelProtocolState.deserializeProtocolState(metadata.get("protocolState")))
+                .isEqualTo(responseState);
     }
 
     private static AgentTool tool(String name) {

@@ -51,7 +51,7 @@ public class LlmNetworkProxyConfiguration {
         return builder -> builder.clientConnector(connector);
     }
 
-    private static ProxySettings proxySettings(DeerFlowProperties properties) {
+    static ProxySettings proxySettings(DeerFlowProperties properties) {
         return parseProxySettings(
                 properties.getNetworkProxyUrl(),
                 properties.getNetworkProxyUsername(),
@@ -137,4 +137,5 @@ public class LlmNetworkProxyConfiguration {
             ProxyProvider.Proxy proxyType,
             String username,
             String password) { }
+
 }

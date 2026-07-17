@@ -12,6 +12,10 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -195,6 +199,67 @@ class SpringAiAgentModelClientTest {
         assertThat(springMessage.getToolCalls()).singleElement()
                 .extracting(AssistantMessage.ToolCall::arguments)
                 .isEqualTo("{}");
+    }
+
+    @Test
+    void consolidatesAllSystemMessagesForGoogleGenAiCompatibility() {
+        List<Message> messages = SpringAiAgentModelClient.toSpringAiMessages(new ModelPrompt(
+                "primary system prompt",
+                "",
+                "model",
+                List.of(
+                        new ModelMessage(ModelMessage.Role.USER, "first user message"),
+                        new ModelMessage(ModelMessage.Role.SYSTEM, "runtime reminder"),
+                        new ModelMessage(ModelMessage.Role.ASSISTANT, "intermediate answer"),
+                        new ModelMessage(ModelMessage.Role.SYSTEM, "retry instruction"),
+                        new ModelMessage(ModelMessage.Role.USER, "latest user message"))));
+
+        assertThat(messages).filteredOn(SystemMessage.class::isInstance)
+                .singleElement()
+                .satisfies(message -> assertThat(message.getText())
+                        .isEqualTo("primary system prompt\n\nruntime reminder\n\nretry instruction"));
+        assertThat(messages).extracting(message -> message.getClass().getSimpleName())
+                .containsExactly(
+                        "SystemMessage",
+                        "UserMessage",
+                        "AssistantMessage",
+                        "UserMessage");
+    }
+
+    @Test
+    void wrapsPlainTextToolResponsesAsJsonForGoogleGenAiCompatibility() {
+        ModelMessage toolMessage = new ModelMessage(
+                ModelMessage.Role.TOOL,
+                "Declared 1 completion requirement(s).",
+                List.of(),
+                "call-1",
+                "declare_completion_requirements",
+                Map.of());
+
+        ToolResponseMessage springMessage = (ToolResponseMessage) SpringAiAgentModelClient.toSpringAiMessages(
+                new ModelPrompt("system", "", "model", List.of(toolMessage))).get(1);
+
+        assertThat(springMessage.getResponses()).singleElement()
+                .extracting(ToolResponseMessage.ToolResponse::responseData)
+                .isEqualTo("{\"result\":\"Declared 1 completion requirement(s).\"}");
+    }
+
+    @Test
+    void preservesJsonObjectToolResponses() {
+        ModelMessage toolMessage = new ModelMessage(
+                ModelMessage.Role.TOOL,
+                "{\"status\":\"ok\"}",
+                List.of(),
+                "call-1",
+                "example_tool",
+                Map.of());
+
+        ToolResponseMessage springMessage = (ToolResponseMessage) SpringAiAgentModelClient.toSpringAiMessages(
+                new ModelPrompt("system", "", "model", List.of(toolMessage))).get(1);
+
+        assertThat(springMessage.getResponses()).singleElement()
+                .extracting(ToolResponseMessage.ToolResponse::responseData)
+                .isEqualTo("{\"status\":\"ok\"}");
     }
 
     private static String requiredEnvironmentVariable(String name) {

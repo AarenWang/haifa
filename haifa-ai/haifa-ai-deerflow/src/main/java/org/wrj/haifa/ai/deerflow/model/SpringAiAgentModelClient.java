@@ -1,6 +1,7 @@
 package org.wrj.haifa.ai.deerflow.model;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -15,6 +16,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.ai.model.ModelOptionsUtils;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.DefaultToolDefinition;
@@ -36,6 +38,34 @@ public class SpringAiAgentModelClient implements AgentModelClient {
 
     private static final Logger log = LoggerFactory.getLogger(SpringAiAgentModelClient.class);
 
+    private static final List<SpringAiProtocolStateCodec> codecs = List.of(new GoogleThoughtSignatureCodec());
+
+    private static ModelProtocolState captureProtocolState(AssistantMessage message) {
+        if (message == null) {
+            return ModelProtocolState.empty();
+        }
+        for (SpringAiProtocolStateCodec codec : codecs) {
+            ModelProtocolState state = codec.capture(message);
+            if (state != null && !state.isEmpty()) {
+                return state;
+            }
+        }
+        return ModelProtocolState.empty();
+    }
+
+    private static Map<String, Object> restoreProtocolState(ModelProtocolState state) {
+        if (state == null || state.isEmpty()) {
+            return Map.of();
+        }
+        for (SpringAiProtocolStateCodec codec : codecs) {
+            if (codec.supports(state.adapter())) {
+                return codec.restore(state);
+            }
+        }
+        throw new ModelProtocolStateException(
+                "No Spring AI protocol state codec registered for adapter: " + state.adapter());
+    }
+
     private final ObjectProvider<ChatClient.Builder> chatClientBuilderProvider;
     private final DeerFlowProperties properties;
     private final BiFunction<ChatClient.Builder, ModelPrompt, ModelResponse> modelCaller;
@@ -43,7 +73,9 @@ public class SpringAiAgentModelClient implements AgentModelClient {
     @Autowired
     public SpringAiAgentModelClient(ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
             DeerFlowProperties properties) {
-        this(chatClientBuilderProvider, properties, SpringAiAgentModelClient::callSpringAi);
+        this.chatClientBuilderProvider = chatClientBuilderProvider;
+        this.properties = properties;
+        this.modelCaller = null;
     }
 
     SpringAiAgentModelClient(ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
@@ -66,7 +98,12 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         log.info("Spring AI model call starting. model={}, timeoutMs={}, systemPromptChars={}, userPromptChars={}, messageCount={}",
                 safe(prompt.modelName()), timeoutMs, length(prompt.systemPrompt()), length(prompt.effectiveUserPrompt()),
                 prompt.messages().size());
-        return Mono.fromCallable(() -> this.modelCaller.apply(builder, prompt))
+        return Mono.fromCallable(() -> {
+                    if (this.modelCaller != null) {
+                        return this.modelCaller.apply(builder, prompt);
+                    }
+                    return this.callSpringAi(builder, prompt);
+                })
                 .subscribeOn(Schedulers.boundedElastic())
                 .timeout(Duration.ofMillis(timeoutMs))
                 .retryWhen(Retry.fixedDelay(3, Duration.ofSeconds(3))
@@ -126,6 +163,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                         }
                         String content = "";
                         List<ModelToolCall> modelToolCalls = new ArrayList<>();
+                        ModelProtocolState protocolState = ModelProtocolState.empty();
 
                         if (chatResponse.getResult() != null) {
                             org.springframework.ai.chat.model.Generation generation = chatResponse.getResult();
@@ -145,6 +183,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                                         ));
                                     }
                                 }
+                                protocolState = captureProtocolState(assistantMessage);
                             }
                         }
 
@@ -153,7 +192,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                             finishReason = chatResponse.getResult().getMetadata().getFinishReason();
                         }
 
-                        return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of());
+                        return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of(), protocolState);
                     });
         })
         .subscribeOn(Schedulers.boundedElastic())
@@ -185,7 +224,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                 new IllegalStateException("Model API streaming call timed out after " + timeoutMs + "ms", ex));
     }
 
-    private static ModelResponse callSpringAi(ChatClient.Builder builder, ModelPrompt prompt) {
+    private ModelResponse callSpringAi(ChatClient.Builder builder, ModelPrompt prompt) {
         ChatClient.ChatClientRequestSpec request = builder.build()
                 .prompt()
                 .messages(toSpringAiMessages(prompt));
@@ -202,6 +241,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
 
         String content = "";
         List<ModelToolCall> modelToolCalls = new ArrayList<>();
+        ModelProtocolState protocolState = ModelProtocolState.empty();
 
         if (chatResponse.getResult() != null) {
             org.springframework.ai.chat.model.Generation generation = chatResponse.getResult();
@@ -221,6 +261,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                         ));
                     }
                 }
+                protocolState = captureProtocolState(assistantMessage);
             }
         }
 
@@ -229,24 +270,44 @@ public class SpringAiAgentModelClient implements AgentModelClient {
             finishReason = chatResponse.getResult().getMetadata().getFinishReason();
         }
 
-        return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of());
+        return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of(), protocolState);
     }
 
     static List<Message> toSpringAiMessages(ModelPrompt prompt) {
-        List<Message> messages = new ArrayList<>();
+        List<String> systemParts = new ArrayList<>();
         if (StringUtils.hasText(prompt.systemPrompt())) {
-            messages.add(new SystemMessage(prompt.systemPrompt()));
+            systemParts.add(prompt.systemPrompt());
         }
+
+        List<Message> conversationMessages = new ArrayList<>();
         if (prompt.hasMessages()) {
             for (ModelMessage message : prompt.messages()) {
+                if (message == null) {
+                    continue;
+                }
+                if (message.role() == ModelMessage.Role.SYSTEM) {
+                    if (StringUtils.hasText(message.content())) {
+                        systemParts.add(message.content());
+                    }
+                    continue;
+                }
                 Message springMessage = toSpringAiMessage(message);
                 if (springMessage != null) {
-                    messages.add(springMessage);
+                    conversationMessages.add(springMessage);
                 }
             }
         } else if (StringUtils.hasText(prompt.userPrompt())) {
-            messages.add(new UserMessage(prompt.userPrompt()));
+            conversationMessages.add(new UserMessage(prompt.userPrompt()));
         }
+
+        List<Message> messages = new ArrayList<>();
+        if (!systemParts.isEmpty()) {
+            // Google GenAI accepts exactly one system instruction. Runtime reminders,
+            // summaries, and retry instructions are therefore folded into the primary
+            // system message while retaining their original relative order.
+            messages.add(new SystemMessage(String.join("\n\n", systemParts)));
+        }
+        messages.addAll(conversationMessages);
         return messages;
     }
 
@@ -255,27 +316,60 @@ public class SpringAiAgentModelClient implements AgentModelClient {
             return null;
         }
         return switch (message.role()) {
-            case SYSTEM -> new SystemMessage(message.content());
+            case SYSTEM -> null; // Consolidated by toSpringAiMessages.
             case USER -> new UserMessage(message.content());
-            case ASSISTANT -> AssistantMessage.builder()
-                    .content(message.content())
-                    .properties(message.metadata())
-                    .toolCalls(message.toolCalls().stream()
-                            .map(toolCall -> new AssistantMessage.ToolCall(
-                                    blankToDefault(toolCall.id(), ""),
-                                    blankToDefault(toolCall.type(), "tool_call"),
-                                    blankToDefault(toolCall.name(), ""),
-                                    ModelToolCallSanitizer.sanitizeArguments(toolCall.arguments())))
-                            .toList())
-                    .build();
+            case ASSISTANT -> {
+                Map<String, Object> properties = new HashMap<>();
+                if (message.metadata() != null) {
+                    properties.putAll(message.metadata());
+                }
+                properties.remove("protocolState");
+                if (message.protocolState() != null && !message.protocolState().isEmpty()) {
+                    properties.putAll(restoreProtocolState(message.protocolState()));
+                }
+                yield AssistantMessage.builder()
+                        .content(message.content())
+                        .properties(properties)
+                        .toolCalls(message.toolCalls().stream()
+                                .map(toolCall -> new AssistantMessage.ToolCall(
+                                        blankToDefault(toolCall.id(), ""),
+                                        blankToDefault(toolCall.type(), "tool_call"),
+                                        blankToDefault(toolCall.name(), ""),
+                                        ModelToolCallSanitizer.sanitizeArguments(toolCall.arguments())))
+                                .toList())
+                        .build();
+            }
             case TOOL -> ToolResponseMessage.builder()
                     .responses(List.of(new ToolResponseMessage.ToolResponse(
                             blankToDefault(message.toolCallId(), ""),
                             blankToDefault(message.name(), ""),
-                            message.content())))
+                            normalizeToolResponseData(message.content()))))
                     .metadata(message.metadata())
                     .build();
         };
+    }
+
+    /**
+     * Spring AI's Google GenAI adapter deserializes every tool response as JSON before
+     * building Gemini's {@code functionResponse.response} map. DeerFlow tools are also
+     * allowed to return plain text, so expose non-object results through a stable JSON
+     * envelope that remains valid for OpenAI-compatible providers as well.
+     */
+    private static String normalizeToolResponseData(String responseData) {
+        String content = responseData == null ? "" : responseData;
+        try {
+            Object parsed = ModelOptionsUtils.OBJECT_MAPPER.readValue(content, Object.class);
+            if (parsed instanceof Map<?, ?>) {
+                return content;
+            }
+            return ModelOptionsUtils.OBJECT_MAPPER.writeValueAsString(Map.of("result", parsed));
+        } catch (Exception ignored) {
+            try {
+                return ModelOptionsUtils.OBJECT_MAPPER.writeValueAsString(Map.of("result", content));
+            } catch (Exception serializationFailure) {
+                throw new IllegalStateException("Failed to serialize tool response", serializationFailure);
+            }
+        }
     }
 
     static boolean isRetryableFailure(Throwable failure) {

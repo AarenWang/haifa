@@ -31,6 +31,13 @@ spring:
         completions-path: ${OPENAI_BASE_URL:https://api.openai.com/v1/chat/completions}
         options:
           model: gpt-4o-mini
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY:${OPENAI_API_KEY:}}
+        chat:
+          options:
+            model: ${HAIFA_DEERFLOW_MODEL:gemini-2.5-flash}
+            include-thoughts: true
 
 logging:
   level:
