@@ -14,6 +14,9 @@ import org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType;
 public class DeerFlowProperties {
 
     private String model;
+    private String networkProxyUrl;
+    private String networkProxyUsername;
+    private String networkProxyPassword;
     private String systemPrompt;
     private String userDataRoot = "${user.dir}/data/user-data";
     private String workspaceRoot = "${user.dir}/data/user-data/workspace";
@@ -484,6 +487,30 @@ public class DeerFlowProperties {
 
     public void setModel(String model) {
         this.model = model;
+    }
+
+    public String getNetworkProxyUrl() {
+        return networkProxyUrl;
+    }
+
+    public void setNetworkProxyUrl(String networkProxyUrl) {
+        this.networkProxyUrl = networkProxyUrl;
+    }
+
+    public String getNetworkProxyUsername() {
+        return networkProxyUsername;
+    }
+
+    public void setNetworkProxyUsername(String networkProxyUsername) {
+        this.networkProxyUsername = networkProxyUsername;
+    }
+
+    public String getNetworkProxyPassword() {
+        return networkProxyPassword;
+    }
+
+    public void setNetworkProxyPassword(String networkProxyPassword) {
+        this.networkProxyPassword = networkProxyPassword;
     }
 
     public String getSystemPrompt() {

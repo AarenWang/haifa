@@ -44,8 +44,11 @@ mvn -pl haifa-ai/haifa-ai-deerflow -am spring-boot:run
 
 ```powershell
 $env:OPENAI_API_KEY = "your-key"
-$env:OPENAI_BASE_URL = "https://api.openai.com"
+$env:OPENAI_BASE_URL = "https://api.openai.com/v1/chat/completions"
 $env:HAIFA_DEERFLOW_MODEL = "gpt-4o-mini"
+$env:LLM_NETWORK_PROXY_URL = "socks5://127.0.0.1:1080" # Optional: http, https, or socks5
+$env:LLM_NETWORK_PROXY_USERNAME = "proxy-user"         # Optional
+$env:LLM_NETWORK_PROXY_PASSWORD = "proxy-password"     # Optional
 mvn -pl haifa-ai/haifa-ai-deerflow -Popenai spring-boot:run
 ```
 
@@ -76,6 +79,9 @@ curl http://localhost:8095/api/deerflow/health
 | `haifa.ai.deerflow.uploads-root` | `${user.dir}/data/user-data/uploads` |
 | `haifa.ai.deerflow.outputs-root` | `${user.dir}/data/user-data/outputs` |
 | `haifa.ai.deerflow.skills-root` | `${user.dir}/skills` |
+| `haifa.ai.deerflow.network-proxy-url` | `${LLM_NETWORK_PROXY_URL:}`; optional `http`, `https`, or `socks5` proxy for blocking and streaming LLM calls |
+| `haifa.ai.deerflow.network-proxy-username` | `${LLM_NETWORK_PROXY_USERNAME:}`; optional proxy username |
+| `haifa.ai.deerflow.network-proxy-password` | `${LLM_NETWORK_PROXY_PASSWORD:}`; optional proxy password |
 | `haifa.ai.deerflow.graph.enabled` | `true` |
 | `haifa.ai.deerflow.graph.mode` | `GRAPH_FIRST` |
 | `haifa.ai.deerflow.graph.checkpoint.enabled` | `true` |

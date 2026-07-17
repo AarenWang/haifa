@@ -6,20 +6,56 @@ import static org.mockito.Mockito.when;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.wrj.haifa.ai.deerflow.DeerFlowApplication;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import reactor.test.StepVerifier;
 
 class SpringAiAgentModelClientTest {
+
+    @Test
+    void callsModelUsingOpenAiEnvironment() {
+        String apiKey = requiredEnvironmentVariable("OPENAI_API_KEY");
+        String baseUrl = requiredEnvironmentVariable("OPENAI_BASE_URL");
+        String model = requiredEnvironmentVariable("HAIFA_DEERFLOW_MODEL");
+
+        Map<String, Object> properties = Map.of(
+                "spring.ai.openai.api-key", apiKey,
+                "spring.ai.openai.base-url", baseUrl,
+                "haifa.ai.deerflow.model", model,
+                "spring.main.lazy-initialization", true);
+
+        try (ConfigurableApplicationContext context = new SpringApplicationBuilder(DeerFlowApplication.class)
+                .web(WebApplicationType.NONE)
+                .properties(properties)
+                .run()) {
+            SpringAiAgentModelClient client = context.getBean(SpringAiAgentModelClient.class);
+            ModelResponse response = client.generate(new ModelPrompt(
+                            "You are a concise and helpful assistant.",
+                            "Reply with a short greeting to confirm that the model connection works.",
+                            model))
+                    .block();
+
+            assertThat(response).isNotNull();
+            assertThat(response.content()).isNotBlank();
+            System.out.println("SpringAiAgentModelClient response:");
+            System.out.println(response.content());
+        }
+    }
 
     @Test
     void buildsStructuredToolCallingOptionsWithoutInternalExecution() {
@@ -159,5 +195,12 @@ class SpringAiAgentModelClientTest {
         assertThat(springMessage.getToolCalls()).singleElement()
                 .extracting(AssistantMessage.ToolCall::arguments)
                 .isEqualTo("{}");
+    }
+
+    private static String requiredEnvironmentVariable(String name) {
+        String value = System.getenv(name);
+        Assumptions.assumeTrue(value != null && !value.isBlank(),
+                () -> "Skipping live model test because " + name + " is not set");
+        return value;
     }
 }

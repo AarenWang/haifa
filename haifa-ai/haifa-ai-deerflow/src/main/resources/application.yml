@@ -23,8 +23,12 @@ spring:
   ai:
     openai:
       api-key: ${OPENAI_API_KEY:}
-      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      # OPENAI_BASE_URL is the complete chat-completions endpoint. Spring AI 1.1.x
+      # rejects an empty completions-path, so the same absolute URL is used here
+      # to prevent Spring AI from appending its /v1/chat/completions default.
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1/chat/completions}
       chat:
+        completions-path: ${OPENAI_BASE_URL:https://api.openai.com/v1/chat/completions}
         options:
           model: gpt-4o-mini
 
@@ -44,6 +48,9 @@ haifa:
   ai:
     deerflow:
       model: ${HAIFA_DEERFLOW_MODEL:}
+      network-proxy-url: ${LLM_NETWORK_PROXY_URL:}
+      network-proxy-username: ${LLM_NETWORK_PROXY_USERNAME:}
+      network-proxy-password: ${LLM_NETWORK_PROXY_PASSWORD:}
       model-timeout: ${HAIFA_DEERFLOW_MODEL_TIMEOUT:300000}
       max-iterations: 20
       max-tool-calls: ${HAIFA_DEERFLOW_MAX_TOOL_CALLS:80}
