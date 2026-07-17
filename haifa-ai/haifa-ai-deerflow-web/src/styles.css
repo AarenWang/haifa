@@ -1590,8 +1590,8 @@ body {
 }
 
 .clarification-card.pending {
-  border-color: #ffec99;
-  background: linear-gradient(180deg, #fff9db 0%, var(--bg-secondary) 72%);
+  border-color: #a5d8ff;
+  background: linear-gradient(180deg, #e7f5ff 0%, var(--bg-secondary) 72%);
 }
 
 .clarification-card.resolved {
@@ -1629,9 +1629,9 @@ body {
 }
 
 .clarification-card.pending .clarification-card-icon {
-  background: var(--accent-amber-light);
-  color: var(--accent-amber);
-  border-color: #ffec99;
+  background: var(--accent-blue-light);
+  color: var(--accent-blue);
+  border-color: #a5d8ff;
 }
 
 .clarification-card.resolved .clarification-card-icon {
@@ -1654,7 +1654,7 @@ body {
 }
 
 .clarification-card.pending .clarification-card-eyebrow {
-  color: var(--accent-amber);
+  color: var(--accent-blue);
 }
 
 .clarification-card.resolved .clarification-card-eyebrow {
@@ -1713,8 +1713,8 @@ body {
 }
 
 .clarification-card.pending .clarification-card-footer {
-  color: var(--accent-amber);
-  border-top-color: #ffec99;
+  color: var(--accent-blue);
+  border-top-color: #a5d8ff;
 }
 
 .clarification-collapsed-summary {
@@ -1811,8 +1811,8 @@ body {
   align-items: center;
   justify-content: center;
   background: var(--bg-secondary);
-  border: 1px solid #ffec99;
-  color: var(--accent-amber);
+  border: 1px solid #a5d8ff;
+  color: var(--accent-blue);
   font-size: 12px;
   font-weight: 700;
 }
@@ -1878,14 +1878,14 @@ body {
 
 .clarification-card.pending .clarification-choice:hover,
 .clarification-choice.selected {
-  border-color: var(--accent-amber);
-  background: var(--accent-amber-light);
+  border-color: var(--accent-blue);
+  background: var(--accent-blue-light);
   color: var(--text-primary);
 }
 
 .clarification-choice.selected span {
-  border-color: var(--accent-amber);
-  background: var(--accent-amber);
+  border-color: var(--accent-blue);
+  background: var(--accent-blue);
   color: #fff;
 }
 
@@ -1911,8 +1911,8 @@ body {
 
 .clarification-custom-input:focus {
   outline: none;
-  border-color: var(--accent-amber);
-  box-shadow: 0 0 0 3px var(--accent-amber-light);
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px var(--accent-blue-light);
 }
 
 .clarification-submit-btn {
@@ -1920,8 +1920,8 @@ body {
   min-height: 32px;
   padding: 0 14px;
   border-radius: var(--radius);
-  border: 1px solid var(--accent-amber);
-  background: var(--accent-amber);
+  border: 1px solid var(--accent-blue);
+  background: var(--accent-blue);
   color: #fff;
   font-size: 13px;
   font-weight: 700;

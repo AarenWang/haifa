@@ -1,12 +1,15 @@
 package org.wrj.haifa.ai.deerflow.model;
 
+import com.fasterxml.jackson.core.io.JsonEOFException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -146,7 +149,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                 safe(prompt.modelName()), timeoutMs, length(prompt.systemPrompt()), length(prompt.effectiveUserPrompt()),
                 prompt.messages().size());
 
-        return Flux.defer(() -> {
+        Flux<ModelResponse> providerStream = Flux.defer(() -> {
             ChatClient.ChatClientRequestSpec request = builder.build()
                     .prompt()
                     .messages(toSpringAiMessages(prompt));
@@ -194,6 +197,12 @@ public class SpringAiAgentModelClient implements AgentModelClient {
 
                         return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of(), protocolState);
                     });
+        });
+
+        return recoverTruncatedJsonStream(providerStream, () -> {
+            log.warn("Spring AI model stream ended with truncated JSON before its first response. "
+                    + "Falling back to a non-streaming model call. model={}", safe(prompt.modelName()));
+            return generate(prompt);
         })
         .subscribeOn(Schedulers.boundedElastic())
         .timeout(Duration.ofMillis(timeoutMs))
@@ -222,6 +231,28 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         })
         .onErrorMap(TimeoutException.class, ex ->
                 new IllegalStateException("Model API streaming call timed out after " + timeoutMs + "ms", ex));
+    }
+
+    static Flux<ModelResponse> recoverTruncatedJsonStream(Flux<ModelResponse> stream,
+            Supplier<Mono<ModelResponse>> fallback) {
+        return Flux.defer(() -> {
+            AtomicBoolean responseReceived = new AtomicBoolean();
+            return stream
+                    .doOnNext(ignored -> responseReceived.set(true))
+                    .onErrorResume(failure -> !responseReceived.get() && isJsonEofFailure(failure),
+                            failure -> fallback.get().flux());
+        });
+    }
+
+    static boolean isJsonEofFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof JsonEOFException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private ModelResponse callSpringAi(ChatClient.Builder builder, ModelPrompt prompt) {

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.core.io.JsonEOFException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +29,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.wrj.haifa.ai.deerflow.DeerFlowApplication;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 class SpringAiAgentModelClientTest {
@@ -260,6 +264,48 @@ class SpringAiAgentModelClientTest {
         assertThat(springMessage.getResponses()).singleElement()
                 .extracting(ToolResponseMessage.ToolResponse::responseData)
                 .isEqualTo("{\"status\":\"ok\"}");
+    }
+
+    @Test
+    void fallsBackToNonStreamingCallWhenStreamJsonIsTruncatedBeforeFirstResponse() {
+        AtomicInteger fallbackCalls = new AtomicInteger();
+        JsonEOFException truncatedJson = new JsonEOFException(
+                null, JsonToken.START_OBJECT, "Unexpected end-of-input");
+
+        Flux<ModelResponse> recovered = SpringAiAgentModelClient.recoverTruncatedJsonStream(
+                Flux.error(new IllegalStateException("stream decoding failed", truncatedJson)),
+                () -> {
+                    fallbackCalls.incrementAndGet();
+                    return Mono.just(new ModelResponse("complete unary response"));
+                });
+
+        StepVerifier.create(recovered)
+                .assertNext(response -> assertThat(response.content()).isEqualTo("complete unary response"))
+                .verifyComplete();
+        assertThat(fallbackCalls).hasValue(1);
+    }
+
+    @Test
+    void doesNotReplaceStreamAfterAResponseWasAlreadyDelivered() {
+        AtomicInteger fallbackCalls = new AtomicInteger();
+        JsonEOFException truncatedJson = new JsonEOFException(
+                null, JsonToken.START_OBJECT, "Unexpected end-of-input");
+        Flux<ModelResponse> partialStream = Flux.concat(
+                Flux.just(new ModelResponse("partial")),
+                Flux.error(truncatedJson));
+
+        Flux<ModelResponse> recovered = SpringAiAgentModelClient.recoverTruncatedJsonStream(
+                partialStream,
+                () -> {
+                    fallbackCalls.incrementAndGet();
+                    return Mono.just(new ModelResponse("replacement"));
+                });
+
+        StepVerifier.create(recovered)
+                .assertNext(response -> assertThat(response.content()).isEqualTo("partial"))
+                .expectError(JsonEOFException.class)
+                .verify();
+        assertThat(fallbackCalls).hasValue(0);
     }
 
     private static String requiredEnvironmentVariable(String name) {
