@@ -40,6 +40,8 @@ import { Activity, Menu } from 'lucide-react';
 function App() {
   const [state, dispatch] = useReducer(deerflowReducer, initialState);
   const abortRef = useRef<AbortController | null>(null);
+  const streamControllersRef = useRef(new Set<AbortController>());
+  const threadStreamControllersRef = useRef(new Map<string, AbortController>());
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'unknown'>('unknown');
   const [externalMessage, setExternalMessage] = useState<string | undefined>(undefined);
   const [isMemoryOpen, setIsMemoryOpen] = useState<boolean>(false);
@@ -375,10 +377,12 @@ function App() {
 
   // Cleanup on unmount
   useEffect(() => {
+    const streamControllers = streamControllersRef.current;
+    const threadStreamControllers = threadStreamControllersRef.current;
     return () => {
-      if (abortRef.current) {
-        abortRef.current.abort();
-      }
+      streamControllers.forEach((controller) => controller.abort());
+      streamControllers.clear();
+      threadStreamControllers.clear();
     };
   }, []);
 
@@ -389,6 +393,7 @@ function App() {
       }
       const controller = new AbortController();
       abortRef.current = controller;
+      streamControllersRef.current.add(controller);
 
       const fullReq: RunRequest = {
         ...req,
@@ -396,6 +401,20 @@ function App() {
         uploadedFileIds: state.selectedUploadIds.length > 0 ? state.selectedUploadIds : undefined,
       };
       let streamThreadId = fullReq.threadId;
+      if (streamThreadId) {
+        threadStreamControllersRef.current.set(streamThreadId, controller);
+      }
+      const releaseController = () => {
+        streamControllersRef.current.delete(controller);
+        threadStreamControllersRef.current.forEach((trackedController, threadId) => {
+          if (trackedController === controller) {
+            threadStreamControllersRef.current.delete(threadId);
+          }
+        });
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+      };
       allowArtifactAutoOpenRef.current = true;
       setCanvasArtifactId(null);
 
@@ -407,6 +426,13 @@ function App() {
           onEvent: (evt) => {
             if (evt.threadId) {
               streamThreadId = evt.threadId;
+              threadStreamControllersRef.current.set(evt.threadId, controller);
+            }
+            if (abortRef.current !== controller) {
+              if (evt.type === 'RUN_COMPLETED' || evt.type === 'RUN_FAILED' || evt.type === 'RUN_CANCELLED') {
+                refreshThreads();
+              }
+              return;
             }
             dispatch({ type: 'ADD_EVENT', payload: evt });
             const isResearchEvent =
@@ -449,22 +475,28 @@ function App() {
             }
           },
           onError: (err) => {
-            abortRef.current = null;
-            dispatch({ type: 'SET_ERROR', payload: err });
+            const isVisibleStream = abortRef.current === controller;
+            releaseController();
+            if (isVisibleStream) {
+              dispatch({ type: 'SET_ERROR', payload: err });
+            }
           },
           onDone: () => {
-            abortRef.current = null;
-            if (streamThreadId) {
+            const isVisibleStream = abortRef.current === controller;
+            releaseController();
+            refreshThreads();
+            if (isVisibleStream && streamThreadId) {
               void refreshMessages(streamThreadId);
             }
           },
         },
         controller.signal
       ).catch((err) => {
-        if (!controller.signal.aborted) {
+        const isVisibleStream = abortRef.current === controller;
+        releaseController();
+        if (!controller.signal.aborted && isVisibleStream) {
           dispatch({ type: 'SET_ERROR', payload: (err as Error).message });
         }
-        abortRef.current = null;
       });
     },
     [refreshArtifactData, refreshMessages, refreshObservabilityData, refreshResearchData, refreshThreads, state.selectedUploadIds, state.threadId]
@@ -476,6 +508,7 @@ function App() {
     }
     const controller = new AbortController();
     abortRef.current = controller;
+    streamControllersRef.current.add(controller);
 
     dispatch({
       type: 'START_RUN',
@@ -483,6 +516,20 @@ function App() {
     });
 
     let streamThreadId = state.threadId;
+    if (streamThreadId) {
+      threadStreamControllersRef.current.set(streamThreadId, controller);
+    }
+    const releaseController = () => {
+      streamControllersRef.current.delete(controller);
+      threadStreamControllersRef.current.forEach((trackedController, threadId) => {
+        if (trackedController === controller) {
+          threadStreamControllersRef.current.delete(threadId);
+        }
+      });
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
+    };
     allowArtifactAutoOpenRef.current = true;
     setCanvasArtifactId(null);
 
@@ -492,6 +539,13 @@ function App() {
         onEvent: (evt) => {
           if (evt.threadId) {
             streamThreadId = evt.threadId;
+            threadStreamControllersRef.current.set(evt.threadId, controller);
+          }
+          if (abortRef.current !== controller) {
+            if (evt.type === 'RUN_COMPLETED' || evt.type === 'RUN_FAILED' || evt.type === 'RUN_CANCELLED') {
+              refreshThreads();
+            }
+            return;
           }
           dispatch({ type: 'ADD_EVENT', payload: evt });
           const isResearchEvent =
@@ -533,22 +587,28 @@ function App() {
           }
         },
         onError: (err) => {
-          abortRef.current = null;
-          dispatch({ type: 'SET_ERROR', payload: err });
+          const isVisibleStream = abortRef.current === controller;
+          releaseController();
+          if (isVisibleStream) {
+            dispatch({ type: 'SET_ERROR', payload: err });
+          }
         },
         onDone: () => {
-          abortRef.current = null;
-          if (streamThreadId) {
+          const isVisibleStream = abortRef.current === controller;
+          releaseController();
+          refreshThreads();
+          if (isVisibleStream && streamThreadId) {
             void refreshMessages(streamThreadId);
           }
         },
       },
       controller.signal
     ).catch((err) => {
-      if (!controller.signal.aborted) {
+      const isVisibleStream = abortRef.current === controller;
+      releaseController();
+      if (!controller.signal.aborted && isVisibleStream) {
         dispatch({ type: 'SET_ERROR', payload: (err as Error).message });
       }
-      abortRef.current = null;
     });
   }, [refreshArtifactData, refreshMessages, refreshObservabilityData, refreshResearchData, refreshThreads, state.lastRequest, state.threadId]);
 
@@ -650,10 +710,13 @@ function App() {
   }, [state.threadId, state.uploads]);
 
   const handleSelectThread = useCallback((threadId: string) => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
+    if (threadId === state.threadId) {
+      setIsSidebarOpen(false);
+      return;
     }
+    // Navigating between threads must not cancel the run that owns the current stream.
+    // Reattach the visible stream when the target thread also has an in-flight run.
+    abortRef.current = threadStreamControllersRef.current.get(threadId) || null;
     dispatch({ type: 'CLEAR' });
     dispatch({ type: 'SET_UPLOADS', payload: [] });
     dispatch({ type: 'SET_MESSAGES', payload: [] });
@@ -666,7 +729,7 @@ function App() {
     allowArtifactAutoOpenRef.current = false;
     setCanvasArtifactId(null);
     setIsSidebarOpen(false);
-  }, []);
+  }, [state.threadId]);
 
   const handleNewThread = useCallback(() => {
     if (abortRef.current) {
