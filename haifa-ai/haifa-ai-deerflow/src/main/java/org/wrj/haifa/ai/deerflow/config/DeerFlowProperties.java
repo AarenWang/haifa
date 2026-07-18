@@ -897,4 +897,115 @@ public class DeerFlowProperties {
         public boolean isHardlinePatternsEnabled() { return hardlinePatternsEnabled; }
         public void setHardlinePatternsEnabled(boolean hardlinePatternsEnabled) { this.hardlinePatternsEnabled = hardlinePatternsEnabled; }
     }
+
+    private PromptCache promptCache = new PromptCache();
+
+    public PromptCache getPromptCache() {
+        return promptCache;
+    }
+
+    public void setPromptCache(PromptCache promptCache) {
+        this.promptCache = promptCache == null ? new PromptCache() : promptCache;
+    }
+
+    public static class PromptCache {
+        private boolean enabled = true;
+        private String canonicalizationVersion = "v1";
+        private int routingShards = 1;
+        private boolean observabilityEnabled = true;
+        private OpenAiPromptCache openai = new OpenAiPromptCache();
+        private GooglePromptCache google = new GooglePromptCache();
+        private CompressionPromptCache compression = new CompressionPromptCache();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getCanonicalizationVersion() { return canonicalizationVersion; }
+        public void setCanonicalizationVersion(String canonicalizationVersion) { this.canonicalizationVersion = canonicalizationVersion; }
+        public int getRoutingShards() { return routingShards; }
+        public void setRoutingShards(int routingShards) { this.routingShards = routingShards; }
+        public boolean isObservabilityEnabled() { return observabilityEnabled; }
+        public void setObservabilityEnabled(boolean observabilityEnabled) { this.observabilityEnabled = observabilityEnabled; }
+        public OpenAiPromptCache getOpenai() { return openai; }
+        public void setOpenai(OpenAiPromptCache openai) { this.openai = openai == null ? new OpenAiPromptCache() : openai; }
+        public GooglePromptCache getGoogle() { return google; }
+        public void setGoogle(GooglePromptCache google) { this.google = google == null ? new GooglePromptCache() : google; }
+        public CompressionPromptCache getCompression() { return compression; }
+        public void setCompression(CompressionPromptCache compression) { this.compression = compression == null ? new CompressionPromptCache() : compression; }
+
+        public static class OpenAiPromptCache {
+            private boolean enabled = true;
+            private boolean promptCacheKeyEnabled = true;
+            private String retention = "PROVIDER_DEFAULT";
+            private boolean explicitBreakpointsEnabled = false;
+
+            public boolean isEnabled() { return enabled; }
+            public void setEnabled(boolean enabled) { this.enabled = enabled; }
+            public boolean isPromptCacheKeyEnabled() { return promptCacheKeyEnabled; }
+            public void setPromptCacheKeyEnabled(boolean promptCacheKeyEnabled) { this.promptCacheKeyEnabled = promptCacheKeyEnabled; }
+            public String getRetention() { return retention; }
+            public void setRetention(String retention) { this.retention = retention; }
+            public boolean isExplicitBreakpointsEnabled() { return explicitBreakpointsEnabled; }
+            public void setExplicitBreakpointsEnabled(boolean explicitBreakpointsEnabled) { this.explicitBreakpointsEnabled = explicitBreakpointsEnabled; }
+        }
+
+        public static class GooglePromptCache {
+            private boolean enabled = true;
+            private boolean includeExtendedUsageMetadata = true;
+            private boolean autoCacheEnabled = false;
+            private int autoCacheThreshold = 8192;
+            private String autoCacheTtl = "PT30M";
+            private ExplicitContent explicitContent = new ExplicitContent();
+
+            public boolean isEnabled() { return enabled; }
+            public void setEnabled(boolean enabled) { this.enabled = enabled; }
+            public boolean isIncludeExtendedUsageMetadata() { return includeExtendedUsageMetadata; }
+            public void setIncludeExtendedUsageMetadata(boolean includeExtendedUsageMetadata) { this.includeExtendedUsageMetadata = includeExtendedUsageMetadata; }
+            public boolean isAutoCacheEnabled() { return autoCacheEnabled; }
+            public void setAutoCacheEnabled(boolean autoCacheEnabled) { this.autoCacheEnabled = autoCacheEnabled; }
+            public int getAutoCacheThreshold() { return autoCacheThreshold; }
+            public void setAutoCacheThreshold(int autoCacheThreshold) { this.autoCacheThreshold = autoCacheThreshold; }
+            public String getAutoCacheTtl() { return autoCacheTtl; }
+            public void setAutoCacheTtl(String autoCacheTtl) { this.autoCacheTtl = autoCacheTtl; }
+            public ExplicitContent getExplicitContent() { return explicitContent; }
+            public void setExplicitContent(ExplicitContent explicitContent) { this.explicitContent = explicitContent == null ? new ExplicitContent() : explicitContent; }
+
+            public static class ExplicitContent {
+                private boolean enabled = false;
+                private int minEstimatedTokens = 8192;
+                private String ttl = "PT30M";
+                private String createWaitTimeout = "PT1S";
+
+                public boolean isEnabled() { return enabled; }
+                public void setEnabled(boolean enabled) { this.enabled = enabled; }
+                public int getMinEstimatedTokens() { return minEstimatedTokens; }
+                public void setMinEstimatedTokens(int minEstimatedTokens) { this.minEstimatedTokens = minEstimatedTokens; }
+                public String getTtl() { return ttl; }
+                public void setTtl(String ttl) { this.ttl = ttl; }
+                public String getCreateWaitTimeout() { return createWaitTimeout; }
+                public void setCreateWaitTimeout(String createWaitTimeout) { this.createWaitTimeout = createWaitTimeout; }
+            }
+        }
+
+        public static class CompressionPromptCache {
+            private boolean enabled = true;
+            private String schemaVersion = "v1";
+            private String promptVersion = "evidence-compressor-v1";
+            private String ttl = "P7D";
+            private int maxEntries = 10000;
+            private String cleanupInterval = "PT6H";
+
+            public boolean isEnabled() { return enabled; }
+            public void setEnabled(boolean enabled) { this.enabled = enabled; }
+            public String getSchemaVersion() { return schemaVersion; }
+            public void setSchemaVersion(String schemaVersion) { this.schemaVersion = schemaVersion; }
+            public String getPromptVersion() { return promptVersion; }
+            public void setPromptVersion(String promptVersion) { this.promptVersion = promptVersion; }
+            public String getTtl() { return ttl; }
+            public void setTtl(String ttl) { this.ttl = ttl; }
+            public int getMaxEntries() { return maxEntries; }
+            public void setMaxEntries(int maxEntries) { this.maxEntries = maxEntries; }
+            public String getCleanupInterval() { return cleanupInterval; }
+            public void setCleanupInterval(String cleanupInterval) { this.cleanupInterval = cleanupInterval; }
+        }
+    }
 }

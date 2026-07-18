@@ -52,6 +52,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
     @Autowired(required = false)
     private RunCancellationService runCancellationService;
 
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore modelStepStore;
+
     public ChatCallModelNode(AgentModelClient modelClient,
                              ToolRegistry toolRegistry,
                              DeerFlowProperties properties) {
@@ -92,27 +95,12 @@ public class ChatCallModelNode implements AsyncNodeAction {
                     .map(ChatCallModelNode::toModelMessage)
                     .toList());
             applyStateUserPrompt(typedHistory, stateUserPrompt);
-            StringBuilder toolDescriptions = new StringBuilder();
-            List<ModelToolDefinition> toolDefinitions = new ArrayList<>();
-            for (AgentTool tool : toolRegistry.tools()) {
-                String toolName = tool.name();
-                if (toolPolicyService != null && !toolPolicyService.evaluateTool(toolName, activeSkills, view.mode()).allowed()) {
-                    continue;
-                }
-                toolDescriptions.append("- ").append(toolName).append(": ").append(tool.description()).append("\n");
-                toolDefinitions.add(new ModelToolDefinition(toolName, tool.description(), tool.inputSchema()));
-            }
+
+            org.wrj.haifa.ai.deerflow.tool.ToolEnvironmentBuilder.ToolEnvironment toolEnv =
+                    org.wrj.haifa.ai.deerflow.tool.ToolEnvironmentBuilder.build(toolRegistry, toolPolicyService, activeSkills, view.mode());
 
             String promptReinforcement = "\nIf a user asks for information that can be measured from the local runtime or workspace, and a sandbox execution tool is available, do not claim you lack access. Use the smallest appropriate script, inspect the tool result, then answer from observed output. If the tool is disabled or denied, explain the configuration limitation.";
-            StringBuilder graphInstruction = new StringBuilder();
-            if (!toolDescriptions.isEmpty()) {
-                graphInstruction.append("\n\nAvailable tools:\n").append(toolDescriptions);
-            }
-            graphInstruction.append("\nWhen external information or actions are needed, call the available tools through the model provider's structured tool-call interface.\n")
-                    .append("Do not write tool calls manually in XML, JSON code blocks, markdown, or prose.\n")
-                    .append("When no further tool call is needed, respond with the final answer directly in normal assistant text.")
-                    .append(promptReinforcement);
-            String fullSystemPrompt = systemPromptBase + graphInstruction;
+            String fullSystemPrompt = systemPromptBase + "\n\n" + toolEnv.systemInstruction() + promptReinforcement;
 
             // Emit MODEL_STARTED
             int stepNum = state.<Integer>value("chat_steps").orElse(0) + 1;
@@ -136,7 +124,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
             ));
 
             PromptAssembler.Result assembly = promptAssembler.assemble(fullSystemPrompt, modelName, typedHistory);
-            ModelPrompt prompt = assembly.prompt().withToolDefinitions(toolDefinitions);
+            ModelPrompt prompt = org.wrj.haifa.ai.deerflow.prompt.PromptCachePlanner.enrich(
+                    assembly.prompt().withToolDefinitions(toolEnv.toolDefinitions()), properties);
+
 
             long startTime = System.currentTimeMillis();
             ModelResponseAccumulator accumulator = new ModelResponseAccumulator();
@@ -170,6 +160,27 @@ public class ChatCallModelNode implements AsyncNodeAction {
             ModelResponse modelResponse = accumulator.toResponse();
             String responseContent = modelResponse.content() == null ? "" : modelResponse.content();
             List<Map<String, Object>> structuredToolCalls = serializeToolCalls(modelResponse.toolCalls());
+
+            if (modelStepStore != null) {
+                try {
+                    org.wrj.haifa.ai.deerflow.agent.loop.ModelStep modelStep = new org.wrj.haifa.ai.deerflow.agent.loop.ModelStep(
+                            stepNum,
+                            prompt.effectiveUserPrompt(),
+                            responseContent,
+                            List.of(),
+                            startTime,
+                            duration,
+                            modelResponse.usage(),
+                            prompt.cacheContext().fingerprint(),
+                            org.wrj.haifa.ai.deerflow.model.cache.ModelCallPurpose.AGENT_STEP,
+                            prompt.cacheContext().eligibility()
+                    );
+                    modelStepStore.save(modelStep, runId, threadId);
+                } catch (Exception e) {
+                    org.slf4j.LoggerFactory.getLogger(ChatCallModelNode.class).warn("Failed to persist model step in ChatCallModelNode: {}", e.getMessage());
+                }
+            }
+
 
             // Emit final MODEL_DELTA containing the complete text for content synchronization
             GraphEventRegistry.publish(runId, AgentEvent.of(

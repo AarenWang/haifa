@@ -64,6 +64,8 @@ public class RunObservabilityService {
                     .reduce((first, second) -> second)
                     .orElse("");
 
+            ModelUsageObservability modelUsage = buildModelUsageObservability(runId);
+
             return new RunObservabilityResponse(
                     run.runId(),
                     run.threadId(),
@@ -80,9 +82,195 @@ public class RunObservabilityService {
                     citationCoverage,
                     timeline(events),
                     checkpointTimeline(checkpoints),
-                    new ResearchTraceability(sourceTraces, orphanEvidenceCount)
+                    new ResearchTraceability(sourceTraces, orphanEvidenceCount),
+                    modelUsage
             );
         });
+    }
+
+    private ModelUsageObservability buildModelUsageObservability(String runId) {
+        if (modelStepStore == null) {
+            return new ModelUsageObservability(new ModelUsageTotals(0, 0, null, null, null, null, null, null, null), List.of());
+        }
+        List<org.wrj.haifa.ai.deerflow.persistence.entity.ModelStepEntity> entities = modelStepStore.findByRunId(runId);
+        if (entities.isEmpty()) {
+            return new ModelUsageObservability(new ModelUsageTotals(0, 0, null, null, null, null, null, null, null), List.of());
+        }
+
+        int providerReported = 0;
+        int unavailable = 0;
+        long totalInput = 0;
+        long totalUncachedInput = 0;
+        long totalOutput = 0;
+        long totalTokensCombined = 0;
+        long totalCacheRead = 0;
+        long totalCacheWrite = 0;
+        boolean hasReportedUsage = false;
+        boolean hasInput = false;
+        boolean hasUncachedInput = false;
+        boolean hasOutput = false;
+        boolean hasTotal = false;
+        boolean hasCacheRead = false;
+        boolean hasCacheWrite = false;
+
+        List<ModelUsageStepDetail> stepDetails = new ArrayList<>();
+        org.wrj.haifa.ai.deerflow.model.cache.PromptFingerprint prevFingerprint = null;
+        String prevModel = null;
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        for (org.wrj.haifa.ai.deerflow.persistence.entity.ModelStepEntity entity : entities) {
+            org.wrj.haifa.ai.deerflow.model.cache.ModelUsage usage = org.wrj.haifa.ai.deerflow.model.cache.ModelUsage.empty();
+            if (entity.getTokenUsageJson() != null && !entity.getTokenUsageJson().isBlank()) {
+                try {
+                    usage = mapper.readValue(entity.getTokenUsageJson(), org.wrj.haifa.ai.deerflow.model.cache.ModelUsage.class);
+                } catch (Exception ignored) {
+                }
+            }
+
+            String purpose = "AGENT_STEP";
+            String eligibility = "UNKNOWN";
+            org.wrj.haifa.ai.deerflow.model.cache.PromptFingerprint fingerprint = org.wrj.haifa.ai.deerflow.model.cache.PromptFingerprint.empty();
+
+            if (entity.getMetadataJson() != null && !entity.getMetadataJson().isBlank()) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode metaNode = mapper.readTree(entity.getMetadataJson());
+                    if (metaNode.has("purpose")) purpose = metaNode.get("purpose").asText();
+                    if (metaNode.has("eligibility")) eligibility = metaNode.get("eligibility").asText();
+                    if (metaNode.has("promptFingerprint")) {
+                        fingerprint = mapper.treeToValue(metaNode.get("promptFingerprint"), org.wrj.haifa.ai.deerflow.model.cache.PromptFingerprint.class);
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+
+            boolean isReported = usage.availability() == org.wrj.haifa.ai.deerflow.model.cache.UsageAvailability.PROVIDER_REPORTED;
+            if (isReported) {
+                providerReported++;
+                hasReportedUsage = true;
+                if (usage.inputTokens() != null) {
+                    totalInput += usage.inputTokens();
+                    hasInput = true;
+                }
+                if (usage.uncachedInputTokens() != null) {
+                    totalUncachedInput += usage.uncachedInputTokens();
+                    hasUncachedInput = true;
+                }
+                if (usage.outputTokens() != null) {
+                    totalOutput += usage.outputTokens();
+                    hasOutput = true;
+                }
+                if (usage.totalTokens() != null) {
+                    totalTokensCombined += usage.totalTokens();
+                    hasTotal = true;
+                }
+                if (usage.cacheReadInputTokens() != null) {
+                    totalCacheRead += usage.cacheReadInputTokens();
+                    hasCacheRead = true;
+                }
+                if (usage.cacheWriteInputTokens() != null) {
+                    totalCacheWrite += usage.cacheWriteInputTokens();
+                    hasCacheWrite = true;
+                }
+            } else {
+                unavailable++;
+            }
+
+            String currentModel = usage.model();
+            String inferredMissReason = inferMissReason(usage, eligibility, prevFingerprint, fingerprint, prevModel, currentModel);
+            prevFingerprint = fingerprint;
+            prevModel = currentModel;
+
+            stepDetails.add(new ModelUsageStepDetail(
+                    entity.getStepIndex(),
+                    purpose,
+                    usage.provider(),
+                    usage.model(),
+                    usage.availability() != null ? usage.availability().name() : "UNAVAILABLE",
+                    usage.inputTokens(),
+                    usage.outputTokens(),
+                    usage.cacheReadInputTokens(),
+                    usage.cacheWriteInputTokens(),
+                    usage.cacheHitRate(),
+                    eligibility,
+                    shortHash(fingerprint.cacheablePrefixHash()),
+                    shortHash(fingerprint.toolDefinitionsHash()),
+                    shortHash(fingerprint.skillCatalogHash()),
+                    shortHash(fingerprint.dynamicTailHash()),
+                    inferredMissReason
+            ));
+        }
+
+        Double weightedCacheHitRate = (hasReportedUsage && totalInput > 0 && hasCacheRead)
+                ? Math.min(1.0d, (double) totalCacheRead / totalInput)
+                : null;
+
+        ModelUsageTotals totals = new ModelUsageTotals(
+                providerReported,
+                unavailable,
+                hasInput ? totalInput : null,
+                hasUncachedInput ? totalUncachedInput : null,
+                hasOutput ? totalOutput : null,
+                hasTotal ? totalTokensCombined : null,
+                hasCacheRead ? totalCacheRead : null,
+                hasCacheWrite ? totalCacheWrite : null,
+                weightedCacheHitRate
+        );
+
+        return new ModelUsageObservability(totals, stepDetails);
+    }
+
+    private static String inferMissReason(
+            org.wrj.haifa.ai.deerflow.model.cache.ModelUsage usage,
+            String eligibility,
+            org.wrj.haifa.ai.deerflow.model.cache.PromptFingerprint prev,
+            org.wrj.haifa.ai.deerflow.model.cache.PromptFingerprint curr,
+            String prevModel,
+            String currModel) {
+
+        if (usage.cacheReadInputTokens() != null && usage.cacheReadInputTokens() > 0) {
+            return "NONE";
+        }
+        if (usage.availability() == org.wrj.haifa.ai.deerflow.model.cache.UsageAvailability.UNAVAILABLE) {
+            return "PROVIDER_USAGE_UNAVAILABLE";
+        }
+        if ("BELOW_MINIMUM".equalsIgnoreCase(eligibility)) {
+            return "BELOW_PROVIDER_MINIMUM";
+        }
+        if (prev == null) {
+            return "NO_PRIOR_COMPARABLE_REQUEST";
+        }
+        if (prevModel != null && currModel != null && !prevModel.equalsIgnoreCase(currModel)) {
+            return "MODEL_CHANGED";
+        }
+        if (!safeStr(prev.staticSystemHash()).equals(safeStr(curr.staticSystemHash()))) {
+            return "STATIC_SYSTEM_CHANGED";
+        }
+        if (!safeStr(prev.toolDefinitionsHash()).equals(safeStr(curr.toolDefinitionsHash()))) {
+            return "TOOLS_CHANGED";
+        }
+        if (!safeStr(prev.skillCatalogHash()).equals(safeStr(curr.skillCatalogHash()))) {
+            return "SKILL_CATALOG_CHANGED";
+        }
+        if (!safeStr(prev.activeSkillsHash()).equals(safeStr(curr.activeSkillsHash()))) {
+            return "ACTIVE_SKILLS_CHANGED";
+        }
+        if (!safeStr(prev.sessionContextHash()).equals(safeStr(curr.sessionContextHash()))) {
+            return "SESSION_CONTEXT_CHANGED";
+        }
+        if (!safeStr(prev.conversationPrefixHash()).equals(safeStr(curr.conversationPrefixHash()))) {
+            return "CONVERSATION_PREFIX_CHANGED";
+        }
+        return "UNKNOWN";
+    }
+
+    private static String safeStr(String str) {
+        return str == null ? "" : str;
+    }
+
+    private static String shortHash(String hash) {
+        if (hash == null || hash.isBlank()) return "";
+        return hash.length() > 12 ? hash.substring(0, 12) : hash;
     }
 
     private SourceTrace sourceTrace(String runId, ResearchSource source, List<EvidenceItem> evidence) {
@@ -137,6 +325,9 @@ public class RunObservabilityService {
         return value == null ? "" : String.valueOf(value);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore modelStepStore;
+
     public record RunObservabilityResponse(
             String runId,
             String threadId,
@@ -153,9 +344,50 @@ public class RunObservabilityService {
             double citationCoverage,
             List<TimelineItem> timeline,
             List<CheckpointTimelineItem> checkpointTimeline,
-            ResearchTraceability researchTraceability
+            ResearchTraceability researchTraceability,
+            ModelUsageObservability modelUsage
     ) {
     }
+
+    public record ModelUsageObservability(
+            ModelUsageTotals totals,
+            List<ModelUsageStepDetail> steps
+    ) {
+    }
+
+    public record ModelUsageTotals(
+            int providerReportedSteps,
+            int unavailableSteps,
+            Long inputTokens,
+            Long uncachedInputTokens,
+            Long outputTokens,
+            Long totalTokens,
+            Long cacheReadInputTokens,
+            Long cacheWriteInputTokens,
+            Double weightedCacheHitRate
+    ) {
+    }
+
+    public record ModelUsageStepDetail(
+            int stepIndex,
+            String purpose,
+            String provider,
+            String model,
+            String availability,
+            Long inputTokens,
+            Long outputTokens,
+            Long cacheReadInputTokens,
+            Long cacheWriteInputTokens,
+            Double cacheHitRate,
+            String eligibility,
+            String cacheablePrefixHashShort,
+            String toolDefinitionsHashShort,
+            String skillCatalogHashShort,
+            String dynamicTailHashShort,
+            String inferredMissReason
+    ) {
+    }
+
 
     public record TimelineItem(
             int sequence,

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 
 /**
  * Compresses research evidence (web fetch results) using an LLM.
@@ -20,26 +21,93 @@ public class ResearchEvidenceCompressor {
     private static final Logger log = LoggerFactory.getLogger(ResearchEvidenceCompressor.class);
 
     private final AgentModelClient modelClient;
+    private final CompressionCacheService compressionCacheService;
+    private final DeerFlowProperties properties;
 
     public ResearchEvidenceCompressor(AgentModelClient modelClient) {
+        this(modelClient, null, new DeerFlowProperties());
+    }
+
+    public ResearchEvidenceCompressor(AgentModelClient modelClient,
+            CompressionCacheService compressionCacheService) {
+        this(modelClient, compressionCacheService, new DeerFlowProperties());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ResearchEvidenceCompressor(AgentModelClient modelClient,
+            CompressionCacheService compressionCacheService,
+            DeerFlowProperties properties) {
         this.modelClient = modelClient;
+        this.compressionCacheService = compressionCacheService;
+        this.properties = properties == null ? new DeerFlowProperties() : properties;
     }
 
     public String compressFetchContent(String title, String url, String sourceId, String content) {
+        String contentText = content == null ? "" : content;
+        String contentHash = org.wrj.haifa.ai.deerflow.prompt.PromptCanonicalizer.sha256Hex(contentText);
+        DeerFlowProperties.PromptCache.CompressionPromptCache config = properties.getPromptCache().getCompression();
+        boolean cacheEnabled = properties.getPromptCache().isEnabled() && config.isEnabled()
+                && compressionCacheService != null;
+        String model = properties.getModel() == null || properties.getModel().isBlank()
+                ? "default" : properties.getModel();
+        String provider = providerFor(model);
+        String cacheKey = cacheEnabled
+                ? CompressionCacheService.computeCacheKey(config.getSchemaVersion(), provider, model,
+                        config.getPromptVersion(), "contract-v1", url, contentHash)
+                : "";
+
+        String reusableBody;
+        if (cacheEnabled) {
+            reusableBody = compressionCacheService.getOrCompute(
+                    cacheKey, config.getSchemaVersion(), provider, model, config.getPromptVersion(), url,
+                    contentHash, contentText.length(), parsePositiveDuration(config.getTtl(), java.time.Duration.ofDays(7)),
+                    () -> computeReusableSummary(contentText)
+            );
+        } else {
+            reusableBody = computeReusableSummary(contentText);
+        }
+
+        if (reusableBody == null || reusableBody.isBlank()) {
+            reusableBody = buildFallback(contentText, null, null, null, 2000, 700, 700);
+        }
+
+        return "Source ID: " + sourceId + "\nURL: " + url + "\nTitle: " + title + "\n\n" + reusableBody;
+    }
+
+    private String computeReusableSummary(String contentText) {
         String systemPrompt = "You are a precise research compressor. Your task is to compress the provided web page content into a highly informative, citable summary.\n" +
                 "Extract the core facts, statistics, key findings, and main claims relevant for research.\n" +
-                "You MUST preserve and output the source metadata at the top: Source ID: " + sourceId + ", URL: " + url + ", Title: " + title + ".\n" +
                 "Keep the final output under 1500 characters, written in a clear, concise bullet-point style.";
-        ModelPrompt prompt = new ModelPrompt(systemPrompt, content, null);
+        ModelPrompt prompt = new ModelPrompt(systemPrompt, contentText, null);
         try {
             ModelResponse response = modelClient.generate(prompt).block();
-            return response != null ? response.content() : "[Empty Summary]";
+            return response != null ? response.content() : "";
         } catch (Exception e) {
-            log.warn("Failed to compress fetch content for URL: {}, error: {}. Falling back to head+tail truncation.", url, e.getMessage());
-            // Head+tail fallback (Python deer-flow _build_fallback equivalent)
-            return buildFallback(content, sourceId, url, title, 2000, 700, 700);
+            log.warn("Failed to compress fetch content, error: {}. Falling back to head+tail truncation.", e.getMessage());
+            return "";
         }
     }
+
+    private static java.time.Duration parsePositiveDuration(String configured, java.time.Duration fallback) {
+        try {
+            java.time.Duration parsed = java.time.Duration.parse(configured);
+            return parsed.isNegative() || parsed.isZero() ? fallback : parsed;
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static String providerFor(String model) {
+        String normalized = model == null ? "" : model.toLowerCase(java.util.Locale.ROOT);
+        if (normalized.contains("gemini") || normalized.contains("google")) {
+            return "google-genai";
+        }
+        if (normalized.contains("gpt") || normalized.contains("openai")) {
+            return "openai";
+        }
+        return "generic";
+    }
+
 
     public String compressGenericOutput(String toolName, String content) {
         String systemPrompt = "Summarize the following tool output for tool: " + toolName + ". Keep it under 1000 characters.";

@@ -165,11 +165,12 @@ class GraphChatRuntimeTest {
         assertThat(events).anySatisfy(e -> assertThat(e.type()).isEqualTo(AgentEventType.RUN_COMPLETED));
 
         List<ModelPrompt> graphPrompts = observedPrompts.stream()
-                .filter(prompt -> prompt.systemPrompt().contains("[Dynamic context]"))
+                .filter(prompt -> prompt.systemPrompt().contains("[Workspace policy]"))
                 .toList();
         assertThat(graphPrompts).hasSize(2);
         assertThat(graphPrompts)
-                .allSatisfy(prompt -> assertThat(count(prompt.systemPrompt(), "[Dynamic context]")).isEqualTo(1));
+                .allSatisfy(prompt -> assertThat(count(prompt.systemPrompt(), "[Workspace policy]")).isEqualTo(1));
+
         assertThat(graphPrompts.get(1).messages())
                 .anySatisfy(message -> {
                     assertThat(message.role()).isEqualTo(ModelMessage.Role.TOOL);

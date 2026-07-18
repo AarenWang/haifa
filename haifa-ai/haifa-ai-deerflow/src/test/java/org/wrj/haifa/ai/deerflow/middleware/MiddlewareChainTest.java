@@ -99,9 +99,10 @@ class MiddlewareChainTest {
         StepVerifier.create(chain.next(context))
                 .assertNext(prompt -> {
                     assertThat(prompt.systemPrompt()).contains("You are helpful.");
-                    assertThat(prompt.systemPrompt()).contains("[Dynamic context]");
-                    assertThat(prompt.systemPrompt()).contains("Current date/time:");
+                    assertThat(prompt.systemPrompt()).contains("[Workspace policy]");
                     assertThat(prompt.systemPrompt()).contains("Workspace root:");
+                    assertThat(prompt.effectiveUserPrompt()).contains("runtime_context").contains("Current date:");
+
                 })
                 .verifyComplete();
     }
@@ -129,10 +130,12 @@ class MiddlewareChainTest {
                 .assertNext(prompt -> {
                     assertThat(prompt.systemPrompt()).contains("Base system");
                     assertThat(prompt.systemPrompt()).contains("[Active skills]");
-                    assertThat(prompt.systemPrompt()).contains("[Dynamic context]");
+                    assertThat(prompt.systemPrompt()).contains("[Workspace policy]");
+                    assertThat(prompt.effectiveUserPrompt()).contains("runtime_context");
                 })
                 .verifyComplete();
     }
+
 
     @Test
     void tokenBudgetMiddlewareReturnsBudgetExceededWhenOverLimit() {

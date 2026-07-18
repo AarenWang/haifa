@@ -174,7 +174,8 @@ public class SubagentRuntime implements ApplicationContextAware {
                     null, // toolCallStore - not persisted for subagent
                     null, // agentLoopRunStore - not persisted for subagent
                     subagentObserver,
-                    toolOutputBudgetMiddleware
+                    toolOutputBudgetMiddleware,
+                    properties
             );
 
             AtomicInteger seq = new AtomicInteger();

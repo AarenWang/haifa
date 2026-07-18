@@ -1,9 +1,12 @@
 package org.wrj.haifa.ai.deerflow.model;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.wrj.haifa.ai.deerflow.model.cache.ModelUsage;
+import org.wrj.haifa.ai.deerflow.model.cache.UsageAvailability;
 
 public class ModelResponseAccumulator {
     private final StringBuilder content = new StringBuilder();
@@ -12,6 +15,7 @@ public class ModelResponseAccumulator {
     private String finishReason = null;
     private final Map<String, Object> metadata = new LinkedHashMap<>();
     private ModelProtocolState protocolState = ModelProtocolState.empty();
+    private ModelUsage usage = ModelUsage.empty();
 
     public void accumulate(ModelResponse response) {
         if (response == null) {
@@ -35,6 +39,9 @@ public class ModelResponseAccumulator {
         if (response.protocolState() != null && !response.protocolState().isEmpty()) {
             protocolState = protocolState.merge(response.protocolState());
         }
+        if (response.usage() != null && response.usage().availability() != UsageAvailability.UNAVAILABLE) {
+            usage = mergeUsage(usage, response.usage());
+        }
     }
 
     public ModelResponse toResponse() {
@@ -44,8 +51,34 @@ public class ModelResponseAccumulator {
                 invalidToolCalls,
                 finishReason,
                 metadata,
-                protocolState
+                protocolState,
+                usage
         );
+    }
+
+    private static ModelUsage mergeUsage(ModelUsage current, ModelUsage incoming) {
+        if (incoming == null || incoming.availability() == UsageAvailability.UNAVAILABLE) {
+            return current;
+        }
+        if (current == null || current.availability() == UsageAvailability.UNAVAILABLE) {
+            return incoming;
+        }
+        Long input = incoming.inputTokens() != null ? incoming.inputTokens() : current.inputTokens();
+        Long uncached = incoming.uncachedInputTokens() != null ? incoming.uncachedInputTokens() : current.uncachedInputTokens();
+        Long output = incoming.outputTokens() != null ? incoming.outputTokens() : current.outputTokens();
+        Long total = incoming.totalTokens() != null ? incoming.totalTokens() : current.totalTokens();
+        Long cacheRead = incoming.cacheReadInputTokens() != null ? incoming.cacheReadInputTokens() : current.cacheReadInputTokens();
+        Long cacheWrite = incoming.cacheWriteInputTokens() != null ? incoming.cacheWriteInputTokens() : current.cacheWriteInputTokens();
+        Long reasoning = incoming.reasoningTokens() != null ? incoming.reasoningTokens() : current.reasoningTokens();
+        String provider = hasText(incoming.provider()) ? incoming.provider() : current.provider();
+        String model = hasText(incoming.model()) ? incoming.model() : current.model();
+        UsageAvailability avail = incoming.availability() != UsageAvailability.UNAVAILABLE ? incoming.availability() : current.availability();
+
+        Map<String, Long> details = new HashMap<>(current.providerDetails() != null ? current.providerDetails() : Map.of());
+        if (incoming.providerDetails() != null) {
+            details.putAll(incoming.providerDetails());
+        }
+        return new ModelUsage(input, uncached, output, total, cacheRead, cacheWrite, reasoning, provider, model, avail, details);
     }
 
     private void mergeToolCalls(List<ModelToolCall> incomingCalls) {

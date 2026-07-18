@@ -11,6 +11,8 @@ import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelProtocolState;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
+import org.wrj.haifa.ai.deerflow.model.ModelToolDefinition;
+
 import org.wrj.haifa.ai.deerflow.model.ToolCallProtocolState;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
@@ -62,8 +64,9 @@ class ChatCallModelNodeTest {
         assertThat(prompt).isNotNull();
         assertThat(prompt.systemPrompt())
                 .contains("middleware persona memory skill prompt")
-                .contains("structured tool-call interface")
+                .contains("structured tools")
                 .doesNotContain("properties system prompt should not be used");
+
         assertThat(prompt.modelName()).isEqualTo("prompt-model");
         assertThat(prompt.messages()).extracting(ModelMessage::role)
                 .containsExactly(ModelMessage.Role.USER);
@@ -97,7 +100,8 @@ class ChatCallModelNodeTest {
         assertThat(prompt).isNotNull();
         assertThat(prompt.systemPrompt())
                 .contains("You are a helpful assistant.")
-                .contains("structured tool-call interface");
+                .contains("structured tools");
+
         assertThat(prompt.modelName()).isEqualTo("fallback-model");
 
         List<Map<String, Object>> messages = (List<Map<String, Object>>) update.get(AgentGraphStateKeys.MESSAGE_WINDOW);
@@ -144,8 +148,10 @@ class ChatCallModelNodeTest {
                 AgentGraphStateKeys.MESSAGE_WINDOW, List.of()
         ))).join();
 
-        assertThat(capturedPrompt.get().systemPrompt())
-                .contains("run_script: run_script description");
+        assertThat(capturedPrompt.get().toolDefinitions())
+                .extracting(ModelToolDefinition::name)
+                .contains("run_script");
+
     }
 
     @Test

@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.wrj.haifa.ai.deerflow.model.cache.ModelUsage;
+import org.wrj.haifa.ai.deerflow.model.cache.UsageAvailability;
 
 class ModelResponseAccumulatorTest {
 
@@ -59,6 +61,23 @@ class ModelResponseAccumulatorTest {
                 response(new ModelToolCall("call-1", "weather", "{}", "other_type"))))
                 .isInstanceOf(ModelProtocolStateException.class)
                 .hasMessageContaining("type");
+    }
+
+    @Test
+    void keepsLatestStreamingUsageSnapshotInsteadOfSummingSnapshots() {
+        ModelResponseAccumulator accumulator = new ModelResponseAccumulator();
+        accumulator.accumulate(new ModelResponse("a", List.of(), List.of(), null, Map.of(),
+                ModelProtocolState.empty(), usage(10L, 2L)));
+        accumulator.accumulate(new ModelResponse("b", List.of(), List.of(), null, Map.of(),
+                ModelProtocolState.empty(), usage(12L, 4L)));
+
+        assertThat(accumulator.toResponse().usage().inputTokens()).isEqualTo(12L);
+        assertThat(accumulator.toResponse().usage().cacheReadInputTokens()).isEqualTo(4L);
+    }
+
+    private static ModelUsage usage(Long input, Long cacheRead) {
+        return new ModelUsage(input, input - cacheRead, 3L, input + 3L, cacheRead, null, null,
+                "test", "model", UsageAvailability.PROVIDER_REPORTED, Map.of());
     }
 
     private static ModelResponse response(ModelToolCall call) {

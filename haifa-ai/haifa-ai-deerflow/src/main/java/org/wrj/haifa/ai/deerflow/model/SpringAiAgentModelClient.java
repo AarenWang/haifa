@@ -31,6 +31,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.model.cache.GenericPromptCacheProviderAdapter;
+import org.wrj.haifa.ai.deerflow.model.cache.PromptCacheProviderAdapter;
+import org.wrj.haifa.ai.deerflow.prompt.PromptCachePlanner;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
@@ -72,13 +75,24 @@ public class SpringAiAgentModelClient implements AgentModelClient {
     private final ObjectProvider<ChatClient.Builder> chatClientBuilderProvider;
     private final DeerFlowProperties properties;
     private final BiFunction<ChatClient.Builder, ModelPrompt, ModelResponse> modelCaller;
+    private final List<PromptCacheProviderAdapter> promptCacheAdapters;
 
     @Autowired
     public SpringAiAgentModelClient(ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
+            DeerFlowProperties properties,
+            ObjectProvider<PromptCacheProviderAdapter> promptCacheAdapters) {
+        this.chatClientBuilderProvider = chatClientBuilderProvider;
+        this.properties = properties;
+        this.modelCaller = null;
+        this.promptCacheAdapters = promptCacheAdapters.orderedStream().toList();
+    }
+
+    SpringAiAgentModelClient(ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
             DeerFlowProperties properties) {
         this.chatClientBuilderProvider = chatClientBuilderProvider;
         this.properties = properties;
         this.modelCaller = null;
+        this.promptCacheAdapters = List.of();
     }
 
     SpringAiAgentModelClient(ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
@@ -87,10 +101,22 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         this.chatClientBuilderProvider = chatClientBuilderProvider;
         this.properties = properties;
         this.modelCaller = modelCaller;
+        this.promptCacheAdapters = List.of();
+    }
+
+    SpringAiAgentModelClient(ObjectProvider<ChatClient.Builder> chatClientBuilderProvider,
+            DeerFlowProperties properties,
+            BiFunction<ChatClient.Builder, ModelPrompt, ModelResponse> modelCaller,
+            List<PromptCacheProviderAdapter> promptCacheAdapters) {
+        this.chatClientBuilderProvider = chatClientBuilderProvider;
+        this.properties = properties;
+        this.modelCaller = modelCaller;
+        this.promptCacheAdapters = promptCacheAdapters == null ? List.of() : List.copyOf(promptCacheAdapters);
     }
 
     @Override
     public Mono<ModelResponse> generate(ModelPrompt prompt) {
+        ModelPrompt effectivePrompt = PromptCachePlanner.enrich(prompt, this.properties);
         ChatClient.Builder builder = this.chatClientBuilderProvider.getIfAvailable();
         if (builder == null) {
             log.warn("Spring AI ChatClient.Builder is not available. Returning fallback answer.");
@@ -99,13 +125,13 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         long startTime = System.currentTimeMillis();
         long timeoutMs = Math.max(1_000, this.properties.getModelTimeout());
         log.info("Spring AI model call starting. model={}, timeoutMs={}, systemPromptChars={}, userPromptChars={}, messageCount={}",
-                safe(prompt.modelName()), timeoutMs, length(prompt.systemPrompt()), length(prompt.effectiveUserPrompt()),
-                prompt.messages().size());
+                safe(effectivePrompt.modelName()), timeoutMs, length(effectivePrompt.systemPrompt()), length(effectivePrompt.effectiveUserPrompt()),
+                effectivePrompt.messages().size());
         return Mono.fromCallable(() -> {
                     if (this.modelCaller != null) {
-                        return this.modelCaller.apply(builder, prompt);
+                        return this.modelCaller.apply(builder, effectivePrompt);
                     }
-                    return this.callSpringAi(builder, prompt);
+                    return this.callSpringAi(builder, effectivePrompt);
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .timeout(Duration.ofMillis(timeoutMs))
@@ -120,15 +146,15 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                 .doOnSuccess(response -> {
                     long duration = System.currentTimeMillis() - startTime;
                     log.info("Spring AI model call succeeded. model={}, durationMs={}, answerLength={}, toolCalls={}",
-                            safe(prompt.modelName()), duration, response.content().length(), response.toolCalls().size());
+                            safe(effectivePrompt.modelName()), duration, response.content().length(), response.toolCalls().size());
                 })
                 .doOnError(ex -> {
                     long duration = System.currentTimeMillis() - startTime;
                     log.error("Spring AI chat call failed. model={}, systemPromptChars={}, userPromptChars={}, messageCount={}, durationMs={}",
-                            safe(prompt.modelName()),
-                            length(prompt.systemPrompt()),
-                            length(prompt.effectiveUserPrompt()),
-                            prompt.messages().size(),
+                            safe(effectivePrompt.modelName()),
+                            length(effectivePrompt.systemPrompt()),
+                            length(effectivePrompt.effectiveUserPrompt()),
+                            effectivePrompt.messages().size(),
                             duration,
                             ex);
                 })
@@ -138,6 +164,7 @@ public class SpringAiAgentModelClient implements AgentModelClient {
 
     @Override
     public Flux<ModelResponse> streamGenerate(ModelPrompt prompt) {
+        ModelPrompt effectivePrompt = PromptCachePlanner.enrich(prompt, this.properties);
         ChatClient.Builder builder = this.chatClientBuilderProvider.getIfAvailable();
         if (builder == null) {
             log.warn("Spring AI ChatClient.Builder is not available. Returning fallback answer.");
@@ -146,15 +173,18 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         long startTime = System.currentTimeMillis();
         long timeoutMs = Math.max(1_000, this.properties.getModelTimeout());
         log.info("Spring AI model streaming starting. model={}, timeoutMs={}, systemPromptChars={}, userPromptChars={}, messageCount={}",
-                safe(prompt.modelName()), timeoutMs, length(prompt.systemPrompt()), length(prompt.effectiveUserPrompt()),
-                prompt.messages().size());
+                safe(effectivePrompt.modelName()), timeoutMs, length(effectivePrompt.systemPrompt()), length(effectivePrompt.effectiveUserPrompt()),
+                effectivePrompt.messages().size());
+
+        PromptCacheProviderAdapter adapter = adapterFor(effectivePrompt);
 
         Flux<ModelResponse> providerStream = Flux.defer(() -> {
             ChatClient.ChatClientRequestSpec request = builder.build()
                     .prompt()
-                    .messages(toSpringAiMessages(prompt));
+                    .messages(toSpringAiMessages(effectivePrompt));
 
-            ChatOptions chatOptions = chatOptionsFor(prompt);
+            ChatOptions chatOptions = adapter.buildOptions(effectivePrompt,
+                    toToolCallbacks(effectivePrompt.toolDefinitions()));
             if (chatOptions != null) {
                 request = request.options(chatOptions);
             }
@@ -194,15 +224,17 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                         if (chatResponse.getResult() != null && chatResponse.getResult().getMetadata() != null) {
                             finishReason = chatResponse.getResult().getMetadata().getFinishReason();
                         }
+                        org.wrj.haifa.ai.deerflow.model.cache.ModelUsage usage = adapter
+                                .extractUsage(chatResponse.getMetadata(), effectivePrompt.modelName());
 
-                        return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of(), protocolState);
+                        return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of(), protocolState, usage);
                     });
         });
 
         return recoverTruncatedJsonStream(providerStream, () -> {
             log.warn("Spring AI model stream ended with truncated JSON before its first response. "
-                    + "Falling back to a non-streaming model call. model={}", safe(prompt.modelName()));
-            return generate(prompt);
+                    + "Falling back to a non-streaming model call. model={}", safe(effectivePrompt.modelName()));
+            return generate(effectivePrompt);
         })
         .subscribeOn(Schedulers.boundedElastic())
         .timeout(Duration.ofMillis(timeoutMs))
@@ -217,15 +249,15 @@ public class SpringAiAgentModelClient implements AgentModelClient {
         .doOnComplete(() -> {
             long duration = System.currentTimeMillis() - startTime;
             log.info("Spring AI model streaming completed. model={}, durationMs={}",
-                    safe(prompt.modelName()), duration);
+                    safe(effectivePrompt.modelName()), duration);
         })
         .doOnError(ex -> {
             long duration = System.currentTimeMillis() - startTime;
             log.error("Spring AI chat streaming failed. model={}, systemPromptChars={}, userPromptChars={}, messageCount={}, durationMs={}",
-                    safe(prompt.modelName()),
-                    length(prompt.systemPrompt()),
-                    length(prompt.effectiveUserPrompt()),
-                    prompt.messages().size(),
+                    safe(effectivePrompt.modelName()),
+                    length(effectivePrompt.systemPrompt()),
+                    length(effectivePrompt.effectiveUserPrompt()),
+                    effectivePrompt.messages().size(),
                     duration,
                     ex);
         })
@@ -256,11 +288,12 @@ public class SpringAiAgentModelClient implements AgentModelClient {
     }
 
     private ModelResponse callSpringAi(ChatClient.Builder builder, ModelPrompt prompt) {
+        PromptCacheProviderAdapter adapter = adapterFor(prompt);
         ChatClient.ChatClientRequestSpec request = builder.build()
                 .prompt()
                 .messages(toSpringAiMessages(prompt));
 
-        ChatOptions chatOptions = chatOptionsFor(prompt);
+        ChatOptions chatOptions = adapter.buildOptions(prompt, toToolCallbacks(prompt.toolDefinitions()));
         if (chatOptions != null) {
             request = request.options(chatOptions);
         }
@@ -301,16 +334,18 @@ public class SpringAiAgentModelClient implements AgentModelClient {
             finishReason = chatResponse.getResult().getMetadata().getFinishReason();
         }
 
-        return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of(), protocolState);
+        org.wrj.haifa.ai.deerflow.model.cache.ModelUsage usage = adapter
+                .extractUsage(chatResponse.getMetadata(), prompt.modelName());
+
+        return new ModelResponse(content, modelToolCalls, List.of(), finishReason, Map.of(), protocolState, usage);
     }
 
     static List<Message> toSpringAiMessages(ModelPrompt prompt) {
-        List<String> systemParts = new ArrayList<>();
+        List<Message> messages = new ArrayList<>();
         if (StringUtils.hasText(prompt.systemPrompt())) {
-            systemParts.add(prompt.systemPrompt());
+            messages.add(new SystemMessage(prompt.systemPrompt()));
         }
 
-        List<Message> conversationMessages = new ArrayList<>();
         if (prompt.hasMessages()) {
             for (ModelMessage message : prompt.messages()) {
                 if (message == null) {
@@ -318,29 +353,27 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                 }
                 if (message.role() == ModelMessage.Role.SYSTEM) {
                     if (StringUtils.hasText(message.content())) {
-                        systemParts.add(message.content());
+                        String envelope = """
+                                <runtime_instruction type="system_control" trusted="true">
+                                %s
+                                </runtime_instruction>
+                                """.formatted(message.content()).trim();
+                        messages.add(new UserMessage(envelope));
                     }
                     continue;
                 }
                 Message springMessage = toSpringAiMessage(message);
                 if (springMessage != null) {
-                    conversationMessages.add(springMessage);
+                    messages.add(springMessage);
                 }
             }
         } else if (StringUtils.hasText(prompt.userPrompt())) {
-            conversationMessages.add(new UserMessage(prompt.userPrompt()));
+            messages.add(new UserMessage(prompt.userPrompt()));
         }
 
-        List<Message> messages = new ArrayList<>();
-        if (!systemParts.isEmpty()) {
-            // Google GenAI accepts exactly one system instruction. Runtime reminders,
-            // summaries, and retry instructions are therefore folded into the primary
-            // system message while retaining their original relative order.
-            messages.add(new SystemMessage(String.join("\n\n", systemParts)));
-        }
-        messages.addAll(conversationMessages);
         return messages;
     }
+
 
     private static Message toSpringAiMessage(ModelMessage message) {
         if (message == null) {
@@ -428,6 +461,26 @@ public class SpringAiAgentModelClient implements AgentModelClient {
             optionsBuilder.model(prompt.modelName());
         }
         return optionsBuilder.build();
+    }
+
+    private PromptCacheProviderAdapter adapterFor(ModelPrompt prompt) {
+        String requestedProvider = prompt.cacheContext() == null ? "" : prompt.cacheContext().provider();
+        if (StringUtils.hasText(requestedProvider)) {
+            for (PromptCacheProviderAdapter adapter : this.promptCacheAdapters) {
+                if (requestedProvider.equalsIgnoreCase(adapter.providerId())) {
+                    return adapter;
+                }
+            }
+        }
+        for (PromptCacheProviderAdapter adapter : this.promptCacheAdapters) {
+            if (adapter.supports(prompt)) {
+                return adapter;
+            }
+        }
+        if (this.promptCacheAdapters.size() == 1) {
+            return this.promptCacheAdapters.get(0);
+        }
+        return new GenericPromptCacheProviderAdapter();
     }
 
     static List<ToolCallback> toToolCallbacks(List<ModelToolDefinition> toolDefinitions) {

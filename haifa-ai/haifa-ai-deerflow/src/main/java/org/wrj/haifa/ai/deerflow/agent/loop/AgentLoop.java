@@ -16,6 +16,7 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
@@ -68,6 +69,7 @@ public class AgentLoop {
     private final ApprovalPolicyService approvalPolicyService;
     private final ApprovalStore approvalStore;
     private final PromptAssembler promptAssembler;
+    private final DeerFlowProperties properties;
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry) {
         this(modelClient, toolRegistry, null, null, null, new NoopAgentLoopObserver(), null, null, null, null);
@@ -102,6 +104,16 @@ public class AgentLoop {
             AgentLoopObserver observer, ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
             ClarificationStore clarificationStore, ApprovalPolicyService approvalPolicyService,
             ApprovalStore approvalStore) {
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer,
+                toolOutputBudgetMiddleware, clarificationStore, approvalPolicyService, approvalStore,
+                new DeerFlowProperties());
+    }
+
+    public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            AgentLoopObserver observer, ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
+            ClarificationStore clarificationStore, ApprovalPolicyService approvalPolicyService,
+            ApprovalStore approvalStore, DeerFlowProperties properties) {
         this.modelClient = modelClient;
         this.toolRegistry = toolRegistry;
         this.modelStepStore = modelStepStore;
@@ -113,6 +125,15 @@ public class AgentLoop {
         this.approvalPolicyService = approvalPolicyService;
         this.approvalStore = approvalStore;
         this.promptAssembler = new PromptAssembler();
+        this.properties = properties == null ? new DeerFlowProperties() : properties;
+    }
+
+    public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            AgentLoopObserver observer, ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
+            DeerFlowProperties properties) {
+        this(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore, observer,
+                toolOutputBudgetMiddleware, null, null, null, properties);
     }
 
     public AgentLoopObserver observer() {
@@ -216,7 +237,8 @@ public class AgentLoop {
 
                 PromptAssembler.Result assembly = this.promptAssembler.assemble(
                         fullSystemPrompt, runConfig.modelName(), typedHistory);
-                ModelPrompt prompt = assembly.prompt().withToolDefinitions(toolDefinitions);
+                ModelPrompt prompt = org.wrj.haifa.ai.deerflow.prompt.PromptCachePlanner.enrich(
+                        assembly.prompt().withToolDefinitions(toolDefinitions), this.properties);
                 String userPrompt = prompt.userPrompt();
                 if (log.isDebugEnabled()) {
                     log.debug("Prompt assembled. runId={}, step={}, trace={}",
@@ -248,7 +270,18 @@ public class AgentLoop {
                 // Persist model step
                 if (modelStepStore != null) {
                     try {
-                        ModelStep modelStep = new ModelStep(step + 1, userPrompt, responseContent, List.of(), modelStartTime, modelDuration);
+                        ModelStep modelStep = new ModelStep(
+                                step + 1,
+                                userPrompt,
+                                responseContent,
+                                List.of(),
+                                modelStartTime,
+                                modelDuration,
+                                modelResponse.usage(),
+                                prompt.cacheContext().fingerprint(),
+                                org.wrj.haifa.ai.deerflow.model.cache.ModelCallPurpose.AGENT_STEP,
+                                prompt.cacheContext().eligibility()
+                        );
                         modelStepStore.save(modelStep, runConfig.runId(), runConfig.threadId());
                     } catch (Exception e) {
                         log.warn("Failed to persist model step: {}", e.getMessage());
@@ -595,26 +628,16 @@ public class AgentLoop {
 
     private ToolEnvironment buildToolEnvironment(String systemPrompt, ToolPolicyService toolPolicy,
             List<Skill> activeSkills, RunMode runMode) {
-        StringBuilder toolDescriptions = new StringBuilder();
-        List<ModelToolDefinition> toolDefinitions = new ArrayList<>();
-        for (AgentTool tool : toolRegistry.tools()) {
-            String toolName = tool.name();
-            if (toolPolicy != null && !toolPolicy.evaluateTool(toolName, activeSkills, runMode).allowed()) {
-                continue;
-            }
-            toolDescriptions.append("- ").append(toolName).append(": ")
-                    .append(tool.description()).append("\n");
-            toolDefinitions.add(new ModelToolDefinition(toolName, tool.description(), tool.inputSchema()));
-        }
+        org.wrj.haifa.ai.deerflow.tool.ToolEnvironmentBuilder.ToolEnvironment toolEnv =
+                org.wrj.haifa.ai.deerflow.tool.ToolEnvironmentBuilder.build(toolRegistry, toolPolicy, activeSkills, runMode != null ? runMode : RunMode.RESEARCH);
+
+
 
         String promptReinforcement = "\nIf a user asks for information that can be measured from the local runtime or workspace, and a sandbox execution tool is available, do not claim you lack access. Use the smallest appropriate script, inspect the tool result, then answer from observed output. If the tool is disabled or denied, explain the configuration limitation.";
-        String fullSystemPrompt = systemPrompt + "\n\nAvailable tools:\n" + toolDescriptions
-                + "\nWhen you need to use a tool, use the model provider's structured tool-call channel. "
-                + "Do not write tool calls manually as XML, JSON blocks, or prose.\n"
-                + "When no further tool call is needed, respond with the final answer directly in normal assistant text."
-                + promptReinforcement;
-        return new ToolEnvironment(fullSystemPrompt, List.copyOf(toolDefinitions));
+        String fullSystemPrompt = systemPrompt + "\n\n" + toolEnv.systemInstruction() + promptReinforcement;
+        return new ToolEnvironment(fullSystemPrompt, toolEnv.toolDefinitions());
     }
+
 
     private void persistToolResult(ToolCall toolCall, ToolCallResult result) {
         if (toolCallStore == null) {

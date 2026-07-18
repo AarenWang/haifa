@@ -287,7 +287,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 toolOutputBudgetMiddleware,
                 clarificationStore,
                 approvalPolicyService,
-                approvalStore);
+                approvalStore,
+                properties);
     }
 
     @Override

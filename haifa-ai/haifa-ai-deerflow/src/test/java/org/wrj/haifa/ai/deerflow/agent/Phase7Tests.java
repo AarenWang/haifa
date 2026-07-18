@@ -70,8 +70,9 @@ class Phase7Tests {
             sb.append("a");
         }
         String resultLong = middleware.processToolOutput("web_fetch", sb.toString(), "t1", "r1", "http://url", "s1", "title");
-        assertThat(resultLong).isEqualTo("Brief Summary");
+        assertThat(resultLong).contains("Brief Summary").contains("Source ID: s1");
     }
+
 
     @Test
     void toolOutputBudgetMiddlewareUsesHeadTailFallbackWhenCompressionFails() {

@@ -221,14 +221,18 @@ class SpringAiAgentModelClientTest {
         assertThat(messages).filteredOn(SystemMessage.class::isInstance)
                 .singleElement()
                 .satisfies(message -> assertThat(message.getText())
-                        .isEqualTo("primary system prompt\n\nruntime reminder\n\nretry instruction"));
-        assertThat(messages).extracting(message -> message.getClass().getSimpleName())
-                .containsExactly(
-                        "SystemMessage",
-                        "UserMessage",
-                        "AssistantMessage",
-                        "UserMessage");
+                        .isEqualTo("primary system prompt"));
+
+        List<UserMessage> userMessages = messages.stream()
+                .filter(UserMessage.class::isInstance)
+                .map(UserMessage.class::cast)
+                .toList();
+
+        assertThat(userMessages.stream().map(UserMessage::getText))
+                .anyMatch(text -> text.contains("runtime reminder") && text.contains("runtime_instruction"))
+                .anyMatch(text -> text.contains("retry instruction") && text.contains("runtime_instruction"));
     }
+
 
     @Test
     void wrapsPlainTextToolResponsesAsJsonForGoogleGenAiCompatibility() {

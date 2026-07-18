@@ -1,19 +1,29 @@
 package org.wrj.haifa.ai.deerflow.model;
 
 import java.util.List;
+import org.wrj.haifa.ai.deerflow.model.cache.PromptBlock;
+import org.wrj.haifa.ai.deerflow.model.cache.PromptCacheContext;
 
 public record ModelPrompt(
     String systemPrompt,
     String userPrompt,
     String modelName,
     List<ModelMessage> messages,
-    List<ModelToolDefinition> toolDefinitions
+    List<ModelToolDefinition> toolDefinitions,
+    List<PromptBlock> promptBlocks,
+    PromptCacheContext cacheContext
 ) {
     public ModelPrompt {
         systemPrompt = systemPrompt == null ? "" : systemPrompt;
         userPrompt = userPrompt == null ? "" : userPrompt;
         messages = messages == null ? List.of() : List.copyOf(messages);
         toolDefinitions = toolDefinitions == null ? List.of() : List.copyOf(toolDefinitions);
+        promptBlocks = promptBlocks == null ? List.of() : List.copyOf(promptBlocks);
+        cacheContext = cacheContext == null ? PromptCacheContext.disabled() : cacheContext;
+    }
+
+    public ModelPrompt(String systemPrompt, String userPrompt, String modelName, List<ModelMessage> messages, List<ModelToolDefinition> toolDefinitions) {
+        this(systemPrompt, userPrompt, modelName, messages, toolDefinitions, List.of(), PromptCacheContext.disabled());
     }
 
     public ModelPrompt(String systemPrompt, String userPrompt, String modelName) {
@@ -35,8 +45,33 @@ public record ModelPrompt(
         return renderMessages(messages);
     }
 
-    public ModelPrompt withToolDefinitions(List<ModelToolDefinition> toolDefinitions) {
-        return new ModelPrompt(systemPrompt, userPrompt, modelName, messages, toolDefinitions);
+    public ModelPrompt withSystemPrompt(String newSystemPrompt) {
+        return new ModelPrompt(newSystemPrompt, userPrompt, modelName, messages, toolDefinitions, promptBlocks, cacheContext);
+    }
+
+    public ModelPrompt withUserPrompt(String newUserPrompt) {
+        return new ModelPrompt(systemPrompt, newUserPrompt, modelName, messages, toolDefinitions, promptBlocks, cacheContext);
+    }
+
+    public ModelPrompt withModelName(String newModelName) {
+        return new ModelPrompt(systemPrompt, userPrompt, newModelName, messages, toolDefinitions, promptBlocks, cacheContext);
+    }
+
+
+    public ModelPrompt withMessages(List<ModelMessage> newMessages) {
+        return new ModelPrompt(systemPrompt, userPrompt, modelName, newMessages, toolDefinitions, promptBlocks, cacheContext);
+    }
+
+    public ModelPrompt withToolDefinitions(List<ModelToolDefinition> newToolDefinitions) {
+        return new ModelPrompt(systemPrompt, userPrompt, modelName, messages, newToolDefinitions, promptBlocks, cacheContext);
+    }
+
+    public ModelPrompt withPromptBlocks(List<PromptBlock> newPromptBlocks) {
+        return new ModelPrompt(systemPrompt, userPrompt, modelName, messages, toolDefinitions, newPromptBlocks, cacheContext);
+    }
+
+    public ModelPrompt withCacheContext(PromptCacheContext newCacheContext) {
+        return new ModelPrompt(systemPrompt, userPrompt, modelName, messages, toolDefinitions, promptBlocks, newCacheContext);
     }
 
     public static String renderMessages(List<ModelMessage> messages) {

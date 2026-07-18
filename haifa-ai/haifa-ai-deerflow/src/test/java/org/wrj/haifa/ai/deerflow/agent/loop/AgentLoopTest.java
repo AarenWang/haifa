@@ -104,8 +104,9 @@ class AgentLoopTest {
                 .extracting(definition -> definition.name())
                 .contains("web_search", "web_fetch");
         assertThat(prompts.getFirst().systemPrompt())
-                .contains("structured tool-call channel")
+                .contains("structured tools")
                 .doesNotContain("emit: " + "<" + "tool_call");
+
     }
 
     @Test

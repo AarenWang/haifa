@@ -160,3 +160,31 @@ haifa:
         require-for-network: false
         require-for-file-write: false
         hardline-patterns-enabled: false
+      prompt-cache:
+        enabled: true
+        canonicalization-version: v1
+        routing-shards: 1
+        observability-enabled: true
+        openai:
+          enabled: true
+          prompt-cache-key-enabled: true
+          retention: PROVIDER_DEFAULT
+          explicit-breakpoints-enabled: false
+        google:
+          enabled: true
+          include-extended-usage-metadata: true
+          auto-cache-enabled: false
+          auto-cache-threshold: 8192
+          auto-cache-ttl: PT30M
+          explicit-content:
+            enabled: false
+            min-estimated-tokens: 8192
+            ttl: PT30M
+            create-wait-timeout: PT1S
+        compression:
+          enabled: true
+          schema-version: v1
+          prompt-version: evidence-compressor-v1
+          ttl: P7D
+          max-entries: 10000
+          cleanup-interval: PT6H

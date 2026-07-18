@@ -1,5 +1,7 @@
 package org.wrj.haifa.ai.deerflow.persistence.mapper;
 
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.loop.ModelStep;
 import org.wrj.haifa.ai.deerflow.persistence.entity.ModelStepEntity;
@@ -22,9 +24,25 @@ public class ModelStepMapper {
         entity.setStatus(ModelStepEntity.Status.COMPLETED);
         entity.setPromptSummary(step.prompt());
         entity.setResponseText(step.response());
-        entity.setMetadataJson(jsonMapper.toJson(step.toolCalls() != null
-                ? java.util.Map.of("toolCallCount", step.toolCalls().size())
-                : java.util.Map.of()));
+
+        Map<String, Object> metadataMap = new HashMap<>();
+        metadataMap.put("toolCallCount", step.toolCalls() != null ? step.toolCalls().size() : 0);
+        if (step.purpose() != null) {
+            metadataMap.put("purpose", step.purpose().name());
+        }
+        if (step.eligibility() != null) {
+            metadataMap.put("eligibility", step.eligibility().name());
+        }
+        if (step.promptFingerprint() != null) {
+            metadataMap.put("promptFingerprint", step.promptFingerprint());
+        }
+        entity.setMetadataJson(jsonMapper.toJson(metadataMap));
+
+        if (step.usage() != null) {
+            entity.setTokenUsageJson(jsonMapper.toJsonObject(step.usage()));
+        }
+
+
         entity.setCreatedAt(java.time.Instant.ofEpochMilli(step.startedAt()));
         entity.setUpdatedAt(java.time.Instant.ofEpochMilli(step.startedAt() + step.durationMs()));
         return entity;
