@@ -54,6 +54,54 @@ deerflow:
 haifa:
   ai:
     deerflow:
+      voice:
+        enabled: ${HAIFA_DEERFLOW_VOICE_ENABLED:true}
+        websocket:
+          path: /api/deerflow/voice/ws
+          max-sessions-per-user: 2
+          max-frame-bytes: 8192
+          idle-timeout: 90s
+        audio:
+          input-sample-rate-hz: 16000
+          input-channels: 1
+          max-turn-duration: 90s
+          max-turn-bytes: 2880000
+        asr:
+          default-provider: ${VOICE_ASR_PROVIDER:fake}
+          providers:
+            volcengine:
+              enabled: ${VOLCENGINE_ASR_ENABLED:false}
+              api-key: ${VOLCENGINE_VOICE_API_KEY:}
+              endpoint: ${VOLCENGINE_ASR_ENDPOINT:wss://ai-gateway.vei.volces.com/v1/realtime}
+              model: ${VOLCENGINE_ASR_MODEL:bigmodel}
+              resource-id: ${VOLCENGINE_ASR_RESOURCE_ID:}
+            dashscope:
+              enabled: ${DASHSCOPE_ASR_ENABLED:true}
+              api-key: ${DASHSCOPE_API_KEY:}
+              workspace-id: ${DASHSCOPE_WORKSPACE_ID:}
+              region: ${DASHSCOPE_REGION:cn-beijing}
+              endpoint: ${DASHSCOPE_ASR_ENDPOINT:}
+              model: ${DASHSCOPE_ASR_MODEL:paraformer-realtime-v2}
+        tts:
+          default-provider: ${VOICE_TTS_PROVIDER:fake}
+          providers:
+            volcengine:
+              enabled: ${VOLCENGINE_TTS_ENABLED:false}
+              app-id: ${VOLCENGINE_TTS_APP_ID:}
+              access-token: ${VOLCENGINE_TTS_ACCESS_TOKEN:}
+              endpoint: ${VOLCENGINE_TTS_ENDPOINT:wss://openspeech.bytedance.com/api/v1/tts/ws_binary}
+              cluster: ${VOLCENGINE_TTS_CLUSTER:volcano_tts}
+              voice: ${VOLCENGINE_TTS_VOICE:}
+              sample-rate-hz: ${VOLCENGINE_TTS_SAMPLE_RATE:24000}
+            dashscope:
+              enabled: ${DASHSCOPE_TTS_ENABLED:true}
+              api-key: ${DASHSCOPE_API_KEY:}
+              workspace-id: ${DASHSCOPE_WORKSPACE_ID:}
+              region: ${DASHSCOPE_REGION:cn-beijing}
+              endpoint: ${DASHSCOPE_TTS_ENDPOINT:}
+              model: ${DASHSCOPE_TTS_MODEL:cosyvoice-v3-flash}
+              voice: ${DASHSCOPE_TTS_VOICE:longanyang}
+              sample-rate-hz: ${DASHSCOPE_TTS_SAMPLE_RATE:24000}
       model: ${HAIFA_DEERFLOW_MODEL:}
       network-proxy-url: ${LLM_NETWORK_PROXY_URL:}
       network-proxy-username: ${LLM_NETWORK_PROXY_USERNAME:}

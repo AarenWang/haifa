@@ -121,7 +121,7 @@ public class AliyunSearchProvider implements WebSearchProvider {
             apiKey = properties.getTools().getWebSearch().getApiKey();
         }
         if (apiKey == null || apiKey.isBlank()) {
-            apiKey = System.getenv("ALIYUN_API_KEY");
+            apiKey = System.getenv("ALIYUN_IQS_API_KEY");
         }
         if (apiKey == null || apiKey.isBlank()) {
             apiKey = System.getenv("DASHSCOPE_API_KEY");

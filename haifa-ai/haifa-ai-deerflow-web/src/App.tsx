@@ -35,6 +35,7 @@ import ArtifactCanvas from './components/ArtifactCanvas';
 import ResearchInspector from './components/ResearchInspector';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
 import MemorySettingsModal from './components/MemorySettingsModal';
+import { VoiceComposer } from './voice/VoiceComposer';
 import { Activity, Menu } from 'lucide-react';
 
 function App() {
@@ -47,6 +48,7 @@ function App() {
   const [isMemoryOpen, setIsMemoryOpen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isTraceOpen, setIsTraceOpen] = useState<boolean>(false);
+  const [isVoiceOpen, setIsVoiceOpen] = useState<boolean>(false);
   const [canvasArtifactId, setCanvasArtifactId] = useState<string | null>(null);
   const allowArtifactAutoOpenRef = useRef(false);
 
@@ -832,6 +834,23 @@ function App() {
             />
           )}
           <ArtifactPanel artifacts={state.artifacts} onOpenCanvas={handleOpenCanvas} />
+          {isVoiceOpen && (
+            <VoiceComposer
+              threadId={state.threadId}
+              onThreadReady={(threadId) => {
+                if (threadId !== state.threadId) {
+                  dispatch({ type: 'SET_THREAD_ID', payload: threadId });
+                  syncThreadIdToUrl(threadId);
+                }
+                void refreshThreads();
+              }}
+              onTurnComplete={(threadId, runId) => {
+                void refreshThreads();
+                if (threadId) void refreshMessages(threadId);
+                if (runId) void refreshObservabilityData(runId);
+              }}
+            />
+          )}
           <TaskComposer
             onRun={handleRun}
             onAnswerClarification={handleAnswerClarification}
@@ -844,6 +863,8 @@ function App() {
             onClearExternalMessage={() => setExternalMessage(undefined)}
             pendingClarification={pendingClarification}
             activeThreadId={state.threadId}
+            onVoiceToggle={() => setIsVoiceOpen((v) => !v)}
+            isVoiceOpen={isVoiceOpen}
           />
         </div>
         <ActivityTrace

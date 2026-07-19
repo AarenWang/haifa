@@ -19,7 +19,8 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
     "org.wrj.haifa.ai.deerflow.claim",
     "org.wrj.haifa.ai.deerflow.budget",
     "org.wrj.haifa.ai.deerflow.quality",
-    "org.wrj.haifa.ai.deerflow.threadfile"
+    "org.wrj.haifa.ai.deerflow.threadfile",
+    "org.wrj.haifa.ai.deerflow.voice.persistence.repository"
 })
 public class DeerFlowApplication {
 

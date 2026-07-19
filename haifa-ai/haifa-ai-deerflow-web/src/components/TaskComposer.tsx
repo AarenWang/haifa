@@ -1,4 +1,4 @@
-import { ArrowUp, Square, RotateCcw, ChevronDown, Copy, Check, Search, MessageCircle, SlidersHorizontal } from 'lucide-react';
+import { ArrowUp, Square, RotateCcw, ChevronDown, Copy, Check, Search, MessageCircle, SlidersHorizontal, Mic } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import type { AppStatus, RunRequest, ClarificationQuestion, ClarificationAnswer } from '../types';
 
@@ -14,6 +14,8 @@ interface TaskComposerProps {
   onClearExternalMessage?: () => void;
   pendingClarification?: PendingClarification;
   activeThreadId?: string;
+  onVoiceToggle?: () => void;
+  isVoiceOpen?: boolean;
 }
 
 export interface PendingClarification {
@@ -36,6 +38,8 @@ export default function TaskComposer({
   onClearExternalMessage,
   pendingClarification,
   activeThreadId,
+  onVoiceToggle,
+  isVoiceOpen,
 }: TaskComposerProps) {
   const [message, setMessage] = useState('');
 
@@ -185,6 +189,17 @@ export default function TaskComposer({
               <SlidersHorizontal size={14} />
               Advanced
               <ChevronDown size={14} className="chevron" />
+            </button>
+          )}
+          {onVoiceToggle && (
+            <button
+              type="button"
+              className={`composer-icon-btn ${isVoiceOpen ? 'active' : ''}`}
+              onClick={onVoiceToggle}
+              title="Voice Input (语音对话)"
+              style={{ color: isVoiceOpen ? '#1890ff' : undefined }}
+            >
+              <Mic size={16} />
             </button>
           )}
           {isRunning ? (

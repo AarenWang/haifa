@@ -14,7 +14,8 @@ Sandbox execution supports `local-restricted`, opt-in `local-trusted`, and `dock
 
 `haifa-ai-deerflow` 是一个 Java / Spring Boot WebFlux 实现的 DeerFlow 风格 Agent Runtime。它把 SSE run、thread/message 持久化、工具调用、skills、deep research、uploads/artifacts、memory/persona、SQLite 审计和 Spring AI Graph 运行时组合在一个本地可运行的后端服务中。
 
-本文按当前代码事实维护。更详细的架构说明见 [docs/architecture.md](docs/architecture.md)。
+本文按当前代码事实维护。更详细的架构说明见 [docs/architecture.md](docs/architecture.md)，
+语音模型接入与运行方式见 [docs/voice-conversation.md](docs/voice-conversation.md)。
 
 ## 当前能力
 
@@ -30,6 +31,7 @@ Sandbox execution supports `local-restricted`, opt-in `local-trusted`, and `dock
 | Deep research | 由 `RunMode.RESEARCH`、`deep-research` skill、middleware、research observer、plan/source/evidence/claim/citation/quality/budget stores 和 report artifact 共同实现。 |
 | 持久化 | SQLite + JPA 保存 threads、runs、messages、events、model steps、tool calls/executions、todos、clarifications、memory、research plans/sources、graph checkpoints 等。 |
 | 文件状态 | uploads、outputs、workspace 在 `${user.dir}/data/user-data/**` 下；artifact registry 会保存到 `${userDataRoot}/artifacts.json`。 |
+| 语音对话 | 浏览器 PCM 推流，支持 fake、阿里云百炼和火山引擎 ASR/TTS provider；ASR 与 TTS 可混合选厂商。 |
 | 安全边界 | 当前 YAML 开启 local sandbox、脚本执行和网络访问，并关闭 approval；适合本地实验，不是生产安全默认值。 |
 
 ## 本地运行
