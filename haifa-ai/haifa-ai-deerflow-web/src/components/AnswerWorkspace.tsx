@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw, RefreshCw, Brain, BookOpen, Search, Globe, Terminal, Tag, Sparkles, ChevronDown, ChevronUp, FolderOpen, FileCode, Image, Clock, Users } from 'lucide-react';
-import type { AppPhase, AppStatus, ClarificationAnswer, MessageRecord, DeerFlowEvent, ArtifactRecord } from '../types';
+import type { AppPhase, AppStatus, ClarificationAnswer, MessageRecord, DeerFlowEvent, ArtifactRecord, RunObservability } from '../types';
 import { renderMarkdown } from '../utils/markdownRenderer';
 import ApprovalCard from './ApprovalCard';
 import ClarificationCard from './ClarificationCard';
@@ -11,6 +11,7 @@ interface AnswerWorkspaceProps {
   status: AppStatus;
   messages: MessageRecord[];
   events: DeerFlowEvent[];
+  observability?: RunObservability;
   threadId?: string;
   finalAnswer?: string;
   error?: string;
@@ -36,6 +37,12 @@ interface ExecutionStep {
 type StepArguments = Record<string, unknown>;
 
 const STEP_DETAIL_MAX = 220;
+const TOKEN_NUMBER_FORMATTER = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 });
+
+const providerTokenCount = (value: number | null | undefined): number | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  return Math.trunc(value);
+};
 
 const parseToolArguments = (rawArgs: unknown): StepArguments | undefined => {
   if (!rawArgs) return undefined;
@@ -322,6 +329,7 @@ export default function AnswerWorkspace({
   status,
   messages,
   events,
+  observability,
   threadId,
   finalAnswer,
   error,
@@ -413,39 +421,30 @@ export default function AnswerWorkspace({
     }
   }, [status, phase, threadId]);
 
-  // Token metrics logic
+  // Only display usage reported by the model provider. Text-length estimates are
+  // intentionally excluded because they are misleading for multilingual prompts.
   const tokenMetrics = (() => {
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let totalTokens = 0;
+    const totals = observability?.modelUsage?.totals;
+    const inputTokens = providerTokenCount(totals?.inputTokens);
+    const outputTokens = providerTokenCount(totals?.outputTokens);
+    const reportedTotalTokens = providerTokenCount(totals?.totalTokens);
+    const totalTokens = reportedTotalTokens
+      ?? (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null);
+    const cacheReadInputTokens = providerTokenCount(totals?.cacheReadInputTokens);
+    const providerReportedSteps = totals?.providerReportedSteps ?? 0;
+    const available = providerReportedSteps > 0
+      && (inputTokens !== null || outputTokens !== null || totalTokens !== null);
 
-    (events || []).forEach((evt) => {
-      const meta = evt.metadata || {};
-      if (meta.promptTokens) inputTokens += Number(meta.promptTokens);
-      if (meta.completionTokens) outputTokens += Number(meta.completionTokens);
-      if (meta.totalTokens) totalTokens += Number(meta.totalTokens);
-      else if (meta.estimated_total_tokens) totalTokens += Number(meta.estimated_total_tokens);
-    });
-
-    if (totalTokens === 0 && events && events.length > 0) {
-      const totalChars = events.reduce((sum, e) => sum + (e.content?.length || 0), 0);
-      totalTokens = Math.round(totalChars / 4);
-      inputTokens = Math.round(totalTokens * 0.75);
-      outputTokens = Math.round(totalTokens * 0.25);
-    }
-
-    const formatNumber = (num: number) => {
-      if (num >= 1000) {
-        return (num / 1000).toFixed(1) + 'K';
-      }
-      return num.toString();
-    };
+    const formatNumber = (num: number | null) => num === null ? '—' : TOKEN_NUMBER_FORMATTER.format(num);
 
     return {
       input: formatNumber(inputTokens),
       output: formatNumber(outputTokens),
       total: formatNumber(totalTokens),
-      rawTotal: totalTokens,
+      cacheRead: formatNumber(cacheReadInputTokens),
+      hasCacheRead: cacheReadInputTokens !== null,
+      providerReportedSteps,
+      available,
     };
   })();
 
@@ -483,13 +482,13 @@ export default function AnswerWorkspace({
     return false;
   });
 
-  const latestUserMessageId = (() => {
+  const latestUserMessageIndex = (() => {
     for (let i = visibleMessages.length - 1; i >= 0; i--) {
       if (visibleMessages[i].role === 'USER') {
-        return visibleMessages[i].messageId;
+        return i;
       }
     }
-    return null;
+    return -1;
   })();
 
   const hasAssistantContent = visibleMessages.some((message) => message.role === 'ASSISTANT');
@@ -583,8 +582,8 @@ export default function AnswerWorkspace({
         <>
           {visibleMessages.length > 0 && (
             <div className="conversation-list" onClick={handleConversationClick}>
-              {visibleMessages.map((message) => (
-                <div key={message.messageId}>
+              {visibleMessages.map((message, messageIndex) => (
+                <div key={`${message.messageId}-${messageIndex}`}>
                   <div
                     className={`conversation-message ${message.role.toLowerCase()}`}
                   >
@@ -643,7 +642,7 @@ export default function AnswerWorkspace({
                     )}
                   </div>
 
-                  {message.messageId === latestUserMessageId && events && events.length > 0 && (
+                  {messageIndex === latestUserMessageIndex && events && events.length > 0 && (
                     <div className="steps-accordion-card">
                       <div
                         className="steps-accordion-header"
@@ -683,7 +682,7 @@ export default function AnswerWorkspace({
                         </div>
                       )}
 
-                      {status !== 'running' && tokenMetrics.rawTotal > 0 && (
+                      {status !== 'running' && tokenMetrics.available && (
                         <div className="steps-token-dashboard">
                           <Tag size={11} style={{ opacity: 0.6 }} />
                           <span>Tokens 输入: <strong style={{ color: 'var(--text-color)' }}>{tokenMetrics.input}</strong></span>
@@ -691,6 +690,18 @@ export default function AnswerWorkspace({
                           <span>输出: <strong style={{ color: 'var(--text-color)' }}>{tokenMetrics.output}</strong></span>
                           <span style={{ margin: '0 4px', opacity: 0.3 }}>|</span>
                           <span>总计: <strong style={{ color: 'var(--text-color)' }}>{tokenMetrics.total}</strong></span>
+                          {tokenMetrics.hasCacheRead && (
+                            <>
+                              <span style={{ margin: '0 4px', opacity: 0.3 }}>|</span>
+                              <span>缓存读取: <strong style={{ color: 'var(--text-color)' }}>{tokenMetrics.cacheRead}</strong></span>
+                            </>
+                          )}
+                          <span
+                            className="token-source-badge"
+                            title={`${tokenMetrics.providerReportedSteps} 个模型步骤返回了 usage`}
+                          >
+                            提供方实报
+                          </span>
                         </div>
                       )}
                     </div>

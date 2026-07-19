@@ -806,6 +806,7 @@ function App() {
             status={state.status}
             messages={state.messages}
             events={state.events}
+            observability={state.runObservability}
             threadId={state.threadId}
             finalAnswer={state.finalAnswer}
             error={state.error}

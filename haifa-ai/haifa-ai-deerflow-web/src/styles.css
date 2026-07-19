@@ -4107,7 +4107,19 @@ body {
   color: var(--text-muted);
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
+}
+
+.token-source-badge {
+  margin-left: 4px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
+  border-radius: 999px;
+  color: var(--green);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
 /* Artifact canvas */

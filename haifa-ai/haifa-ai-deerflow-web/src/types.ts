@@ -238,6 +238,42 @@ export interface RunResearchTraceability {
   orphanEvidenceCount: number;
 }
 
+export interface RunModelUsageTotals {
+  providerReportedSteps: number;
+  unavailableSteps: number;
+  inputTokens?: number | null;
+  uncachedInputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+  cacheReadInputTokens?: number | null;
+  cacheWriteInputTokens?: number | null;
+  weightedCacheHitRate?: number | null;
+}
+
+export interface RunModelUsageStep {
+  stepIndex: number;
+  purpose: string;
+  provider: string;
+  model: string;
+  availability: string;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadInputTokens?: number | null;
+  cacheWriteInputTokens?: number | null;
+  cacheHitRate?: number | null;
+  eligibility?: string | null;
+  cacheablePrefixHashShort?: string | null;
+  toolDefinitionsHashShort?: string | null;
+  skillCatalogHashShort?: string | null;
+  dynamicTailHashShort?: string | null;
+  inferredMissReason?: string | null;
+}
+
+export interface RunModelUsageObservability {
+  totals: RunModelUsageTotals;
+  steps: RunModelUsageStep[];
+}
+
 export interface RunObservability {
   runId: string;
   threadId: string;
@@ -255,6 +291,7 @@ export interface RunObservability {
   timeline: RunObservabilityTimelineItem[];
   checkpointTimeline: RunCheckpointTimelineItem[];
   researchTraceability: RunResearchTraceability;
+  modelUsage?: RunModelUsageObservability;
 }
 
 export type ThreadStatus = 'ACTIVE' | 'ARCHIVED';
