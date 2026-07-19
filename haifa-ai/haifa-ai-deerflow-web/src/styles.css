@@ -2008,6 +2008,7 @@ body {
 .message-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;
   padding-left: 2px;
@@ -4099,16 +4100,27 @@ body {
   white-space: nowrap;
 }
 
-.steps-token-dashboard {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border-color);
-  font-size: 11px;
-  color: var(--text-muted);
-  display: flex;
+.message-token-dashboard {
+  display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.message-token-dashboard > svg {
+  opacity: 0.6;
+}
+
+.message-token-dashboard strong {
+  color: var(--text-color);
+}
+
+.token-separator {
+  margin: 0 4px;
+  opacity: 0.3;
 }
 
 .token-source-badge {

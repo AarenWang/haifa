@@ -638,6 +638,30 @@ export default function AnswerWorkspace({
                             刷新
                           </button>
                         )}
+                        {status !== 'running'
+                          && tokenMetrics.available
+                          && message.runId === observability?.runId && (
+                          <div className="message-token-dashboard">
+                            <Tag size={11} aria-hidden="true" />
+                            <span>Tokens 输入: <strong>{tokenMetrics.input}</strong></span>
+                            <span className="token-separator">|</span>
+                            <span>输出: <strong>{tokenMetrics.output}</strong></span>
+                            <span className="token-separator">|</span>
+                            <span>总计: <strong>{tokenMetrics.total}</strong></span>
+                            {tokenMetrics.hasCacheRead && (
+                              <>
+                                <span className="token-separator">|</span>
+                                <span>缓存读取: <strong>{tokenMetrics.cacheRead}</strong></span>
+                              </>
+                            )}
+                            <span
+                              className="token-source-badge"
+                              title={`${tokenMetrics.providerReportedSteps} 个模型步骤返回了 usage`}
+                            >
+                              提供方实报
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -679,29 +703,6 @@ export default function AnswerWorkspace({
                               )}
                             </div>
                           ))}
-                        </div>
-                      )}
-
-                      {status !== 'running' && tokenMetrics.available && (
-                        <div className="steps-token-dashboard">
-                          <Tag size={11} style={{ opacity: 0.6 }} />
-                          <span>Tokens 输入: <strong style={{ color: 'var(--text-color)' }}>{tokenMetrics.input}</strong></span>
-                          <span style={{ margin: '0 4px', opacity: 0.3 }}>|</span>
-                          <span>输出: <strong style={{ color: 'var(--text-color)' }}>{tokenMetrics.output}</strong></span>
-                          <span style={{ margin: '0 4px', opacity: 0.3 }}>|</span>
-                          <span>总计: <strong style={{ color: 'var(--text-color)' }}>{tokenMetrics.total}</strong></span>
-                          {tokenMetrics.hasCacheRead && (
-                            <>
-                              <span style={{ margin: '0 4px', opacity: 0.3 }}>|</span>
-                              <span>缓存读取: <strong style={{ color: 'var(--text-color)' }}>{tokenMetrics.cacheRead}</strong></span>
-                            </>
-                          )}
-                          <span
-                            className="token-source-badge"
-                            title={`${tokenMetrics.providerReportedSteps} 个模型步骤返回了 usage`}
-                          >
-                            提供方实报
-                          </span>
                         </div>
                       )}
                     </div>
