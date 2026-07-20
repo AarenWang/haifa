@@ -1,7 +1,11 @@
 package org.wrj.haifa.ai.utilitymcp.config;
 
 import java.net.URI;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.util.StringUtils;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.transport.ProxyProvider;
@@ -9,13 +13,27 @@ import reactor.netty.transport.ProxyProvider;
 /** Builds the per-provider proxy configuration used for outbound utility requests. */
 public final class UtilityNetworkProxyConfiguration {
 
+    private static final Set<String> SUPPORTED_PROVIDERS = Set.of(
+            "open-meteo",
+            "open-meteo-geocoding",
+            "open-meteo-air-quality",
+            "frankfurter",
+            "nager-date",
+            "wikimedia");
+
     private UtilityNetworkProxyConfiguration() { }
 
     public static ProxySettings proxySettings(
             String providerId,
-            UtilityMcpProperties.Proxy configuredProxy,
-            UtilityMcpProperties.Provider provider) {
-        if (!provider.isProxyEnabled()) return null;
+            UtilityMcpProperties.Proxy configuredProxy) {
+        Set<String> selectedProviders = selectedProviders(configuredProxy.getProviders());
+        Set<String> unsupported = new LinkedHashSet<>(selectedProviders);
+        unsupported.removeAll(SUPPORTED_PROVIDERS);
+        if (!unsupported.isEmpty()) {
+            throw new IllegalArgumentException("Unknown Utility MCP proxy providers: " + unsupported
+                    + ". Supported providers: " + SUPPORTED_PROVIDERS);
+        }
+        if (!selectedProviders.contains(normalizeProviderId(providerId))) return null;
         ProxySettings settings = parseProxySettings(
                 configuredProxy.getUrl(), configuredProxy.getUsername(), configuredProxy.getPassword());
         if (settings == null) {
@@ -23,6 +41,18 @@ public final class UtilityNetworkProxyConfiguration {
                     "Proxy is enabled for provider " + providerId + ", but UTILITY_MCP_PROXY_URL is empty");
         }
         return settings;
+    }
+
+    static Set<String> selectedProviders(String configuredProviders) {
+        if (!StringUtils.hasText(configuredProviders)) return Set.of();
+        return Arrays.stream(configuredProviders.split(","))
+                .map(UtilityNetworkProxyConfiguration::normalizeProviderId)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private static String normalizeProviderId(String providerId) {
+        return providerId == null ? "" : providerId.trim().toLowerCase(Locale.ROOT);
     }
 
     public static HttpClient configure(HttpClient client, ProxySettings proxy) {

@@ -24,16 +24,32 @@ class UtilityNetworkProxyConfigurationTest {
     }
 
     @Test
-    void requiresProxyUrlOnlyForProvidersThatEnableProxy() {
+    void selectsProvidersFromCommaSeparatedListAndRequiresProxyUrl() {
         UtilityMcpProperties.Proxy proxy = new UtilityMcpProperties.Proxy();
-        UtilityMcpProperties.Provider direct = new UtilityMcpProperties.Provider("https://example.com");
-        assertThat(UtilityNetworkProxyConfiguration.proxySettings("direct", proxy, direct)).isNull();
+        proxy.setProviders(" wikimedia, OPEN-METEO ");
+        assertThat(UtilityNetworkProxyConfiguration.selectedProviders(proxy.getProviders()))
+                .containsExactly("wikimedia", "open-meteo");
+        assertThat(UtilityNetworkProxyConfiguration.proxySettings("frankfurter", proxy)).isNull();
 
-        direct.setProxyEnabled(true);
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> UtilityNetworkProxyConfiguration.proxySettings("proxied", proxy, direct))
-                .withMessageContaining("proxied")
+                .isThrownBy(() -> UtilityNetworkProxyConfiguration.proxySettings("wikimedia", proxy))
+                .withMessageContaining("wikimedia")
                 .withMessageContaining("UTILITY_MCP_PROXY_URL");
+
+        proxy.setUrl("http://127.0.0.1:7890");
+        assertThat(UtilityNetworkProxyConfiguration.proxySettings("wikimedia", proxy)).isNotNull();
+        assertThat(UtilityNetworkProxyConfiguration.proxySettings("open-meteo", proxy)).isNotNull();
+    }
+
+    @Test
+    void rejectsUnknownProviderInProxyList() {
+        UtilityMcpProperties.Proxy proxy = new UtilityMcpProperties.Proxy();
+        proxy.setProviders("wikimedia,wikimeda");
+
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> UtilityNetworkProxyConfiguration.proxySettings("wikimedia", proxy))
+                .withMessageContaining("wikimeda")
+                .withMessageContaining("Supported providers");
     }
 
     @Test

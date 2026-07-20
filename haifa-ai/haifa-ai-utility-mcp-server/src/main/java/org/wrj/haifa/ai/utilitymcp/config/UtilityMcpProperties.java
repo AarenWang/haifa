@@ -61,6 +61,7 @@ public class UtilityMcpProperties {
         private String url = "";
         private String username = "";
         private String password = "";
+        private String providers = "";
 
         public String getUrl() { return url; }
         public void setUrl(String url) { this.url = url; }
@@ -68,6 +69,8 @@ public class UtilityMcpProperties {
         public void setUsername(String username) { this.username = username; }
         public String getPassword() { return password; }
         public void setPassword(String password) { this.password = password; }
+        public String getProviders() { return providers; }
+        public void setProviders(String providers) { this.providers = providers; }
     }
 
     public static class Provider {
@@ -78,7 +81,6 @@ public class UtilityMcpProperties {
         private int maxConcurrent = 16;
         private Duration cacheTtl = Duration.ofMinutes(10);
         private boolean allowHttpForTests;
-        private boolean proxyEnabled;
 
         public Provider(String baseUrl) { this.baseUrl = URI.create(baseUrl); }
         public URI getBaseUrl() { return baseUrl; }
@@ -95,7 +97,5 @@ public class UtilityMcpProperties {
         public void setCacheTtl(Duration cacheTtl) { this.cacheTtl = cacheTtl; }
         public boolean isAllowHttpForTests() { return allowHttpForTests; }
         public void setAllowHttpForTests(boolean allowHttpForTests) { this.allowHttpForTests = allowHttpForTests; }
-        public boolean isProxyEnabled() { return proxyEnabled; }
-        public void setProxyEnabled(boolean proxyEnabled) { this.proxyEnabled = proxyEnabled; }
     }
 }

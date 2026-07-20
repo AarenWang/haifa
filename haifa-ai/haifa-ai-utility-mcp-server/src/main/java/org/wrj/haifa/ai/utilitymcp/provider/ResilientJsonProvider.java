@@ -72,7 +72,7 @@ public class ResilientJsonProvider implements JsonProvider {
         this.objectMapper = objectMapper;
         this.meterRegistry = meterRegistry;
         validateBaseUrl(properties);
-        ProxySettings proxy = UtilityNetworkProxyConfiguration.proxySettings(providerId, proxyProperties, properties);
+        ProxySettings proxy = UtilityNetworkProxyConfiguration.proxySettings(providerId, proxyProperties);
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, timeoutMillis(properties.getConnectTimeout()))
                 .responseTimeout(properties.getResponseTimeout());

@@ -128,7 +128,7 @@ class ResilientJsonProviderTest {
     }
 
     @Test
-    void routesOnlyProxyEnabledProviderThroughConfiguredProxy() throws Exception {
+    void routesProviderSelectedByCommaSeparatedListThroughConfiguredProxy() throws Exception {
         AtomicReference<String> requestedUri = new AtomicReference<>();
         proxyServer = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
         Thread proxyThread = Thread.ofPlatform().start(() -> {
@@ -154,13 +154,13 @@ class ResilientJsonProviderTest {
 
         UtilityMcpProperties.Provider properties = new UtilityMcpProperties.Provider("http://127.0.0.1:1");
         properties.setAllowHttpForTests(true);
-        properties.setProxyEnabled(true);
         properties.setConnectTimeout(Duration.ofSeconds(1));
         properties.setResponseTimeout(Duration.ofSeconds(1));
         UtilityMcpProperties.Proxy proxy = new UtilityMcpProperties.Proxy();
         proxy.setUrl("http://127.0.0.1:" + proxyServer.getLocalPort());
+        proxy.setProviders("frankfurter, wikimedia");
         ResilientJsonProvider provider = new ResilientJsonProvider(
-                "proxied-fixture", properties, new ObjectMapper(), null, proxy);
+                "wikimedia", properties, new ObjectMapper(), null, proxy);
 
         ProviderPayload result = provider.get("/proxied", Map.of("q", "value"));
         proxyThread.join(Duration.ofSeconds(2));
