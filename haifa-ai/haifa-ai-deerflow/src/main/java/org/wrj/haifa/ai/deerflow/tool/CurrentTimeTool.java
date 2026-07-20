@@ -5,7 +5,7 @@ import java.time.format.DateTimeFormatter;
 import org.springframework.stereotype.Component;
 
 @Component
-public class CurrentTimeTool implements AgentTool {
+public class CurrentTimeTool implements ParallelSafeAgentTool {
 
     @Override
     public String name() {

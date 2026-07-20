@@ -21,6 +21,7 @@ import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver;
 import org.wrj.haifa.ai.deerflow.agent.loop.ToolCall;
 import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallResult;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties;
 import org.wrj.haifa.ai.deerflow.completion.CompletionRequirement;
 import org.wrj.haifa.ai.deerflow.completion.EvidenceRecord;
 import org.wrj.haifa.ai.deerflow.completion.Freshness;
@@ -40,6 +41,11 @@ import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 import org.wrj.haifa.ai.deerflow.run.RunCancellationService;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationToken;
+import org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchExecutor;
+import org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchItemResult;
+import org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchRequest;
+import org.wrj.haifa.ai.deerflow.tool.execution.ToolExecutionTask;
 
 @Component
 public class ChatExecuteToolsNode implements AsyncNodeAction {
@@ -53,6 +59,12 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
 
     @Autowired(required = false)
     private RunCancellationService runCancellationService;
+
+    @Autowired(required = false)
+    private ToolBatchExecutor toolBatchExecutor;
+
+    @Autowired(required = false)
+    private GraphExecutorProperties executorProperties;
 
     public ChatExecuteToolsNode(ToolRegistry toolRegistry, DeerFlowProperties properties) {
         this(toolRegistry, properties, null);
@@ -71,7 +83,10 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
 
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
-        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
+        String schedulingRunId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
+        // This adapter may wait for the batch future; actual tools always run on the isolated tool executor.
+        java.util.concurrent.Executor executor = graphExecutionManager != null
+                ? graphExecutionManager.getModelExecutor(schedulingRunId) : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");
@@ -93,6 +108,8 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             List<Map<String, Object>> toolResultsList = new ArrayList<>();
             List<Map<String, Object>> completionRequirements = new ArrayList<>();
             List<Map<String, Object>> evidenceRecords = new ArrayList<>();
+            Map<String, ToolBatchItemResult<ToolExecution>> batchResults = executeBatch(
+                    filteredCalls, uploadedFileIds, runId, threadId, view, lifecycle);
 
             for (AgentLoopObserver.FilteredToolCall filtered : filteredCalls) {
 
@@ -101,8 +118,6 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                 String safeName = nullToEmpty(toolCall.toolName());
                 String safeArguments = nullToEmpty(toolCall.arguments());
                 List<ToolCompletionContract> completionContracts = completionContracts(safeName);
-                persistToolCallRequested(toolCall.id(), safeName, safeArguments, runId, threadId);
-
                 if (!filtered.allowed()) {
                     String reason = nullToEmpty(filtered.reason()).isBlank() ? "Tool call rejected by middleware" : filtered.reason();
                     ToolCallResult deniedResult = ToolCallResult.fromError(toolCall, reason, 0);
@@ -116,7 +131,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                     continue;
                 }
 
-                ToolExecution execution = executeTool(toolCall, uploadedFileIds, runId, threadId, view, lifecycle);
+                ToolExecution execution = batchExecution(toolCall, batchResults.get(toolCall.id()));
                 ToolCallResult rawResult = execution.rawResult();
                 Map<String, Object> metadata = resultMetadata(execution.status(), safeName, toolCall.id(),
                         rawResult.durationMs(), execution.deniedByPolicy(), execution.deniedReason(), execution.errorType());
@@ -172,6 +187,76 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "execute_tools", "status", "completed")));
             return update;
         }, executor);
+    }
+
+    private Map<String, ToolBatchItemResult<ToolExecution>> executeBatch(
+            List<AgentLoopObserver.FilteredToolCall> filteredCalls, List<String> uploadedFileIds,
+            String runId, String threadId, AgentGraphStateView view, GraphChatLifecycleContext lifecycle) {
+        List<ToolExecutionTask<ToolExecution>> tasks = new ArrayList<>();
+        for (AgentLoopObserver.FilteredToolCall filtered : filteredCalls) {
+            ToolCall call = filtered.toolCall();
+            persistToolCallRequested(call.id(), nullToEmpty(call.toolName()), nullToEmpty(call.arguments()), runId, threadId);
+            if (!filtered.allowed()) {
+                continue;
+            }
+            AgentTool tool = findAgentTool(call.toolName());
+            var mode = tool == null ? org.wrj.haifa.ai.deerflow.tool.execution.ToolConcurrencyMode.SERIAL_PER_RUN
+                    : tool.concurrencyMode();
+            String resourceKey = tool == null ? "" : tool.concurrencyResourceKey(call.arguments());
+            tasks.add(new ToolExecutionTask<>(call.id(), mode, resourceKey,
+                    () -> executeTool(call, uploadedFileIds, runId, threadId, view, lifecycle)));
+        }
+
+        RunCancellationToken token = runCancellationService == null
+                ? new RunCancellationToken(runId) : runCancellationService.token(runId);
+        List<ToolBatchItemResult<ToolExecution>> results;
+        if (toolBatchExecutor == null) {
+            results = tasks.stream().map(task -> {
+                if (token.isCancelled()) {
+                    return ToolBatchItemResult.<ToolExecution>cancelled(task.callId());
+                }
+                try {
+                    return ToolBatchItemResult.success(task.callId(), task.action().get(), false);
+                }
+                catch (Throwable ex) {
+                    return ToolBatchItemResult.<ToolExecution>failed(task.callId(), ex);
+                }
+            }).toList();
+        }
+        else {
+            int maxConcurrency = executorProperties == null ? 1
+                    : Math.max(1, executorProperties.getToolCorePoolSize());
+            results = toolBatchExecutor.execute(new ToolBatchRequest<>(runId, tasks, maxConcurrency, token)).join().items();
+        }
+        Map<String, ToolBatchItemResult<ToolExecution>> indexed = new LinkedHashMap<>();
+        results.forEach(result -> indexed.put(result.callId(), result));
+        return indexed;
+    }
+
+    private ToolExecution batchExecution(ToolCall call, ToolBatchItemResult<ToolExecution> item) {
+        if (item == null || item.status() == ToolBatchItemResult.Status.CANCELLED) {
+            return failedExecution(call, "FAILED", "Tool execution cancelled", System.currentTimeMillis(), "Cancelled");
+        }
+        if (item.status() == ToolBatchItemResult.Status.FAILED) {
+            Throwable error = item.error();
+            return failedExecution(call, "FAILED", "Error executing tool " + call.toolName() + ": "
+                    + (error == null ? "unknown error" : error.getMessage()), System.currentTimeMillis(),
+                    error == null ? "ToolExecutionError" : error.getClass().getSimpleName());
+        }
+        ToolExecution execution = item.value();
+        if (!item.lateCompletion()) {
+            return execution;
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>(execution.rawResult().metadata());
+        metadata.put("lateCompletionAfterCancel", true);
+        ToolCallResult raw = execution.rawResult();
+        return new ToolExecution(execution.status(), new ToolCallResult(raw.id(), raw.toolName(), raw.arguments(),
+                raw.status(), raw.result(), raw.error(), raw.durationMs(), metadata), execution.errorType(),
+                execution.deniedByPolicy(), execution.deniedReason());
+    }
+
+    private AgentTool findAgentTool(String toolName) {
+        return toolRegistry.tools().stream().filter(tool -> tool.name().equals(toolName)).findFirst().orElse(null);
     }
 
     private List<ToolCompletionContract> completionContracts(String toolName) {
@@ -348,7 +433,9 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                     runId,
                     view.mode(),
                     lifecycle == null ? view.activeSkills() : lifecycle.activeSkills(),
-                    view.modelName()
+                    view.modelName(),
+                    runCancellationService == null ? new RunCancellationToken(runId)
+                            : runCancellationService.token(runId)
             );
             ToolResult result = tool.execute(toolRequest);
             long duration = System.currentTimeMillis() - startTime;

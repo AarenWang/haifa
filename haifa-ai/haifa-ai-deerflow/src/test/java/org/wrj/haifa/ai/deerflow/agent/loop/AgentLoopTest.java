@@ -219,7 +219,7 @@ class AgentLoopTest {
     }
 
     @Test
-    void executesToolCallsFromSameModelResponseConcurrently() {
+    void executesToolCallsFromSameModelResponseConcurrently() throws Exception {
         SlowTool slowTool = new SlowTool();
         AtomicInteger modelCalls = new AtomicInteger();
         AgentModelClient model = prompt -> {
@@ -233,21 +233,36 @@ class AgentLoopTest {
         };
 
         AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(slowTool)));
+        org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties executorProperties =
+                new org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties();
+        executorProperties.setToolCorePoolSize(2);
+        executorProperties.setToolMaxPoolSize(2);
+        executorProperties.setToolQueueCapacity(4);
+        org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager executionManager =
+                new org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager(executorProperties);
+        executionManager.afterPropertiesSet();
+        loop.configureToolExecution(new org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchExecutor(
+                executionManager, executorProperties), null, 2);
         AgentRunConfig config = new AgentRunConfig("thread-parallel", "run-parallel", "test-model",
                 false, false, 4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH,
                 null, Map.of());
 
-        List<AgentEvent> events = loop.run(
-                new LoopConfig(4, 4, 300_000, ResearchOptions.defaults()),
-                config,
-                "You are a research assistant.",
-                "Run both tools",
-                new java.util.concurrent.atomic.AtomicInteger(),
-                null, List.of(), List.of()
-        ).collectList().block();
+        try {
+            List<AgentEvent> events = loop.run(
+                    new LoopConfig(4, 4, 300_000, ResearchOptions.defaults()),
+                    config,
+                    "You are a research assistant.",
+                    "Run both tools",
+                    new java.util.concurrent.atomic.AtomicInteger(),
+                    null, List.of(), List.of()
+            ).collectList().block();
 
-        assertThat(slowTool.maxActive.get()).isGreaterThanOrEqualTo(2);
-        assertThat(events.stream().filter(e -> e.type() == AgentEventType.TOOL_COMPLETED).count()).isEqualTo(2);
+            assertThat(slowTool.maxActive.get()).isGreaterThanOrEqualTo(2);
+            assertThat(events.stream().filter(e -> e.type() == AgentEventType.TOOL_COMPLETED).count()).isEqualTo(2);
+        }
+        finally {
+            executionManager.destroy();
+        }
     }
 
     @Test
@@ -510,6 +525,11 @@ class AgentLoopTest {
         }
 
         @Override
+        public org.wrj.haifa.ai.deerflow.tool.execution.ToolConcurrencyMode concurrencyMode() {
+            return org.wrj.haifa.ai.deerflow.tool.execution.ToolConcurrencyMode.PARALLEL_SAFE;
+        }
+
+        @Override
         public String description() {
             return "Sleeps briefly so tests can observe concurrent execution";
         }
@@ -768,7 +788,5 @@ class AgentLoopTest {
                 .doesNotContain("protocolState", "thoughtSignatures", "c2ln");
     }
 }
-
-
 
 

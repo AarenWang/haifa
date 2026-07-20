@@ -8,7 +8,7 @@ import org.wrj.haifa.ai.deerflow.upload.UploadRecord;
 import org.wrj.haifa.ai.deerflow.upload.UploadStorageService;
 
 @Component
-public class ListUploadedFilesTool implements AgentTool {
+public class ListUploadedFilesTool implements ParallelSafeAgentTool {
 
     private final UploadStorageService uploadStorageService;
 

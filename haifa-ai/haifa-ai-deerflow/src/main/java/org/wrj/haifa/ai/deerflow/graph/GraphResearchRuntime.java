@@ -96,7 +96,7 @@ public class GraphResearchRuntime {
         GraphEventRegistry.register(runId, eventSink, request.eventSequence());
 
         java.util.concurrent.Executor executor = graphExecutionManager != null
-                ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
+                ? graphExecutionManager.getCoordinatorExecutor(runId) : GraphExecutionManager.fallbackExecutor();
         CompletableFuture.runAsync(() -> {
             try {
                 Map<String, Object> initialState = new HashMap<>(stateFactory.create(
@@ -153,10 +153,10 @@ public class GraphResearchRuntime {
                         : graph.stream(initialState, runnableConfig);
 
                 streamResult.collectList().block(Duration.ofMillis(request.loopConfig().timeoutMs()));
-                eventSink.tryEmitComplete();
+                GraphEventRegistry.complete(runId);
             }
             catch (Exception ex) {
-                eventSink.tryEmitError(ex);
+                GraphEventRegistry.error(runId, ex);
             }
             finally {
                 GraphEventRegistry.deregister(runId);

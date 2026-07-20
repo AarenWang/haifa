@@ -163,6 +163,12 @@ public class SimpleAgentRuntime implements AgentRuntime {
     @Autowired(required = false)
     private RunCancellationService runCancellationService;
 
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchExecutor toolBatchExecutor;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties graphExecutorProperties;
+
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
             RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
             AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
@@ -294,6 +300,11 @@ public class SimpleAgentRuntime implements AgentRuntime {
     @Override
     public Flux<AgentEvent> stream(AgentRequest request) {
         return Flux.defer(() -> {
+            if (toolBatchExecutor != null) {
+                int maxConcurrency = graphExecutorProperties == null ? 1
+                        : graphExecutorProperties.getToolCorePoolSize();
+                this.agentLoop.configureToolExecution(toolBatchExecutor, runCancellationService, maxConcurrency);
+            }
             long runStartTime = System.currentTimeMillis();
             String requestedThreadId = StringUtils.hasText(request.threadId()) ? request.threadId() : UUID.randomUUID().toString();
             ThreadRecord thread = this.threadManager.upsert(requestedThreadId,

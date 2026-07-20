@@ -113,7 +113,8 @@ public class GraphChatRuntime {
             runCancellationService.register(runId, request.runConfig().threadId());
         }
 
-        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
+        java.util.concurrent.Executor executor = graphExecutionManager != null
+                ? graphExecutionManager.getCoordinatorExecutor(runId) : GraphExecutionManager.fallbackExecutor();
         CompletableFuture<Void> graphTask = CompletableFuture.runAsync(() -> {
             try {
                 throwIfCancelled(runId);
@@ -168,22 +169,18 @@ public class GraphChatRuntime {
                         .block(Duration.ofMillis(request.loopConfig().timeoutMs()));
                 throwIfCancelled(runId);
 
-                eventSink.tryEmitComplete();
+                GraphEventRegistry.complete(runId);
             }
             catch (RunCancelledException ex) {
-                eventSink.tryEmitNext(AgentEvent.of(java.util.UUID.randomUUID().toString(), runId,
-                        request.runConfig().threadId(), AgentEventType.RUN_CANCELLED, "Run cancelled",
-                        Map.of("status", "CANCELLED", "stopReason", "USER_CANCELLED")));
-                eventSink.tryEmitComplete();
+                emitCancelledIfNotRecorded(runId, request.runConfig().threadId());
+                GraphEventRegistry.complete(runId);
             }
             catch (Exception ex) {
                 if (runCancellationService != null && runCancellationService.isCancelled(runId)) {
-                    eventSink.tryEmitNext(AgentEvent.of(java.util.UUID.randomUUID().toString(), runId,
-                            request.runConfig().threadId(), AgentEventType.RUN_CANCELLED, "Run cancelled",
-                            Map.of("status", "CANCELLED", "stopReason", "USER_CANCELLED")));
-                    eventSink.tryEmitComplete();
+                    emitCancelledIfNotRecorded(runId, request.runConfig().threadId());
+                    GraphEventRegistry.complete(runId);
                 } else {
-                    eventSink.tryEmitError(ex);
+                    GraphEventRegistry.error(runId, ex);
                 }
             }
             finally {
@@ -200,9 +197,9 @@ public class GraphChatRuntime {
 
         return eventSink.asFlux();
     }
-    private void emitCancelledIfNotRecorded(Sinks.Many<AgentEvent> eventSink, String runId, String threadId) {
+    private void emitCancelledIfNotRecorded(String runId, String threadId) {
         if (runCancellationService == null || !runCancellationService.isCancellationRecorded(runId)) {
-            eventSink.tryEmitNext(AgentEvent.of(java.util.UUID.randomUUID().toString(), runId,
+            GraphEventRegistry.publish(runId, AgentEvent.of(java.util.UUID.randomUUID().toString(), runId,
                     threadId, AgentEventType.RUN_CANCELLED, "Run cancelled",
                     Map.of("status", "CANCELLED", "stopReason", "USER_CANCELLED")));
         }

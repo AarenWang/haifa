@@ -69,7 +69,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
 
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
-        java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
+        String schedulingRunId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
+        java.util.concurrent.Executor executor = graphExecutionManager != null
+                ? graphExecutionManager.getModelExecutor(schedulingRunId) : GraphExecutionManager.fallbackExecutor();
         return CompletableFuture.supplyAsync(() -> {
             String runId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
             String threadId = state.<String>value(AgentGraphStateKeys.THREAD_ID).orElse("");

@@ -69,22 +69,18 @@ public class ChatFinalizeNode implements AsyncNodeAction {
             }
 
             String mode = state.<String>value(AgentGraphStateKeys.MODE).orElse("CHAT");
-            if (!"RESEARCH".equalsIgnoreCase(mode)) {
-                graphLifecycleService.completeChat(runId, threadId, finalAnswer, stepNum, totalToolCalls);
-            }
+            boolean terminalWon = "RESEARCH".equalsIgnoreCase(mode)
+                    || graphLifecycleService.completeChat(runId, threadId, finalAnswer, stepNum, totalToolCalls);
 
             Map<String, Object> completionMetadata = new HashMap<>(finalMetadata);
             completionMetadata.put("stopReason", "FINAL_ANSWER");
             completionMetadata.put("steps", stepNum);
             completionMetadata.put("totalToolCalls", totalToolCalls);
-            GraphEventRegistry.publish(runId, AgentEvent.of(
-                    UUID.randomUUID().toString(),
-                    runId,
-                    threadId,
-                    AgentEventType.RUN_COMPLETED,
-                    finalAnswer,
-                    completionMetadata
-            ));
+            if (terminalWon) {
+                GraphEventRegistry.publish(runId, AgentEvent.of(
+                        UUID.randomUUID().toString(), runId, threadId, AgentEventType.RUN_COMPLETED,
+                        finalAnswer, completionMetadata));
+            }
 
             Map<String, Object> update = new HashMap<>();
             update.put(AgentGraphStateKeys.FINAL_ANSWER, finalAnswer);

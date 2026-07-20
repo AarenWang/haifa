@@ -4,7 +4,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
@@ -14,7 +13,6 @@ import org.wrj.haifa.ai.deerflow.thread.MessageRole;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.thread.ThreadManager;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
 
 @Component
 public class RunCancellationService {
@@ -50,7 +48,7 @@ public class RunCancellationService {
         }
         CancellationState state = state(runId);
         state.task = task;
-        if (state.cancelled.get()) {
+        if (state.token.isCancelled()) {
             task.cancel(true);
         }
     }
@@ -60,11 +58,7 @@ public class RunCancellationService {
             return false;
         }
         CancellationState state = state(runId);
-        state.reason = normalizeReason(reason);
-        boolean changed = state.cancelled.compareAndSet(false, true);
-        if (changed) {
-            state.cancelSignal.tryEmitEmpty();
-        }
+        boolean changed = state.token.cancel(normalizeReason(reason));
         CompletableFuture<?> task = state.task;
         if (task != null) {
             task.cancel(true);
@@ -76,6 +70,10 @@ public class RunCancellationService {
         if (isBlank(runId)) {
             return null;
         }
+        RunRecord existing = this.runManager.find(runId).orElse(null);
+        if (existing != null && isTerminal(existing.status())) {
+            return null;
+        }
         CancellationState state = state(runId);
         if (!isBlank(threadId)) {
             state.threadId = threadId;
@@ -83,16 +81,15 @@ public class RunCancellationService {
         String resolvedThreadId = firstNonBlank(threadId, state.threadId, findThreadId(runId));
         String resolvedReason = normalizeReason(reason);
         requestCancel(runId, resolvedReason);
+        if (state.terminalRecorded.get()) {
+            return null;
+        }
+        if (!this.runManager.tryMarkCancelled(runId)) {
+            return null;
+        }
         if (!state.terminalRecorded.compareAndSet(false, true)) {
             return null;
         }
-
-        RunRecord run = this.runManager.find(runId).orElse(null);
-        if (run != null && isTerminal(run.status())) {
-            return null;
-        }
-
-        this.runManager.markCancelled(runId);
         if (!isBlank(resolvedThreadId)) {
             this.threadManager.touch(resolvedThreadId);
             this.messageStore.add(resolvedThreadId, runId, MessageRole.SYSTEM, "Run cancelled",
@@ -124,13 +121,13 @@ public class RunCancellationService {
             return false;
         }
         CancellationState state = states.get(runId);
-        return state != null && state.cancelled.get();
+        return state != null && state.token.isCancelled();
     }
 
     public void throwIfCancelled(String runId) {
         if (isCancelled(runId)) {
             CancellationState state = states.get(runId);
-            throw new RunCancelledException(runId, state == null ? DEFAULT_REASON : state.reason);
+            throw new RunCancelledException(runId, state == null ? DEFAULT_REASON : state.token.reason());
         }
     }
 
@@ -139,7 +136,14 @@ public class RunCancellationService {
             return Mono.never();
         }
         CancellationState state = state(runId);
-        return state.cancelled.get() ? Mono.empty() : state.cancelSignal.asMono();
+        return state.token.signal();
+    }
+
+    public RunCancellationToken token(String runId) {
+        if (isBlank(runId)) {
+            return new RunCancellationToken("");
+        }
+        return state(runId).token;
     }
 
     public void finishExecution(String runId) {
@@ -150,19 +154,19 @@ public class RunCancellationService {
     }
 
     private CancellationState state(String runId) {
-        return states.computeIfAbsent(runId, key -> new CancellationState());
+        return states.computeIfAbsent(runId, CancellationState::new);
     }
 
     private String findThreadId(String runId) {
         return this.runManager.find(runId).map(RunRecord::threadId).orElse("");
     }
 
-    private static boolean isTerminal(RunStatus status) {
-        return status == RunStatus.COMPLETED || status == RunStatus.FAILED || status == RunStatus.CANCELLED;
-    }
-
     private static String normalizeReason(String reason) {
         return isBlank(reason) ? DEFAULT_REASON : reason.trim();
+    }
+
+    private static boolean isTerminal(RunStatus status) {
+        return status == RunStatus.COMPLETED || status == RunStatus.FAILED || status == RunStatus.CANCELLED;
     }
 
     private static String firstNonBlank(String... values) {
@@ -182,11 +186,13 @@ public class RunCancellationService {
     }
 
     private static final class CancellationState {
-        private final AtomicBoolean cancelled = new AtomicBoolean(false);
-        private final AtomicBoolean terminalRecorded = new AtomicBoolean(false);
-        private final Sinks.Empty<Void> cancelSignal = Sinks.empty();
+        private final java.util.concurrent.atomic.AtomicBoolean terminalRecorded = new java.util.concurrent.atomic.AtomicBoolean(false);
+        private final RunCancellationToken token;
         private volatile String threadId;
-        private volatile String reason = DEFAULT_REASON;
         private volatile CompletableFuture<?> task;
+
+        private CancellationState(String runId) {
+            this.token = new RunCancellationToken(runId);
+        }
     }
 }

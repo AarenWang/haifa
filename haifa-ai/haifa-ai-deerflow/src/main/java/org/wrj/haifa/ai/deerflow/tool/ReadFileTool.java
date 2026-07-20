@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 
 @Component
-public class ReadFileTool implements AgentTool {
+public class ReadFileTool implements ParallelSafeAgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int MAX_CHARS = 15_000;

@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
 @Component
-public class ViewImageTool implements AgentTool {
+public class ViewImageTool implements ParallelSafeAgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 

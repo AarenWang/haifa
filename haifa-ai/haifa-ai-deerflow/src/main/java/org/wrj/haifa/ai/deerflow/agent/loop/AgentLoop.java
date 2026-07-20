@@ -36,6 +36,12 @@ import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
+import org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchExecutor;
+import org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchItemResult;
+import org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchRequest;
+import org.wrj.haifa.ai.deerflow.tool.execution.ToolExecutionTask;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationService;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationToken;
 import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStore;
 import org.wrj.haifa.ai.deerflow.approval.ApprovalStore;
 import org.wrj.haifa.ai.deerflow.approval.ApprovalPolicyService;
@@ -70,6 +76,9 @@ public class AgentLoop {
     private final ApprovalStore approvalStore;
     private final PromptAssembler promptAssembler;
     private final DeerFlowProperties properties;
+    private volatile ToolBatchExecutor toolBatchExecutor;
+    private volatile RunCancellationService runCancellationService;
+    private volatile int toolBatchMaxConcurrency = 1;
 
     public AgentLoop(AgentModelClient modelClient, ToolRegistry toolRegistry) {
         this(modelClient, toolRegistry, null, null, null, new NoopAgentLoopObserver(), null, null, null, null);
@@ -138,6 +147,14 @@ public class AgentLoop {
 
     public AgentLoopObserver observer() {
         return this.observer;
+    }
+
+    /** Optional production bridge; direct/unit constructed loops retain conservative serial execution. */
+    public void configureToolExecution(ToolBatchExecutor executor, RunCancellationService cancellationService,
+            int maxConcurrency) {
+        this.toolBatchExecutor = executor;
+        this.runCancellationService = cancellationService;
+        this.toolBatchMaxConcurrency = Math.max(1, maxConcurrency);
     }
 
     public Flux<AgentEvent> run(
@@ -707,7 +724,9 @@ public class AgentLoop {
 
         ToolRequest request = new ToolRequest(toolCall.arguments(), runConfig.workspaceRoot(),
                 uploadedFileIds == null ? List.of() : uploadedFileIds, runConfig.threadId(), runConfig.runId(),
-                runConfig.mode(), activeSkills, runConfig.modelName());
+                runConfig.mode(), activeSkills, runConfig.modelName(),
+                runCancellationService == null ? new RunCancellationToken(runConfig.runId())
+                        : runCancellationService.token(runConfig.runId()));
         long startTime = System.currentTimeMillis();
         try {
             ToolResult result = tool.execute(request);
@@ -1128,24 +1147,74 @@ public class AgentLoop {
                 }
             }
 
-            long toolStartTime = System.currentTimeMillis();
-            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
-                    "Executing " + targetToolName,
-                    Map.of("toolCallId", toolCall.id(), "toolName", targetToolName)));
-
-            if ("task".equals(targetToolName)) {
-                emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_STARTED,
-                        "Subagent task started",
-                        Map.of("toolCallId", toolCall.id(), "toolName", targetToolName,
-                                "arguments", toolCall.arguments())));
-            }
-
-            CompletableFuture<ToolCallResult> future = CompletableFuture.supplyAsync(
-                    () -> executeTool(toolCall, runConfig, uploadedFileIds, activeSkills));
-            pendingExecutions.add(new PendingToolExecution(toolCall, targetToolName, toolStartTime, future));
+            // Approval/policy preflight for the entire batch completes before any side-effecting call starts.
+            pendingExecutions.add(new PendingToolExecution(toolCall, targetToolName,
+                    System.currentTimeMillis(), null));
         }
 
+        if (stopped) {
+            return new ToolBatchOutcome(totalToolCalls, true);
+        }
+
+        List<PendingToolExecution> scheduledExecutions = new ArrayList<>();
+        List<ToolExecutionTask<ToolCallResult>> executionTasks = new ArrayList<>();
         for (PendingToolExecution pending : pendingExecutions) {
+            emitter.emit(event(seq, runConfig, AgentEventType.TOOL_STARTED,
+                    "Executing " + pending.targetToolName(),
+                    Map.of("toolCallId", pending.toolCall().id(), "toolName", pending.targetToolName())));
+            if ("task".equals(pending.targetToolName())) {
+                emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_STARTED,
+                        "Subagent task started",
+                        Map.of("toolCallId", pending.toolCall().id(), "toolName", pending.targetToolName(),
+                                "arguments", pending.toolCall().arguments())));
+            }
+            AgentTool tool = findTool(pending.targetToolName());
+            executionTasks.add(new ToolExecutionTask<>(pending.toolCall().id(),
+                    tool == null ? org.wrj.haifa.ai.deerflow.tool.execution.ToolConcurrencyMode.SERIAL_PER_RUN
+                            : tool.concurrencyMode(),
+                    tool == null ? "" : tool.concurrencyResourceKey(pending.toolCall().arguments()),
+                    () -> executeTool(pending.toolCall(), runConfig, uploadedFileIds, activeSkills)));
+        }
+
+        RunCancellationToken token = runCancellationService == null
+                ? new RunCancellationToken(runConfig.runId()) : runCancellationService.token(runConfig.runId());
+        List<ToolBatchItemResult<ToolCallResult>> batchItems;
+        if (toolBatchExecutor == null) {
+            batchItems = executionTasks.stream().map(task -> {
+                if (token.isCancelled()) {
+                    return ToolBatchItemResult.<ToolCallResult>cancelled(task.callId());
+                }
+                try {
+                    return ToolBatchItemResult.success(task.callId(), task.action().get(), false);
+                }
+                catch (Throwable ex) {
+                    return ToolBatchItemResult.<ToolCallResult>failed(task.callId(), ex);
+                }
+            }).toList();
+        }
+        else {
+            batchItems = toolBatchExecutor.execute(new ToolBatchRequest<>(runConfig.runId(), executionTasks,
+                    toolBatchMaxConcurrency, token)).join().items();
+        }
+        for (int i = 0; i < pendingExecutions.size(); i++) {
+            PendingToolExecution pending = pendingExecutions.get(i);
+            ToolBatchItemResult<ToolCallResult> item = batchItems.get(i);
+            CompletableFuture<ToolCallResult> resultFuture;
+            if (item.status() == ToolBatchItemResult.Status.SUCCESS) {
+                resultFuture = CompletableFuture.completedFuture(item.value());
+            }
+            else {
+                String message = item.status() == ToolBatchItemResult.Status.CANCELLED
+                        ? "Tool execution cancelled"
+                        : "Tool failed: " + (item.error() == null ? "unknown error" : item.error().getMessage());
+                resultFuture = CompletableFuture.completedFuture(ToolCallResult.fromError(
+                        pending.toolCall(), message, System.currentTimeMillis() - pending.startedAtMs()));
+            }
+            scheduledExecutions.add(new PendingToolExecution(pending.toolCall(), pending.targetToolName(),
+                    pending.startedAtMs(), resultFuture));
+        }
+
+        for (PendingToolExecution pending : scheduledExecutions) {
             ToolCall toolCall = pending.toolCall();
             ToolCallResult rawToolResult;
             try {

@@ -69,12 +69,15 @@ class AgentLoopApprovalGateTest {
         // Mock tool
         AgentTool mockTool = mock(AgentTool.class);
         when(mockTool.name()).thenReturn("run_script");
-        when(toolRegistry.tools()).thenReturn(List.of(mockTool));
+        AgentTool safeSibling = mock(AgentTool.class);
+        when(safeSibling.name()).thenReturn("safe_read");
+        when(toolRegistry.tools()).thenReturn(List.of(safeSibling, mockTool));
 
         // Mock model response to request run_script
         ModelResponse modelResponse = new ModelResponse(
                 "Assistant thinking...",
-                List.of(new ModelToolCall("call-1", "run_script", "{\"script\":\"rm -rf\"}"))
+                List.of(new ModelToolCall("call-safe", "safe_read", "{}"),
+                        new ModelToolCall("call-1", "run_script", "{\"script\":\"rm -rf\"}"))
         );
         when(modelClient.generate(any(ModelPrompt.class))).thenReturn(Mono.just(modelResponse));
 
@@ -87,7 +90,9 @@ class AgentLoopApprovalGateTest {
                 "preview script",
                 Map.of()
         );
-        when(approvalPolicyService.evaluate(any(), any(), any())).thenReturn(decision);
+        ApprovalPolicyDecision allow = new ApprovalPolicyDecision(
+                ApprovalPolicyDecisionType.ALLOW, RiskLevel.LOW, "safe", "safe", "", Map.of());
+        when(approvalPolicyService.evaluate(any(), any(), any())).thenReturn(allow, decision);
         when(approvalPolicyService.hashArgs(any(), any())).thenReturn("hash-123");
 
         // Mock approval store creating the request
@@ -115,5 +120,7 @@ class AgentLoopApprovalGateTest {
         });
 
         verify(agentLoopRunStore).markSuspended(eq("run-1"), eq("APPROVAL_REQUIRED"));
+        verify(safeSibling, never()).execute(any());
+        verify(mockTool, never()).execute(any());
     }
 }

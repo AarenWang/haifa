@@ -36,22 +36,29 @@ public class GraphLifecycleService {
         this.memoryReflectionService = memoryReflectionService;
     }
 
-    public void completeChat(String runId, String threadId, String finalAnswer, int steps, int toolCount) {
+    public boolean completeChat(String runId, String threadId, String finalAnswer, int steps, int toolCount) {
         log.info("Completing chat run via GraphLifecycleService. runId={}, threadId={}, steps={}, toolCount={}",
                 runId, threadId, steps, toolCount);
-        this.runManager.markCompleted(runId);
+        if (!this.runManager.tryMarkCompleted(runId) && this.runManager.find(runId).isPresent()) {
+            log.warn("Skipping chat completion side effects after terminal-state conflict. runId={}", runId);
+            return false;
+        }
         this.threadManager.touch(threadId);
         this.messageStore.add(threadId, runId, MessageRole.ASSISTANT, finalAnswer,
                 Map.of("toolCount", toolCount, "mode", "chat", "steps", steps));
         if (this.memoryReflectionService != null) {
             this.memoryReflectionService.reflectAsync(threadId, runId);
         }
+        return true;
     }
 
-    public void completeResearch(String runId, String threadId, ReportWriteResult result, int toolCount) {
+    public boolean completeResearch(String runId, String threadId, ReportWriteResult result, int toolCount) {
         log.info("Completing research run via GraphLifecycleService. runId={}, threadId={}, toolCount={}",
                 runId, threadId, toolCount);
-        this.runManager.markCompleted(runId);
+        if (!this.runManager.tryMarkCompleted(runId) && this.runManager.find(runId).isPresent()) {
+            log.warn("Skipping research completion side effects after terminal-state conflict. runId={}", runId);
+            return false;
+        }
         this.threadManager.touch(threadId);
 
         String summary = buildArtifactSummary(result);
@@ -64,14 +71,19 @@ public class GraphLifecycleService {
         if (this.memoryReflectionService != null) {
             this.memoryReflectionService.reflectAsync(threadId, runId);
         }
+        return true;
     }
 
-    public void failRun(String runId, String threadId, String errorMessage) {
+    public boolean failRun(String runId, String threadId, String errorMessage) {
         log.warn("Failing run via GraphLifecycleService. runId={}, threadId={}, error={}", runId, threadId, errorMessage);
-        this.runManager.markFailed(runId, errorMessage);
+        if (!this.runManager.tryMarkFailed(runId, errorMessage) && this.runManager.find(runId).isPresent()) {
+            log.warn("Skipping failure side effects after terminal-state conflict. runId={}", runId);
+            return false;
+        }
         this.threadManager.touch(threadId);
         this.messageStore.add(threadId, runId, MessageRole.SYSTEM, errorMessage,
                 Map.of("status", "FAILED", "errorType", "GraphException"));
+        return true;
     }
 
     private static String buildArtifactSummary(ReportWriteResult result) {

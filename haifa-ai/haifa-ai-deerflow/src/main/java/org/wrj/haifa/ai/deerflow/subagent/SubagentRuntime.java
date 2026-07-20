@@ -177,6 +177,21 @@ public class SubagentRuntime implements ApplicationContextAware {
                     toolOutputBudgetMiddleware,
                     properties
             );
+            try {
+                var batchExecutor = applicationContext.getBean(
+                        org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchExecutor.class);
+                var cancellationService = applicationContext.getBean(
+                        org.wrj.haifa.ai.deerflow.run.RunCancellationService.class);
+                var executorProperties = applicationContext.getBean(
+                        org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties.class);
+                if (batchExecutor != null && executorProperties != null) {
+                    subagentLoop.configureToolExecution(batchExecutor, cancellationService,
+                            executorProperties.getToolCorePoolSize());
+                }
+            }
+            catch (org.springframework.beans.BeansException ignored) {
+                // Standalone tests retain the conservative serial fallback.
+            }
 
             AtomicInteger seq = new AtomicInteger();
             Flux<AgentEvent> eventFlux = subagentLoop.run(

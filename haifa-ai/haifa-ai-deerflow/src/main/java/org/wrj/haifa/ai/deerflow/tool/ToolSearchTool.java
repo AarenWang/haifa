@@ -7,7 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.wrj.haifa.ai.deerflow.mcp.McpToolSelectionStore;
 
 @Component
-public class ToolSearchTool implements AgentTool {
+public class ToolSearchTool implements ParallelSafeAgentTool {
 
     private final DeferredToolCatalog catalog;
     private final boolean enabled;

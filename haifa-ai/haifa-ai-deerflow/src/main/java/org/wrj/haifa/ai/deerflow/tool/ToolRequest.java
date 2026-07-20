@@ -4,9 +4,16 @@ import java.nio.file.Path;
 import java.util.List;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationToken;
 
 public record ToolRequest(String userMessage, Path workspaceRoot, List<String> uploadedFileIds, String threadId,
-        String runId, RunMode mode, List<Skill> activeSkills, String modelName) {
+        String runId, RunMode mode, List<Skill> activeSkills, String modelName,
+        RunCancellationToken cancellationToken) {
+
+    public ToolRequest(String userMessage, Path workspaceRoot, List<String> uploadedFileIds, String threadId,
+            String runId, RunMode mode, List<Skill> activeSkills, String modelName) {
+        this(userMessage, workspaceRoot, uploadedFileIds, threadId, runId, mode, activeSkills, modelName, null);
+    }
 
     public ToolRequest(String userMessage, Path workspaceRoot) {
         this(userMessage, workspaceRoot, List.of(), null, null);
@@ -27,7 +34,7 @@ public record ToolRequest(String userMessage, Path workspaceRoot, List<String> u
 
     public ToolRequest(String userMessage, Path workspaceRoot, List<String> uploadedFileIds, String threadId,
             String runId, RunMode mode, List<Skill> activeSkills) {
-        this(userMessage, workspaceRoot, uploadedFileIds, threadId, runId, mode, activeSkills, null);
+        this(userMessage, workspaceRoot, uploadedFileIds, threadId, runId, mode, activeSkills, null, null);
     }
 
     public ToolRequest {
@@ -35,5 +42,6 @@ public record ToolRequest(String userMessage, Path workspaceRoot, List<String> u
         mode = mode == null ? RunMode.RESEARCH : mode;
         activeSkills = activeSkills == null ? List.of() : List.copyOf(activeSkills);
         modelName = modelName == null ? "" : modelName;
+        cancellationToken = cancellationToken == null ? new RunCancellationToken(runId) : cancellationToken;
     }
 }

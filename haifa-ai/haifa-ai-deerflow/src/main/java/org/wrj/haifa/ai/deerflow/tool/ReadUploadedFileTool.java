@@ -10,7 +10,7 @@ import org.wrj.haifa.ai.deerflow.upload.UploadRecord;
 import org.wrj.haifa.ai.deerflow.upload.UploadStorageService;
 
 @Component
-public class ReadUploadedFileTool implements AgentTool {
+public class ReadUploadedFileTool implements ParallelSafeAgentTool {
 
     private static final int MAX_CHARS = 12_000;
     private static final Pattern FILE_ID_PATTERN = Pattern.compile("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}");

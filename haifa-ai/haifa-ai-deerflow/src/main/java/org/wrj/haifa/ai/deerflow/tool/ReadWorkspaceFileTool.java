@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
 @Component
-public class ReadWorkspaceFileTool implements AgentTool {
+public class ReadWorkspaceFileTool implements ParallelSafeAgentTool {
 
     private static final int MAX_CHARS = 12_000;
     private static final Pattern QUOTED_PATH = Pattern.compile("[\"'`]([^\"'`]+)[\"'`]");

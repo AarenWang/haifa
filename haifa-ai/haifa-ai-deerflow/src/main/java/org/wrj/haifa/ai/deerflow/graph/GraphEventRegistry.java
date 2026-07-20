@@ -3,8 +3,6 @@ package org.wrj.haifa.ai.deerflow.graph;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import reactor.core.publisher.Sinks;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -13,40 +11,42 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class GraphEventRegistry {
 
-    private static final Map<String, Sinks.Many<AgentEvent>> sinks = new ConcurrentHashMap<>();
-    private static final Map<String, AtomicInteger> sequences = new ConcurrentHashMap<>();
+    private static volatile RunEventPublisher publisher = new RunEventPublisher(false);
 
     private GraphEventRegistry() {
     }
 
     public static void register(String runId, Sinks.Many<AgentEvent> sink, AtomicInteger seq) {
-        if (runId != null && sink != null && seq != null) {
-            sinks.put(runId, sink);
-            sequences.put(runId, seq);
-        }
+        publisher.register(runId, sink, seq);
     }
 
     public static void deregister(String runId) {
-        if (runId != null) {
-            sinks.remove(runId);
-            sequences.remove(runId);
-        }
+        publisher.deregister(runId);
     }
 
-    public static void publish(String runId, AgentEvent event) {
-        if (runId != null && event != null) {
-            Sinks.Many<AgentEvent> sink = sinks.get(runId);
-            if (sink != null) {
-                sink.tryEmitNext(event);
-            }
-        }
+    public static RunEventPublisher.PublishOutcome publish(String runId, AgentEvent event) {
+        return publisher.publish(runId, event);
     }
 
     public static int nextSeq(String runId) {
-        if (runId == null) {
-            return 0;
+        return publisher.nextSequence(runId);
+    }
+
+    public static Sinks.EmitResult complete(String runId) {
+        return publisher.complete(runId);
+    }
+
+    public static Sinks.EmitResult error(String runId, Throwable error) {
+        return publisher.error(runId, error);
+    }
+
+    public static int activeRunCount() {
+        return publisher.activeRunCount();
+    }
+
+    static void install(RunEventPublisher replacement) {
+        if (replacement != null) {
+            publisher = replacement;
         }
-        AtomicInteger seq = sequences.get(runId);
-        return seq != null ? seq.incrementAndGet() : 0;
     }
 }
