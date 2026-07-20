@@ -19,18 +19,11 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
-import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver;
-import org.wrj.haifa.ai.deerflow.agent.loop.DefaultAgentLoopObserver;
 import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
-import org.wrj.haifa.ai.deerflow.agent.loop.NoopAgentLoopObserver;
-import org.wrj.haifa.ai.deerflow.agent.loop.ToolCall;
-import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallResult;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.middleware.ToolOutputBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
-import org.wrj.haifa.ai.deerflow.research.EvidenceItem;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
-import org.wrj.haifa.ai.deerflow.research.ResearchSource;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
@@ -557,94 +550,4 @@ public class SubagentRuntime implements ApplicationContextAware {
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // SubagentLoopObserver - captures sources/evidence for parent thread
-    // ---------------------------------------------------------------------------
-
-    static class SubagentLoopObserver extends DefaultAgentLoopObserver {
-
-        private final ResearchRuntimeSupport researchRuntimeSupport;
-        private final String parentThreadId;
-        private final String parentRunId;
-        private final String subagentRunId;
-        private final List<String> evidenceIds = new ArrayList<>();
-        private final List<String> sourceIds = new ArrayList<>();
-
-        SubagentLoopObserver(ResearchRuntimeSupport researchRuntimeSupport,
-                             String parentThreadId, String parentRunId, String subagentRunId) {
-            super(null);
-            this.researchRuntimeSupport = researchRuntimeSupport;
-            this.parentThreadId = parentThreadId;
-            this.parentRunId = parentRunId;
-            this.subagentRunId = subagentRunId;
-        }
-
-        @Override
-        public String onToolCompleted(AgentRunConfig runConfig, ToolCall toolCall, ToolCallResult toolResult,
-                                      List<AgentEvent> events, AtomicInteger seq, List<String> history) {
-            if (researchRuntimeSupport == null || toolResult.status() != ToolCallResult.Status.SUCCESS) {
-                return super.onToolCompleted(runConfig, toolCall, toolResult, events, seq, history);
-            }
-
-            // Register search results under parent run so quality gate/report delivery can read them.
-            if ("web_search".equals(toolCall.toolName())) {
-                var ingestion = researchRuntimeSupport.ingestSearchResults(parentThreadId, parentRunId, toolResult.result());
-                for (var reg : ingestion.registrations()) {
-                    if (!reg.deduplicated()) {
-                        sourceIds.add(reg.source().sourceId());
-                    }
-                }
-                return ingestion.observation();
-            }
-
-            // Register fetched content under parent run so quality gate/report delivery can read it.
-            if ("web_fetch".equals(toolCall.toolName())) {
-                String url = extractUrl(toolCall.arguments());
-                if (!url.isBlank()) {
-                    var fetchResult = researchRuntimeSupport.ingestFetchedContent(parentThreadId, parentRunId, url, toolResult.result());
-                    if (!fetchResult.registration().deduplicatedByUrl() && !fetchResult.registration().deduplicatedByContentHash()) {
-                        sourceIds.add(fetchResult.registration().stored().source().sourceId());
-                    }
-                    for (EvidenceItem ev : fetchResult.evidenceItems()) {
-                        evidenceIds.add(ev.evidenceId());
-                    }
-                    return fetchResult.observation();
-                }
-            }
-
-            return super.onToolCompleted(runConfig, toolCall, toolResult, events, seq, history);
-        }
-
-        List<String> getEvidenceIds() {
-            return List.copyOf(evidenceIds);
-        }
-
-        List<String> getSourceIds() {
-            return List.copyOf(sourceIds);
-        }
-
-        private String extractUrl(String json) {
-            if (json == null || json.isBlank()) {
-                return "";
-            }
-            String key = "\"url\"";
-            int keyIdx = json.indexOf(key);
-            if (keyIdx < 0) {
-                return "";
-            }
-            int colon = json.indexOf(':', keyIdx);
-            if (colon < 0) {
-                return "";
-            }
-            int firstQuote = json.indexOf('"', colon + 1);
-            if (firstQuote < 0) {
-                return "";
-            }
-            int secondQuote = json.indexOf('"', firstQuote + 1);
-            if (secondQuote < 0) {
-                return "";
-            }
-            return json.substring(firstQuote + 1, secondQuote).trim();
-        }
-    }
 }

@@ -47,6 +47,13 @@ class SubagentRuntimeTest {
 
     private SubagentRuntime subagentRuntime;
 
+    @Test
+    void observerIsAStandaloneTopLevelClass() {
+        assertThat(SubagentLoopObserver.class.getEnclosingClass()).isNull();
+        assertThat(SubagentLoopObserver.class.getName())
+                .isEqualTo("org.wrj.haifa.ai.deerflow.subagent.SubagentLoopObserver");
+    }
+
     @BeforeEach
     void setUp() {
         modelClient = mock(AgentModelClient.class);
