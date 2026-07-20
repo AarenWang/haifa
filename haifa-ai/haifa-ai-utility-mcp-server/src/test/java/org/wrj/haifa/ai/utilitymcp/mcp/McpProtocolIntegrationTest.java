@@ -35,8 +35,10 @@ class McpProtocolIntegrationTest {
             assertThat(initialized.capabilities().prompts()).isNull();
 
             McpSchema.ListToolsResult listed = client.listTools();
-            assertThat(listed.tools()).hasSize(16);
-            assertThat(listed.tools()).extracting(McpSchema.Tool::name).contains("time_now", "calculate");
+            assertThat(listed.tools()).hasSize(19);
+            assertThat(listed.tools()).extracting(McpSchema.Tool::name).contains(
+                    "time_now", "calculate", "microsoft_docs_search",
+                    "microsoft_docs_fetch", "microsoft_code_sample_search");
 
             McpSchema.CallToolResult result = client.callTool(new McpSchema.CallToolRequest(
                     "time_now", Map.of("timezone", "Asia/Shanghai")));

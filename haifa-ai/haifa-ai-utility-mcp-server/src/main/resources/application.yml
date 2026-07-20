@@ -42,6 +42,12 @@ haifa:
         username: ${UTILITY_MCP_PROXY_USERNAME:${LLM_NETWORK_PROXY_USERNAME:}}
         password: ${UTILITY_MCP_PROXY_PASSWORD:${LLM_NETWORK_PROXY_PASSWORD:}}
         providers: ${UTILITY_MCP_PROXY_PROVIDERS:}
+      microsoft-learn:
+        enabled: ${UTILITY_MCP_MICROSOFT_LEARN_ENABLED:true}
+        endpoint: ${UTILITY_MCP_MICROSOFT_LEARN_ENDPOINT:https://learn.microsoft.com/api/mcp}
+        request-timeout: 15s
+        max-content-chars: 60000
+        allow-http-for-tests: false
       security:
         allow-missing-origin: true
         allowed-origins: []

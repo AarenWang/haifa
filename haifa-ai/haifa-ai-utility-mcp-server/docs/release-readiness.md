@@ -2,13 +2,13 @@
 
 Decision: **READY_WITH_LIMITATIONS**
 
-The utility service and DeerFlow connection have automated offline protocol/contract coverage. The public contract contains exactly 16 tools; production has fail-fast issuer/audience/Origin requirements and rate limiting. Provider base URLs are trusted configuration, HTTPS-only in production, with redirects disabled and bounded response handling.
+The utility service and DeerFlow connection have automated offline protocol/contract coverage. The public contract contains exactly 19 tools; production has fail-fast issuer/audience/Origin requirements and rate limiting. Provider base URLs are trusted configuration, HTTPS-only in production, with redirects disabled and bounded response handling.
 
 ## Verified release evidence
 
-- `mvn -pl haifa-ai/haifa-ai-utility-mcp-server -am verify`: PASS (35 tests, 0 failures/errors/skips).
+- Current change: `mvn -pl haifa-ai/haifa-ai-utility-mcp-server test`: PASS (39 tests, 0 failures/errors/skips).
 - `mvn -pl haifa-ai/haifa-ai-deerflow -am verify`: PASS; the reactor also verifies utility, and DeerFlow ran 478 tests with 0 failures, 0 errors and 4 pre-existing skips.
-- The versioned contract snapshot contains exactly 16 tools and is checked without automatic snapshot rewriting.
+- The versioned contract snapshot contains exactly 19 tools and is checked without automatic snapshot rewriting.
 - DeerFlow starts a real local utility Streamable HTTP server in its integration test and performs initialize, list and call through the production client path.
 - `git diff --check`: PASS. Research documents 44 and 45 are unchanged; Fetch remains disabled in the production topology.
 

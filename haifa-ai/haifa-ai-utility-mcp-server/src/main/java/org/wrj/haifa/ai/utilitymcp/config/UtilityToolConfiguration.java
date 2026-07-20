@@ -21,6 +21,8 @@ import org.wrj.haifa.ai.utilitymcp.mcp.UtilityToolException;
 import org.wrj.haifa.ai.utilitymcp.tool.CalculatorService;
 import org.wrj.haifa.ai.utilitymcp.tool.CurrencyService;
 import org.wrj.haifa.ai.utilitymcp.tool.HolidayService;
+import org.wrj.haifa.ai.utilitymcp.tool.MicrosoftLearnMcpClient;
+import org.wrj.haifa.ai.utilitymcp.tool.MicrosoftLearnService;
 import org.wrj.haifa.ai.utilitymcp.tool.TimeService;
 import org.wrj.haifa.ai.utilitymcp.tool.UnitConversionService;
 import org.wrj.haifa.ai.utilitymcp.tool.WeatherService;
@@ -73,6 +75,16 @@ public class UtilityToolConfiguration {
         return new WikipediaService(provider);
     }
 
+    @Bean(destroyMethod = "close")
+    MicrosoftLearnMcpClient microsoftLearnMcpClient(UtilityMcpProperties properties) {
+        return new MicrosoftLearnMcpClient(properties.getMicrosoftLearn());
+    }
+
+    @Bean
+    MicrosoftLearnService microsoftLearnService(MicrosoftLearnMcpClient client) {
+        return new MicrosoftLearnService(client);
+    }
+
     @Bean
     UtilityToolCatalog utilityToolCatalog(
             TimeService timeService,
@@ -81,7 +93,8 @@ public class UtilityToolConfiguration {
             WeatherService weatherService,
             CurrencyService currencyService,
             HolidayService holidayService,
-            WikipediaService wikipediaService) {
+            WikipediaService wikipediaService,
+            MicrosoftLearnService microsoftLearnService) {
         List<UtilityTool> tools = new ArrayList<>();
         tools.add(new SimpleUtilityTool(
                 ToolSchemas.tool("time_now", "Current time",
@@ -119,6 +132,7 @@ public class UtilityToolConfiguration {
         addCurrencyTools(tools, currencyService);
         addHolidayTools(tools, holidayService);
         addWikipediaTools(tools, wikipediaService);
+        addMicrosoftLearnTools(tools, microsoftLearnService);
         return new UtilityToolCatalog(tools);
     }
 
@@ -230,6 +244,28 @@ public class UtilityToolConfiguration {
                 ToolSchemas.tool("wikipedia_summary", "Read Wikipedia summary",
                         "Read bounded plain text for a Wikimedia page identity and return a canonical citation URL.",
                         ToolSchemas.object(summary, "title"), true), service::summary));
+    }
+
+    private static void addMicrosoftLearnTools(List<UtilityTool> tools, MicrosoftLearnService service) {
+        Map<String, Object> search = Map.of("query", ToolSchemas.string("Microsoft documentation search query", 1_000));
+        tools.add(new SimpleUtilityTool(
+                ToolSchemas.tool("microsoft_docs_search", "Search Microsoft Learn",
+                        "Search official Microsoft technical documentation through the Microsoft Learn MCP service.",
+                        ToolSchemas.object(search, "query"), true), service::searchDocs));
+
+        Map<String, Object> fetch = Map.of("url", ToolSchemas.string("HTTPS Microsoft Learn documentation URL", 2_048));
+        tools.add(new SimpleUtilityTool(
+                ToolSchemas.tool("microsoft_docs_fetch", "Read Microsoft Learn documentation",
+                        "Fetch a Microsoft Learn documentation page as bounded Markdown content.",
+                        ToolSchemas.object(fetch, "url"), true), service::fetchDocs));
+
+        Map<String, Object> code = new LinkedHashMap<>();
+        code.put("query", ToolSchemas.string("Microsoft or Azure code sample search query", 1_000));
+        code.put("language", ToolSchemas.string("Optional programming language filter", 64));
+        tools.add(new SimpleUtilityTool(
+                ToolSchemas.tool("microsoft_code_sample_search", "Search Microsoft code samples",
+                        "Search official Microsoft and Azure code samples through the Microsoft Learn MCP service.",
+                        ToolSchemas.object(code, "query"), true), service::searchCodeSamples));
     }
 
     private static Map<String, Object> coordinates() {

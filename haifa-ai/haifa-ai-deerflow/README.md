@@ -263,13 +263,7 @@ set `UTILITY_MCP_ORIGIN` to an allowlisted Origin, put the bearer token in a sec
 
 Third-party compatibility connections are disabled by default. Each requires a static URL/command, explicit tool allowlist, local risk, semantic mappings and capability ownership. Unknown tools are not exposed. Required connection failure prevents startup; optional failure is degraded. Refresh failure preserves last-known-good definitions as `STALE` and denies new calls by default.
 
-Microsoft Learn is available as the optional `microsoft-learn` remote connection. It connects directly to the official Streamable HTTP endpoint rather than being proxied through the self-hosted `utility` server; this retains DeerFlow's local allowlist and risk controls for third-party tool metadata. No API key is required. Enable it with:
-
-```powershell
-$env:MICROSOFT_LEARN_MCP_ENABLED='true'
-```
-
-The default configuration exposes only `microsoft_docs_search`, `microsoft_docs_fetch`, and `microsoft_code_sample_search` as read-only knowledge tools. The base host and endpoint can be overridden with `MICROSOFT_LEARN_MCP_URL` and `MICROSOFT_LEARN_MCP_ENDPOINT`; do not replace the allowlist with an unrestricted catalog.
+Microsoft Learn is provided by the self-hosted `utility` connection as the read-only `mcp__utility__microsoft_docs_search`, `mcp__utility__microsoft_docs_fetch`, and `mcp__utility__microsoft_code_sample_search` tools. DeerFlow does not directly connect to the Microsoft endpoint. Configure or disable the integration on Utility MCP with `UTILITY_MCP_MICROSOFT_LEARN_ENABLED`; no API key is required.
 
 Fetch MCP is an experimental, high-risk connection and remains disabled until server-side egress controls are proven. See [Fetch security and parity](docs/fetch-mcp-security-and-parity.md).
 

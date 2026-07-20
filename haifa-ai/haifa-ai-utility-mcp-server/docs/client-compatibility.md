@@ -2,7 +2,7 @@
 
 Endpoint template: `${UTILITY_MCP_PUBLIC_URL}/mcp`. Authentication: OAuth bearer token injected by the client/secret store; never commit it.
 
-Minimum smoke: connect, list 16 tools, call `time_now`, call `weather_current` against a permitted environment, then call `time_now` with an invalid timezone and confirm a tool error is displayed.
+Minimum smoke: connect, list 19 tools, call `time_now`, call `weather_current` against a permitted environment, then call `time_now` with an invalid timezone and confirm a tool error is displayed.
 
 | Client | Status | Evidence / limitation |
 | --- | --- | --- |

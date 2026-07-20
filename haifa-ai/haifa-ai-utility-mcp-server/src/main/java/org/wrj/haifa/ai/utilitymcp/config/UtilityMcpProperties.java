@@ -12,12 +12,14 @@ public class UtilityMcpProperties {
     private final Security security = new Security();
     private final Proxy proxy = new Proxy();
     private final Providers providers = new Providers();
+    private final MicrosoftLearn microsoftLearn = new MicrosoftLearn();
     private int targetResultBytes = 65_536;
     private int maxResultBytes = 262_144;
 
     public Security getSecurity() { return security; }
     public Proxy getProxy() { return proxy; }
     public Providers getProviders() { return providers; }
+    public MicrosoftLearn getMicrosoftLearn() { return microsoftLearn; }
     public int getTargetResultBytes() { return targetResultBytes; }
     public void setTargetResultBytes(int targetResultBytes) { this.targetResultBytes = targetResultBytes; }
     public int getMaxResultBytes() { return maxResultBytes; }
@@ -55,6 +57,26 @@ public class UtilityMcpProperties {
         public Provider getFrankfurter() { return frankfurter; }
         public Provider getNagerDate() { return nagerDate; }
         public Provider getWikimedia() { return wikimedia; }
+    }
+
+    /** Configuration for the official Microsoft Learn Streamable HTTP MCP endpoint. */
+    public static class MicrosoftLearn {
+        private boolean enabled = true;
+        private URI endpoint = URI.create("https://learn.microsoft.com/api/mcp");
+        private Duration requestTimeout = Duration.ofSeconds(15);
+        private int maxContentChars = 60_000;
+        private boolean allowHttpForTests;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public URI getEndpoint() { return endpoint; }
+        public void setEndpoint(URI endpoint) { this.endpoint = endpoint; }
+        public Duration getRequestTimeout() { return requestTimeout; }
+        public void setRequestTimeout(Duration requestTimeout) { this.requestTimeout = requestTimeout; }
+        public int getMaxContentChars() { return maxContentChars; }
+        public void setMaxContentChars(int maxContentChars) { this.maxContentChars = maxContentChars; }
+        public boolean isAllowHttpForTests() { return allowHttpForTests; }
+        public void setAllowHttpForTests(boolean allowHttpForTests) { this.allowHttpForTests = allowHttpForTests; }
     }
 
     public static class Proxy {

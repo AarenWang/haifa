@@ -161,6 +161,9 @@ haifa:
               - unit_convert
               - wikipedia_search
               - wikipedia_summary
+              - microsoft_docs_search
+              - microsoft_docs_fetch
+              - microsoft_code_sample_search
             semantic-mappings:
               location_search: EXTERNAL_READ
               weather_current: EXTERNAL_READ
@@ -178,6 +181,9 @@ haifa:
               unit_convert: GENERIC
               wikipedia_search: KNOWLEDGE_SEARCH
               wikipedia_summary: KNOWLEDGE_FETCH
+              microsoft_docs_search: KNOWLEDGE_SEARCH
+              microsoft_docs_fetch: KNOWLEDGE_FETCH
+              microsoft_code_sample_search: KNOWLEDGE_SEARCH
             capability-mappings:
               location_search: WEATHER
               weather_current: WEATHER
@@ -227,25 +233,6 @@ haifa:
             args: [wikipedia-mcp]
             default-risk: READ_ONLY
             allowed-tools: []
-          # Official Microsoft Learn remote MCP. It is connected directly by
-          # DeerFlow so its dynamic third-party tool metadata remains subject
-          # to the local allowlist, risk and semantic policies below.
-          microsoft-learn:
-            enabled: ${MICROSOFT_LEARN_MCP_ENABLED:false}
-            required: false
-            transport: STREAMABLE_HTTP
-            url: ${MICROSOFT_LEARN_MCP_URL:https://learn.microsoft.com}
-            endpoint: ${MICROSOFT_LEARN_MCP_ENDPOINT:/api/mcp}
-            default-risk: READ_ONLY
-            stale-policy: DENY_NEW_CALLS
-            allowed-tools:
-              - microsoft_docs_search
-              - microsoft_docs_fetch
-              - microsoft_code_sample_search
-            semantic-mappings:
-              microsoft_docs_search: KNOWLEDGE_SEARCH
-              microsoft_docs_fetch: KNOWLEDGE_FETCH
-              microsoft_code_sample_search: KNOWLEDGE_SEARCH
           fetch:
             enabled: false
             required: false

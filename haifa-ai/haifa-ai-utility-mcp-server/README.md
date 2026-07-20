@@ -1,6 +1,6 @@
 # Haifa Utility MCP Server
 
-面向 DeerFlow、Codex、Claude Code、VS Code、Cursor 等标准 MCP Client 的无状态公共工具服务。服务固定暴露 `/mcp` Streamable HTTP endpoint，v1 只声明 tools capability，不代理第三方 MCP。
+面向 DeerFlow、Codex、Claude Code、VS Code、Cursor 等标准 MCP Client 的无状态公共工具服务。服务固定暴露 `/mcp` Streamable HTTP endpoint，v1 只声明 tools capability，不透明转发第三方 MCP；Microsoft Learn 通过本服务的三个受控稳定工具接入。
 
 ## v1 工具
 
@@ -10,6 +10,7 @@
 - Nager.Date：`holiday_list`、`holiday_next`、`workday_is_workday`、`workday_add`
 - 本地安全计算：`calculate`、`unit_convert`
 - Wikimedia：`wikipedia_search`、`wikipedia_summary`
+- Microsoft Learn：`microsoft_docs_search`、`microsoft_docs_fetch`、`microsoft_code_sample_search`
 
 所有工具返回等价的 JSON TextContent 与 `structuredContent`，业务错误使用 `isError=true`。公共名称和 Schema 是 v1 版本化合同，上游 DTO 变化不得直接改变合同。
 
@@ -50,6 +51,19 @@ mvn -pl haifa-ai/haifa-ai-utility-mcp-server -am spring-boot:run
 ```
 
 多个 Provider 使用逗号分隔，例如 `UTILITY_MCP_PROXY_PROVIDERS=wikimedia,open-meteo,frankfurter`。支持的名称为 `open-meteo`、`open-meteo-geocoding`、`open-meteo-air-quality`、`frankfurter`、`nager-date`、`wikimedia`；名称忽略首尾空格和大小写，未知名称会导致启动失败，避免因拼写错误而静默直连。
+
+## Microsoft Learn
+
+Utility MCP 默认发布三个 Microsoft Learn 工具：`microsoft_docs_search`、`microsoft_docs_fetch` 和 `microsoft_code_sample_search`。服务在首次调用时以 Streamable HTTP 连接官方端点、动态发现工具，并只调用这三个本地审核过的工具合同；远端不可用不会阻止 Utility MCP 启动。
+
+无需 API Key。默认端点为 `https://learn.microsoft.com/api/mcp`，可按需配置：
+
+```powershell
+$env:UTILITY_MCP_MICROSOFT_LEARN_ENABLED='true'
+$env:UTILITY_MCP_MICROSOFT_LEARN_ENDPOINT='https://learn.microsoft.com/api/mcp'
+```
+
+`microsoft_docs_fetch` 仅接受 `https://learn.microsoft.com/...` 域名下的文档 URL。结果统一封装为 Utility MCP 的 `data + meta` 合同，来源标记为 `microsoft-learn`。
 
 代理支持 `http://`、`https://` 和 `socks5://`，认证信息使用 `UTILITY_MCP_PROXY_USERNAME`、`UTILITY_MCP_PROXY_PASSWORD`；未设置 Utility 专属变量时回退到 `LLM_NETWORK_PROXY_URL`、`LLM_NETWORK_PROXY_USERNAME`、`LLM_NETWORK_PROXY_PASSWORD`。
 
