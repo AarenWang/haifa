@@ -177,6 +177,7 @@ public class TaskTool implements AgentTool {
         String normalized = error == null ? "" : error.toLowerCase(java.util.Locale.ROOT);
         if (normalized.contains("400") || normalized.contains("bad request")) return "PROVIDER_HTTP_400";
         if (normalized.contains("401") || normalized.contains("unauthorized")) return "PROVIDER_AUTH_FAILED";
+        if (normalized.contains("403") || normalized.contains("forbidden")) return "PROVIDER_HTTP_403";
         if (normalized.contains("404") || normalized.contains("not found")) return "PROVIDER_HTTP_404";
         if (normalized.contains("timeout") || normalized.contains("timed out")) return "PROVIDER_TIMEOUT";
         return "SUBAGENT_EXECUTION_FAILED";

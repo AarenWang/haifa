@@ -150,12 +150,13 @@ public class SpringAiAgentModelClient implements AgentModelClient {
                 })
                 .doOnError(ex -> {
                     long duration = System.currentTimeMillis() - startTime;
-                    log.error("Spring AI chat call failed. model={}, systemPromptChars={}, userPromptChars={}, messageCount={}, durationMs={}",
+                    log.error("Spring AI chat call failed. model={}, systemPromptChars={}, userPromptChars={}, messageCount={}, durationMs={}, providerDetail={}",
                             safe(effectivePrompt.modelName()),
                             length(effectivePrompt.systemPrompt()),
                             length(effectivePrompt.effectiveUserPrompt()),
                             effectivePrompt.messages().size(),
                             duration,
+                            providerFailureDetail(ex),
                             ex);
                 })
                 .onErrorMap(TimeoutException.class, ex ->
@@ -251,16 +252,17 @@ public class SpringAiAgentModelClient implements AgentModelClient {
             log.info("Spring AI model streaming completed. model={}, durationMs={}",
                     safe(effectivePrompt.modelName()), duration);
         })
-        .doOnError(ex -> {
-            long duration = System.currentTimeMillis() - startTime;
-            log.error("Spring AI chat streaming failed. model={}, systemPromptChars={}, userPromptChars={}, messageCount={}, durationMs={}",
-                    safe(effectivePrompt.modelName()),
-                    length(effectivePrompt.systemPrompt()),
-                    length(effectivePrompt.effectiveUserPrompt()),
-                    effectivePrompt.messages().size(),
-                    duration,
-                    ex);
-        })
+                .doOnError(ex -> {
+                    long duration = System.currentTimeMillis() - startTime;
+                    log.error("Spring AI chat streaming failed. model={}, systemPromptChars={}, userPromptChars={}, messageCount={}, durationMs={}, providerDetail={}",
+                            safe(effectivePrompt.modelName()),
+                            length(effectivePrompt.systemPrompt()),
+                            length(effectivePrompt.effectiveUserPrompt()),
+                            effectivePrompt.messages().size(),
+                            duration,
+                            providerFailureDetail(ex),
+                            ex);
+                })
         .onErrorMap(TimeoutException.class, ex ->
                 new IllegalStateException("Model API streaming call timed out after " + timeoutMs + "ms", ex));
     }
@@ -446,6 +448,28 @@ public class SpringAiAgentModelClient implements AgentModelClient {
             current = current.getCause();
         }
         return true;
+    }
+
+    private static String providerFailureDetail(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof WebClientResponseException responseException) {
+                String responseBody = responseException.getResponseBodyAsString();
+                return "httpStatus=" + responseException.getStatusCode().value()
+                        + ", responseBody=" + safeProviderText(responseBody);
+            }
+            current = current.getCause();
+        }
+        return "exception=" + safeProviderText(failure == null ? "" : failure.getMessage());
+    }
+
+    private static String safeProviderText(String value) {
+        if (value == null || value.isBlank()) {
+            return "<empty>";
+        }
+        String sanitized = value.replaceAll("(?i)(authorization|api[-_ ]?key)\\s*[:=]\\s*[^,\\s]+", "$1=[REDACTED]")
+                .replaceAll("\\s+", " ").trim();
+        return sanitized.length() <= 500 ? sanitized : sanitized.substring(0, 500) + "...";
     }
 
     static ChatOptions chatOptionsFor(ModelPrompt prompt) {

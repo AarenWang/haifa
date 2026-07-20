@@ -674,6 +674,58 @@ class AgentLoopTest {
     }
 
     @Test
+    void stopsParentRunImmediatelyAfterSubagentProviderFailure() {
+        AtomicInteger modelCalls = new AtomicInteger();
+        AgentModelClient model = prompt -> {
+            if (modelCalls.getAndIncrement() == 0) {
+                return Mono.just(new ModelResponse("", List.of(
+                        new ModelToolCall("call-task", "task", "{\"prompt\":\"run subtask\"}"))));
+            }
+            return Mono.just(new ModelResponse("The parent retried after a provider failure."));
+        };
+        AgentTool taskTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "task";
+            }
+
+            @Override
+            public String description() {
+                return "Delegates work";
+            }
+
+            @Override
+            public boolean supports(String userMessage) {
+                return true;
+            }
+
+            @Override
+            public ToolResult execute(ToolRequest request) {
+                return ToolResult.failed("task", "Subagent result [FAILED]\\nError: Model call failed: 400 Bad Request",
+                        Map.of("subagent", true, "subagentStatus", "FAILED",
+                                "errorCode", "PROVIDER_HTTP_400"));
+            }
+        };
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(taskTool)));
+        AgentRunConfig config = new AgentRunConfig(
+                "thread-provider-failure", "run-provider-failure", "test-model", false, false,
+                5, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT, null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                LoopConfig.fromDefaults(), config, "You are an assistant.", "Delegate this task.",
+                new AtomicInteger(), null, List.of(), List.of()).collectList().block();
+
+        assertThat(modelCalls).hasValue(1);
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.SUBAGENT_FAILED, AgentEventType.TOOL_FAILED, AgentEventType.RUN_FAILED)
+                .doesNotContain(AgentEventType.RUN_COMPLETED);
+        assertThat(events).filteredOn(event -> event.type() == AgentEventType.RUN_FAILED)
+                .singleElement()
+                .satisfies(event -> assertThat(event.metadata())
+                        .containsEntry("errorCode", "SUBAGENT_PROVIDER_REQUEST_FAILED"));
+    }
+
+    @Test
     void clarificationToolSuspendsRunWithoutEmittingToolCompletion() {
         AgentModelClient model = prompt -> Mono.just(new ModelResponse("", List.of(
                 new ModelToolCall("call-clarify", "ask_clarification", "{}"))));
@@ -788,5 +840,4 @@ class AgentLoopTest {
                 .doesNotContain("protocolState", "thoughtSignatures", "c2ln");
     }
 }
-
 

@@ -43,6 +43,8 @@ spring:
             include-thoughts: true
 
 logging:
+  file:
+    path: ${HAIFA_DEERFLOW_LOG_PATH:${user.dir}/logs}
   level:
     org.wrj.haifa.ai.deerflow: DEBUG
     org.springframework.ai: DEBUG

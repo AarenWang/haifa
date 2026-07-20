@@ -357,6 +357,23 @@ public class AgentLoop {
                                 "REJECTED", Map.of("denied", true)));
                     }
                 }
+                String circuitFailureReason = filteredToolCalls.stream()
+                        .filter(ftc -> !ftc.allowed() && "task".equals(ftc.toolCall().toolName()))
+                        .map(AgentLoopObserver.FilteredToolCall::reason)
+                        .filter(this::isSubagentProviderCircuitOpen)
+                        .findFirst()
+                        .orElse(null);
+                if (circuitFailureReason != null) {
+                    stopReason = "SUBAGENT_PROVIDER_FAILURE";
+                    emitter.emit(event(seq, runConfig, AgentEventType.RUN_FAILED, circuitFailureReason,
+                            Map.of("stopReason", stopReason, "step", step + 1,
+                                    "errorCode", "SUBAGENT_PROVIDER_CIRCUIT_OPEN")));
+                    if (agentLoopRunStore != null) {
+                        agentLoopRunStore.markFailed(runConfig.runId(), stopReason);
+                    }
+                    stopped = true;
+                    break;
+                }
                 // Keep only allowed calls for execution
                 loopToolCalls = filteredToolCalls.stream()
                         .filter(AgentLoopObserver.FilteredToolCall::allowed)
@@ -1313,10 +1330,38 @@ public class AgentLoop {
                     completionMetadata));
             typedHistory.add(toolMessage(toolCall.id(), pending.targetToolName(), eventContent,
                     rawToolResult.status().name(), completionMetadata));
+
+            if (isSubagentProviderFailure(pending.targetToolName(), completionMetadata)) {
+                String failureReason = eventContent;
+                emitter.emit(event(seq, runConfig, AgentEventType.RUN_FAILED, failureReason,
+                        Map.of("stopReason", "SUBAGENT_PROVIDER_FAILURE",
+                                "errorCode", "SUBAGENT_PROVIDER_REQUEST_FAILED",
+                                "toolCallId", toolCall.id())));
+                if (agentLoopRunStore != null) {
+                    agentLoopRunStore.markFailed(runConfig.runId(), "SUBAGENT_PROVIDER_FAILURE");
+                }
+                stopped = true;
+                break;
+            }
         }
 
 
         return new ToolBatchOutcome(totalToolCalls, stopped);
+    }
+
+    private boolean isSubagentProviderCircuitOpen(String reason) {
+        return reason != null && reason.startsWith("Subagent dispatch circuit is open");
+    }
+
+    private boolean isSubagentProviderFailure(String toolName, Map<String, Object> metadata) {
+        if (!"task".equals(toolName) || metadata == null) {
+            return false;
+        }
+        Object errorCode = metadata.get("errorCode");
+        return "PROVIDER_HTTP_400".equals(errorCode)
+                || "PROVIDER_AUTH_FAILED".equals(errorCode)
+                || "PROVIDER_HTTP_404".equals(errorCode)
+                || "PROVIDER_HTTP_403".equals(errorCode);
     }
 
 }

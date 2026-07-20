@@ -44,6 +44,7 @@ local.properties
 
 # Log Files
 *.log
+haifa-ai/haifa-ai-deerflow/logs/
 
 # Runtime upload data
 haifa-ai/haifa-ai-deerflow/uploads/
