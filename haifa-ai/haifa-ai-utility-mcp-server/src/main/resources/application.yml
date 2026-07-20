@@ -37,6 +37,23 @@ haifa:
     utility-mcp:
       target-result-bytes: 65536
       max-result-bytes: 262144
+      proxy:
+        url: ${UTILITY_MCP_PROXY_URL:${LLM_NETWORK_PROXY_URL:}}
+        username: ${UTILITY_MCP_PROXY_USERNAME:${LLM_NETWORK_PROXY_USERNAME:}}
+        password: ${UTILITY_MCP_PROXY_PASSWORD:${LLM_NETWORK_PROXY_PASSWORD:}}
+      providers:
+        open-meteo:
+          proxy-enabled: ${UTILITY_MCP_OPEN_METEO_PROXY_ENABLED:false}
+        open-meteo-geocoding:
+          proxy-enabled: ${UTILITY_MCP_OPEN_METEO_GEOCODING_PROXY_ENABLED:false}
+        open-meteo-air-quality:
+          proxy-enabled: ${UTILITY_MCP_OPEN_METEO_AIR_QUALITY_PROXY_ENABLED:false}
+        frankfurter:
+          proxy-enabled: ${UTILITY_MCP_FRANKFURTER_PROXY_ENABLED:false}
+        nager-date:
+          proxy-enabled: ${UTILITY_MCP_NAGER_DATE_PROXY_ENABLED:false}
+        wikimedia:
+          proxy-enabled: ${UTILITY_MCP_WIKIMEDIA_PROXY_ENABLED:false}
       security:
         allow-missing-origin: true
         allowed-origins: []

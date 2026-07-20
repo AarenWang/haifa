@@ -37,6 +37,29 @@ mvn -pl haifa-ai/haifa-ai-utility-mcp-server -am spring-boot:run
 
 Provider base URL 只能来自服务端配置，生产仅允许 HTTPS；重定向关闭，单次响应、并发、缓存、超时、一次幂等重试和 circuit breaker 均有边界。Nager.Date 不能可靠表达中国调休时，工作日工具会明确返回不支持，而不是猜测。
 
+## 外部 Provider 代理
+
+代理连接参数兼容 DeerFlow 的 `LLM_NETWORK_PROXY_*` 环境变量，也可以使用 Utility MCP 专属变量覆盖。每个 Provider 默认直连，只有对应的 `*_PROXY_ENABLED=true` 才会经过代理。
+
+例如仅让 Wikimedia 经过本地 HTTP 代理：
+
+```powershell
+$env:UTILITY_MCP_PROXY_URL='http://127.0.0.1:7890'
+$env:UTILITY_MCP_WIKIMEDIA_PROXY_ENABLED='true'
+mvn -pl haifa-ai/haifa-ai-utility-mcp-server -am spring-boot:run
+```
+
+代理支持 `http://`、`https://` 和 `socks5://`，认证信息使用 `UTILITY_MCP_PROXY_USERNAME`、`UTILITY_MCP_PROXY_PASSWORD`；未设置 Utility 专属变量时回退到 `LLM_NETWORK_PROXY_URL`、`LLM_NETWORK_PROXY_USERNAME`、`LLM_NETWORK_PROXY_PASSWORD`。可独立启用：
+
+- `UTILITY_MCP_OPEN_METEO_PROXY_ENABLED`
+- `UTILITY_MCP_OPEN_METEO_GEOCODING_PROXY_ENABLED`
+- `UTILITY_MCP_OPEN_METEO_AIR_QUALITY_PROXY_ENABLED`
+- `UTILITY_MCP_FRANKFURTER_PROXY_ENABLED`
+- `UTILITY_MCP_NAGER_DATE_PROXY_ENABLED`
+- `UTILITY_MCP_WIKIMEDIA_PROXY_ENABLED`
+
+启用代理的 Provider 会记录 `mcp_provider_proxy_configured`，只包含 Provider、代理协议、主机和端口，不记录代理用户名或密码。若 Provider 已开启代理但代理地址为空，服务会在启动时直接失败，避免静默回退到直连。
+
 ## MCP 请求日志
 
 `/mcp` 默认以 INFO 级别记录三类结构化日志：

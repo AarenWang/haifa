@@ -10,11 +10,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class UtilityMcpProperties {
 
     private final Security security = new Security();
+    private final Proxy proxy = new Proxy();
     private final Providers providers = new Providers();
     private int targetResultBytes = 65_536;
     private int maxResultBytes = 262_144;
 
     public Security getSecurity() { return security; }
+    public Proxy getProxy() { return proxy; }
     public Providers getProviders() { return providers; }
     public int getTargetResultBytes() { return targetResultBytes; }
     public void setTargetResultBytes(int targetResultBytes) { this.targetResultBytes = targetResultBytes; }
@@ -55,6 +57,19 @@ public class UtilityMcpProperties {
         public Provider getWikimedia() { return wikimedia; }
     }
 
+    public static class Proxy {
+        private String url = "";
+        private String username = "";
+        private String password = "";
+
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
+        public String getUsername() { return username; }
+        public void setUsername(String username) { this.username = username; }
+        public String getPassword() { return password; }
+        public void setPassword(String password) { this.password = password; }
+    }
+
     public static class Provider {
         private URI baseUrl;
         private Duration connectTimeout = Duration.ofSeconds(2);
@@ -63,6 +78,7 @@ public class UtilityMcpProperties {
         private int maxConcurrent = 16;
         private Duration cacheTtl = Duration.ofMinutes(10);
         private boolean allowHttpForTests;
+        private boolean proxyEnabled;
 
         public Provider(String baseUrl) { this.baseUrl = URI.create(baseUrl); }
         public URI getBaseUrl() { return baseUrl; }
@@ -79,5 +95,7 @@ public class UtilityMcpProperties {
         public void setCacheTtl(Duration cacheTtl) { this.cacheTtl = cacheTtl; }
         public boolean isAllowHttpForTests() { return allowHttpForTests; }
         public void setAllowHttpForTests(boolean allowHttpForTests) { this.allowHttpForTests = allowHttpForTests; }
+        public boolean isProxyEnabled() { return proxyEnabled; }
+        public void setProxyEnabled(boolean proxyEnabled) { this.proxyEnabled = proxyEnabled; }
     }
 }

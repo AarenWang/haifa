@@ -8,12 +8,18 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -24,10 +30,15 @@ import org.wrj.haifa.ai.utilitymcp.mcp.UtilityToolException;
 class ResilientJsonProviderTest {
 
     private HttpServer server;
+    private ServerSocket proxyServer;
 
     @AfterEach
     void stopServer() {
         if (server != null) server.stop(0);
+        if (proxyServer != null) {
+            try { proxyServer.close(); }
+            catch (java.io.IOException ignored) { }
+        }
     }
 
     @Test
@@ -114,6 +125,66 @@ class ResilientJsonProviderTest {
             logger.detachAppender(appender);
             appender.stop();
         }
+    }
+
+    @Test
+    void routesOnlyProxyEnabledProviderThroughConfiguredProxy() throws Exception {
+        AtomicReference<String> requestedUri = new AtomicReference<>();
+        proxyServer = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+        Thread proxyThread = Thread.ofPlatform().start(() -> {
+            try (Socket socket = proxyServer.accept()) {
+                String connectRequest = readHeaders(socket.getInputStream());
+                assertThat(connectRequest).startsWith("CONNECT 127.0.0.1:1 HTTP/1.1");
+                socket.getOutputStream().write(
+                        "HTTP/1.1 200 Connection Established\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+                socket.getOutputStream().flush();
+
+                requestedUri.set(readHeaders(socket.getInputStream()));
+                byte[] body = "{\"proxied\":true}".getBytes(StandardCharsets.UTF_8);
+                String headers = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                        + body.length + "\r\nConnection: close\r\n\r\n";
+                socket.getOutputStream().write(headers.getBytes(StandardCharsets.US_ASCII));
+                socket.getOutputStream().write(body);
+                socket.getOutputStream().flush();
+            }
+            catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        });
+
+        UtilityMcpProperties.Provider properties = new UtilityMcpProperties.Provider("http://127.0.0.1:1");
+        properties.setAllowHttpForTests(true);
+        properties.setProxyEnabled(true);
+        properties.setConnectTimeout(Duration.ofSeconds(1));
+        properties.setResponseTimeout(Duration.ofSeconds(1));
+        UtilityMcpProperties.Proxy proxy = new UtilityMcpProperties.Proxy();
+        proxy.setUrl("http://127.0.0.1:" + proxyServer.getLocalPort());
+        ResilientJsonProvider provider = new ResilientJsonProvider(
+                "proxied-fixture", properties, new ObjectMapper(), null, proxy);
+
+        ProviderPayload result = provider.get("/proxied", Map.of("q", "value"));
+        proxyThread.join(Duration.ofSeconds(2));
+
+        assertThat(result.body().get("proxied").asBoolean()).isTrue();
+        assertThat(requestedUri.get()).contains("GET /proxied?q=value HTTP/1.1");
+    }
+
+    private static String readHeaders(InputStream input) throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        int matched = 0;
+        while (matched < 4) {
+            int value = input.read();
+            if (value < 0) throw new java.io.IOException("Unexpected end of proxy request");
+            bytes.write(value);
+            matched = switch (matched) {
+                case 0 -> value == '\r' ? 1 : 0;
+                case 1 -> value == '\n' ? 2 : 0;
+                case 2 -> value == '\r' ? 3 : 0;
+                case 3 -> value == '\n' ? 4 : 0;
+                default -> 0;
+            };
+        }
+        return bytes.toString(StandardCharsets.US_ASCII);
     }
 
     private ResilientJsonProvider provider(int maxBytes) {
