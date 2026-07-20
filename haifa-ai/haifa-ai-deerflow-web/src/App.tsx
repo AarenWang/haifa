@@ -849,6 +849,9 @@ function App() {
                 if (threadId) void refreshMessages(threadId);
                 if (runId) void refreshObservabilityData(runId);
               }}
+              onFillInput={(text) => setExternalMessage(text)}
+              onSendTranscript={(text) => handleRun({ message: text })}
+              onClose={() => setIsVoiceOpen(false)}
             />
           )}
           <TaskComposer

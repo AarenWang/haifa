@@ -13,6 +13,13 @@ export type VoiceState =
   | 'SPEAKING'
   | 'ERROR';
 
+export interface VoiceTurnRecord {
+  turnId: string;
+  userText: string;
+  agentText: string;
+  timestamp: number;
+}
+
 export interface UseVoiceConversationOptions {
   threadId?: string;
   onThreadReady?: (threadId: string) => void;
@@ -20,6 +27,7 @@ export interface UseVoiceConversationOptions {
   onAgentDelta?: (delta: string) => void;
   onAgentComplete?: (text: string, threadId?: string, runId?: string) => void;
   autoConnect?: boolean;
+  autoContinuous?: boolean;
 }
 
 export function useVoiceConversation(options: UseVoiceConversationOptions = {}) {
@@ -27,6 +35,7 @@ export function useVoiceConversation(options: UseVoiceConversationOptions = {}) 
   const [transcript, setTranscript] = useState('');
   const [agentText, setAgentText] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [turnsHistory, setTurnsHistory] = useState<VoiceTurnRecord[]>([]);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -36,6 +45,7 @@ export function useVoiceConversation(options: UseVoiceConversationOptions = {}) 
   const currentTurnIdRef = useRef<string | null>(null);
   const currentThreadIdRef = useRef<string | undefined>(options.threadId);
   const currentRunIdRef = useRef<string | undefined>(undefined);
+  const transcriptRef = useRef('');
   const agentTextRef = useRef('');
   const asrReadyRef = useRef(false);
   const pendingFramesRef = useRef<Array<{ bytes: Uint8Array; sequence: number }>>([]);
@@ -67,15 +77,21 @@ export function useVoiceConversation(options: UseVoiceConversationOptions = {}) 
         flushPendingFrames();
         setState('LISTENING');
         break;
-      case 'asr.partial':
+      case 'asr.partial': {
+        const text = message.text || '';
+        transcriptRef.current = text;
+        setTranscript(text);
         setState('TRANSCRIBING');
-        setTranscript(message.text || '');
         break;
-      case 'asr.final':
+      }
+      case 'asr.final': {
+        const text = message.text || '';
+        transcriptRef.current = text;
+        setTranscript(text);
         setState('WAITING_AGENT');
-        setTranscript(message.text || '');
-        if (message.text) optionsRef.current.onUserTranscript?.(message.text);
+        if (text) optionsRef.current.onUserTranscript?.(text);
         break;
+      }
       case 'agent.started':
         currentRunIdRef.current = message.runId;
         agentTextRef.current = '';
@@ -99,16 +115,37 @@ export function useVoiceConversation(options: UseVoiceConversationOptions = {}) 
       case 'tts.error':
         setErrorMsg(message.message || '语音朗读失败，文本回答仍然可用。');
         break;
-      case 'turn.completed':
+      case 'turn.completed': {
         captureRef.current?.stop();
+        const userT = transcriptRef.current;
+        const agentT = agentTextRef.current;
+        if (userT || agentT) {
+          setTurnsHistory((prev) => [
+            ...prev,
+            {
+              turnId: currentTurnIdRef.current || `turn_${Date.now()}`,
+              userText: userT,
+              agentText: agentT,
+              timestamp: Date.now(),
+            },
+          ]);
+        }
         setState('READY');
         optionsRef.current.onAgentComplete?.(
-          agentTextRef.current,
+          agentT,
           message.threadId || currentThreadIdRef.current,
           message.runId || currentRunIdRef.current,
         );
         currentTurnIdRef.current = null;
+        if (optionsRef.current.autoContinuous && !disposedRef.current) {
+          setTimeout(() => {
+            if (!disposedRef.current) {
+              void startListening();
+            }
+          }, 1200);
+        }
         break;
+      }
       case 'turn.cancelled':
         captureRef.current?.stop();
         playerRef.current?.stop();
@@ -231,8 +268,27 @@ export function useVoiceConversation(options: UseVoiceConversationOptions = {}) 
     };
   }, [connect, getAudioHardware, options.autoConnect, options.threadId]);
 
+  const cancelTurn = useCallback(() => {
+    captureRef.current?.stop();
+    playerRef.current?.stop();
+    pendingFramesRef.current = [];
+    const turnId = currentTurnIdRef.current;
+    if (turnId) clientRef.current?.sendControl({ type: 'turn.cancel', turnId, reason: 'USER_CANCELLED' });
+    currentTurnIdRef.current = null;
+    setState('READY');
+  }, []);
+
   const startListening = useCallback(async () => {
-    if (state !== 'READY') return;
+    // If speaking, transcribing, or waiting agent, interrupt/cancel current turn first
+    if (state === 'SPEAKING' || state === 'WAITING_AGENT' || state === 'TRANSCRIBING' || state === 'LISTENING') {
+      cancelTurn();
+    }
+
+    // Ensure connection
+    if (!clientRef.current || clientRef.current.isClosed() || state === 'IDLE' || state === 'ERROR') {
+      await connect();
+    }
+
     const { capture, player } = getAudioHardware();
     const client = getOrCreateClient();
 
@@ -241,6 +297,7 @@ export function useVoiceConversation(options: UseVoiceConversationOptions = {}) 
     currentRunIdRef.current = undefined;
     asrReadyRef.current = false;
     pendingFramesRef.current = [];
+    transcriptRef.current = '';
     agentTextRef.current = '';
     player.stop();
     setTranscript('');
@@ -277,7 +334,7 @@ export function useVoiceConversation(options: UseVoiceConversationOptions = {}) 
       setState('ERROR');
       setErrorMsg(`无法使用麦克风：${error instanceof Error ? error.message : '请检查麦克风权限'}`);
     }
-  }, [getAudioHardware, getOrCreateClient, state]);
+  }, [cancelTurn, connect, getAudioHardware, getOrCreateClient, state]);
 
   const commitTurn = useCallback(() => {
     const turnId = currentTurnIdRef.current;
@@ -288,15 +345,23 @@ export function useVoiceConversation(options: UseVoiceConversationOptions = {}) 
     clientRef.current?.sendControl({ type: 'turn.commit', turnId });
   }, [state]);
 
-  const cancelTurn = useCallback(() => {
-    captureRef.current?.stop();
-    playerRef.current?.stop();
-    pendingFramesRef.current = [];
-    const turnId = currentTurnIdRef.current;
-    if (turnId) clientRef.current?.sendControl({ type: 'turn.cancel', turnId, reason: 'USER_CANCELLED' });
-    currentTurnIdRef.current = null;
-    setState('READY');
+  const clearHistory = useCallback(() => {
+    setTurnsHistory([]);
+    setTranscript('');
+    setAgentText('');
   }, []);
 
-  return { state, transcript, agentText, errorMsg, connect, startListening, commitTurn, cancelTurn };
+  return {
+    state,
+    transcript,
+    agentText,
+    turnsHistory,
+    errorMsg,
+    connect,
+    startListening,
+    commitTurn,
+    cancelTurn,
+    clearHistory,
+  };
 }
+

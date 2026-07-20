@@ -2034,6 +2034,11 @@ body {
   color: var(--text-secondary);
   border-color: var(--border);
 }
+.message-action-btn.speaking {
+  color: var(--blue);
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.08);
+}
 
 /* ActivityTrace */
 .trace-panel {

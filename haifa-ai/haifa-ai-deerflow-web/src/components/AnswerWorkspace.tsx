@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw, RefreshCw, Brain, BookOpen, Search, Globe, Terminal, Tag, Sparkles, ChevronDown, ChevronUp, FolderOpen, FileCode, Image, Clock, Users } from 'lucide-react';
+import { Inbox, Loader2, Copy, Check, AlertTriangle, RotateCcw, RefreshCw, Volume2, VolumeX, Brain, BookOpen, Search, Globe, Terminal, Tag, Sparkles, ChevronDown, ChevronUp, FolderOpen, FileCode, Image, Clock, Users } from 'lucide-react';
 import type { AppPhase, AppStatus, ClarificationAnswer, MessageRecord, DeerFlowEvent, ArtifactRecord, RunObservability } from '../types';
 import { renderMarkdown } from '../utils/markdownRenderer';
 import ApprovalCard from './ApprovalCard';
@@ -345,7 +345,58 @@ export default function AnswerWorkspace({
   const panelRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [stepsExpanded, setStepsExpanded] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  const handleToggleSpeech = (messageId: string, content: string) => {
+    if (!('speechSynthesis' in window)) {
+      alert('您的浏览器不支持语音朗读');
+      return;
+    }
+
+    if (speakingMsgId === messageId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    // Clean markdown formatting tags for smooth Chinese TTS speech
+    const plainText = content
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/!\[.*?\]\(.*?\)/g, '')
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+      .replace(/[#*~_>]/g, '')
+      .replace(/\n+/g, ' ')
+      .trim();
+
+    if (!plainText) return;
+
+    const utterance = new SpeechSynthesisUtterance(plainText);
+    utterance.lang = 'zh-CN';
+    utterance.rate = 1.0;
+
+    utterance.onend = () => {
+      setSpeakingMsgId((current) => (current === messageId ? null : current));
+    };
+
+    utterance.onerror = () => {
+      setSpeakingMsgId((current) => (current === messageId ? null : current));
+    };
+
+    setSpeakingMsgId(messageId);
+    window.speechSynthesis.speak(utterance);
+  };
 
   // Thinking timer logic
   const [thinkingSeconds, setThinkingSeconds] = useState(0);
@@ -638,6 +689,19 @@ export default function AnswerWorkspace({
                             刷新
                           </button>
                         )}
+                        <button
+                          type="button"
+                          className={`message-action-btn ${speakingMsgId === message.messageId ? 'speaking' : ''}`}
+                          onClick={() => handleToggleSpeech(message.messageId, message.content)}
+                          title={speakingMsgId === message.messageId ? '停止朗读' : '朗读回答'}
+                        >
+                          {speakingMsgId === message.messageId ? (
+                            <VolumeX size={14} style={{ color: 'var(--blue)' }} />
+                          ) : (
+                            <Volume2 size={14} />
+                          )}
+                          {speakingMsgId === message.messageId ? '停止朗读' : '朗读'}
+                        </button>
                         {status !== 'running'
                           && tokenMetrics.available
                           && message.runId === observability?.runId && (
