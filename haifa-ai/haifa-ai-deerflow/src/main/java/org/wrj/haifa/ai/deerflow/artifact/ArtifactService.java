@@ -69,6 +69,40 @@ public class ArtifactService {
         }
     }
 
+    public ArtifactRecord storeMcpContent(String threadId, String runId, byte[] content, String mimeType) {
+        if (content == null || content.length == 0 || content.length > 10 * 1024 * 1024) {
+            throw new IllegalArgumentException("MCP artifact content must be between 1 byte and 10 MiB");
+        }
+        String extension = switch (normalizeMime(mimeType)) {
+            case "image/png" -> "png";
+            case "image/jpeg" -> "jpg";
+            case "image/gif" -> "gif";
+            case "image/webp" -> "webp";
+            case "audio/mpeg" -> "mp3";
+            case "audio/wav", "audio/x-wav" -> "wav";
+            case "audio/ogg" -> "ogg";
+            default -> "bin";
+        };
+        Path directory = outputsRoot().resolve("mcp").resolve(safeSegment(runId));
+        Path file = directory.resolve(UUID.randomUUID() + "." + extension).normalize();
+        if (!file.startsWith(outputsRoot())) throw new IllegalArgumentException("MCP artifact path escapes outputsRoot");
+        try {
+            Files.createDirectories(directory);
+            Files.write(file, content, java.nio.file.StandardOpenOption.CREATE_NEW);
+            return register(threadId, runId, file, mimeType);
+        }
+        catch (IOException ex) {
+            throw new IllegalArgumentException("Unable to store MCP artifact", ex);
+        }
+    }
+
+    private static String safeSegment(String value) {
+        if (!StringUtils.hasText(value)) throw new IllegalArgumentException("runId is required");
+        String safe = value.replaceAll("[^A-Za-z0-9._-]", "_");
+        if (safe.isBlank() || ".".equals(safe) || "..".equals(safe)) throw new IllegalArgumentException("runId is invalid");
+        return safe;
+    }
+
     public List<ArtifactRecord> list(String threadId, String runId) {
         return artifactsById.values().stream()
                 .filter(record -> !StringUtils.hasText(threadId) || threadId.equals(record.threadId()))

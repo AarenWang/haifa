@@ -16,6 +16,11 @@ import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.sandbox.CommandPolicy;
 import org.wrj.haifa.ai.deerflow.sandbox.SandboxBackend;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.mcp.McpAgentTool;
+import org.wrj.haifa.ai.deerflow.mcp.McpConnectionManager;
+import org.wrj.haifa.ai.deerflow.mcp.McpRiskClassification;
+import org.wrj.haifa.ai.deerflow.mcp.McpSemanticType;
+import org.wrj.haifa.ai.deerflow.mcp.McpToolIdentity;
 
 @Component
 public class ApprovalPolicyService {
@@ -23,17 +28,30 @@ public class ApprovalPolicyService {
     private final DeerFlowProperties properties;
     private final ApprovalStore approvalStore;
     private final CommandPolicy commandPolicy;
+    private final McpConnectionManager mcpConnectionManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Autowired
     public ApprovalPolicyService(DeerFlowProperties properties, ApprovalStore approvalStore, CommandPolicy commandPolicy) {
+        this(properties, approvalStore, commandPolicy, null);
+    }
+
+    @Autowired
+    public ApprovalPolicyService(DeerFlowProperties properties, ApprovalStore approvalStore, CommandPolicy commandPolicy,
+            McpConnectionManager mcpConnectionManager) {
         this.properties = properties;
         this.approvalStore = approvalStore;
         this.commandPolicy = commandPolicy;
+        this.mcpConnectionManager = mcpConnectionManager;
     }
 
     public ApprovalPolicyDecision evaluate(ModelToolCall toolCall, AgentTool tool, AgentRunConfig runConfig) {
+        McpToolIdentity mcpIdentity = tool instanceof McpAgentTool mcpTool ? mcpTool.identity() : null;
         if (properties.getApproval() == null || !properties.getApproval().isEnabled()) {
+            if (mcpIdentity != null && requiresMcpApproval(mcpIdentity)) {
+                return new ApprovalPolicyDecision(ApprovalPolicyDecisionType.DENY, RiskLevel.BLOCKED,
+                        "MCP tool requires approval but approval is disabled", null, null,
+                        Map.of("connectionName", mcpIdentity.connectionName(), "originalToolName", mcpIdentity.originalToolName()));
+            }
             return new ApprovalPolicyDecision(ApprovalPolicyDecisionType.ALLOW, RiskLevel.LOW, "Approval globally disabled", null, null, Map.of());
         }
 
@@ -86,8 +104,10 @@ public class ApprovalPolicyService {
         }
 
         // 2. Risk Key and Hash calculation
-        String riskKey = generateRiskKey(toolName, arguments);
-        String argsHash = hashArgs(toolName, arguments);
+        String riskKey = mcpIdentity == null ? generateRiskKey(toolName, arguments)
+                : mcpRiskKey(mcpIdentity, arguments);
+        String argsHash = mcpIdentity == null ? hashArgs(toolName, arguments)
+                : hashMcpArgs(mcpIdentity, arguments);
 
         // 3. Session approvals lookup
         if (properties.getApproval().isAllowSessionApproval()) {
@@ -124,6 +144,28 @@ public class ApprovalPolicyService {
         boolean isLocal = properties.getSandbox() != null
                 && SandboxBackend.from(properties.getSandbox().getBackend()) != SandboxBackend.DOCKER;
         boolean isNetwork = properties.getSandbox() != null && properties.getSandbox().isNetworkEnabled();
+
+        if (mcpIdentity != null && requiresMcpApproval(mcpIdentity)) {
+            Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+            metadata.put("connectionName", mcpIdentity.connectionName());
+            metadata.put("originalToolName", mcpIdentity.originalToolName());
+            metadata.put("exposedName", mcpIdentity.exposedName());
+            metadata.put("snapshotVersion", mcpIdentity.discoverySnapshotVersion());
+            metadata.put("localRisk", mcpIdentity.localRiskClassification().name());
+            metadata.put("semanticType", mcpIdentity.semanticType().name());
+            metadata.put("capabilityOwner", mcpIdentity.capabilityOwner() == null ? "" : mcpIdentity.capabilityOwner().name());
+            String destination = destinationHost(arguments);
+            if (!destination.isBlank()) metadata.put("destinationHost", destination);
+            return new ApprovalPolicyDecision(
+                    ApprovalPolicyDecisionType.REQUIRE_APPROVAL,
+                    mcpIdentity.localRiskClassification() == McpRiskClassification.DESTRUCTIVE ? RiskLevel.HIGH : RiskLevel.MEDIUM,
+                    mcpIdentity.semanticType() == McpSemanticType.WEB_FETCH
+                            ? "External fetch requires human approval"
+                            : "MCP tool risk classification requires human approval",
+                    riskKey,
+                    redactPreview(arguments),
+                    Map.copyOf(metadata));
+        }
 
         if ("run_script".equals(toolName)) {
             if (isNetwork && properties.getApproval().isRequireForNetwork()) {
@@ -215,8 +257,70 @@ public class ApprovalPolicyService {
         if (approval == null || toolCall == null) {
             return false;
         }
-        String currentHash = hashArgs(toolCall.name(), toolCall.arguments());
+        String currentHash = mcpConnectionManager == null ? hashArgs(toolCall.name(), toolCall.arguments())
+                : mcpConnectionManager.findIdentity(toolCall.name())
+                        .map(identity -> hashMcpArgs(identity, toolCall.arguments()))
+                        .orElseGet(() -> hashArgs(toolCall.name(), toolCall.arguments()));
         return approval.argsHash().equals(currentHash);
+    }
+
+    private static boolean requiresMcpApproval(McpToolIdentity identity) {
+        return identity.semanticType() == McpSemanticType.WEB_FETCH
+                || identity.localRiskClassification() == McpRiskClassification.UNKNOWN
+                || identity.localRiskClassification() == McpRiskClassification.WRITE
+                || identity.localRiskClassification() == McpRiskClassification.DESTRUCTIVE;
+    }
+
+    private String mcpRiskKey(McpToolIdentity identity, String arguments) {
+        String owner = identity.capabilityOwner() == null ? "NONE" : identity.capabilityOwner().name();
+        String destination = destinationHost(arguments);
+        return "connection=" + identity.connectionName() + ";tool=" + identity.originalToolName()
+                + ";owner=" + owner + ";snapshot=" + identity.discoverySnapshotVersion()
+                + (destination.isBlank() ? "" : ";host=" + destination);
+    }
+
+    private String hashMcpArgs(McpToolIdentity identity, String arguments) {
+        return hashArgs(mcpRiskKey(identity, arguments), arguments);
+    }
+
+    private String destinationHost(String arguments) {
+        try {
+            JsonNode node = objectMapper.readTree(arguments);
+            JsonNode value = node.has("url") ? node.get("url") : node.get("uri");
+            if (value == null || !value.isTextual()) return "";
+            java.net.URI uri = java.net.URI.create(value.asText());
+            return uri.getHost() == null ? "" : uri.getHost().toLowerCase(java.util.Locale.ROOT);
+        }
+        catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private String redactPreview(String arguments) {
+        try {
+            JsonNode root = objectMapper.readTree(arguments);
+            redactNode(root);
+            String value = objectMapper.writeValueAsString(root);
+            return value.length() <= 1000 ? value : value.substring(0, 1000) + "... (truncated)";
+        }
+        catch (Exception ex) {
+            return "[unparseable arguments omitted]";
+        }
+    }
+
+    private static void redactNode(JsonNode node) {
+        if (node == null) return;
+        if (node.isObject()) {
+            java.util.List<String> names = new java.util.ArrayList<>();
+            node.fieldNames().forEachRemaining(names::add);
+            for (String name : names) {
+                if (name.toLowerCase(java.util.Locale.ROOT).matches(".*(token|secret|password|cookie|authorization|api.?key).*$")) {
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) node).put(name, "[REDACTED]");
+                }
+                else redactNode(node.get(name));
+            }
+        }
+        else if (node.isArray()) node.forEach(ApprovalPolicyService::redactNode);
     }
 
     private String generatePreview(String toolName, String arguments) {

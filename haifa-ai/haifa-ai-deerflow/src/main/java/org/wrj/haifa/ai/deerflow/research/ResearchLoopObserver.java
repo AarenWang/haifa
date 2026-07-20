@@ -38,6 +38,7 @@ import org.wrj.haifa.ai.deerflow.claim.CitationStore;
 import org.wrj.haifa.ai.deerflow.budget.BudgetLedgerStore;
 import org.wrj.haifa.ai.deerflow.quality.QualityAssessmentStore;
 import org.wrj.haifa.ai.deerflow.threadfile.ThreadFileStore;
+import org.wrj.haifa.ai.deerflow.mcp.McpSemanticType;
 
 /**
  * AgentLoopObserver implementation for research-specific logic.
@@ -198,7 +199,8 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
             return null;
         }
 
-        if ("web_search".equals(toolCall.toolName())) {
+        McpSemanticType semanticType = semanticType(toolCall.toolName(), toolResult.metadata());
+        if (semanticType == McpSemanticType.WEB_SEARCH || semanticType == McpSemanticType.KNOWLEDGE_SEARCH) {
             if (this.sourceStore != null) {
                 try {
                     JsonNode root = MAPPER.readTree(toolResult.result());
@@ -245,7 +247,7 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
             return null;
         }
 
-        if ("web_fetch".equals(toolCall.toolName())) {
+        if (semanticType == McpSemanticType.WEB_FETCH || semanticType == McpSemanticType.KNOWLEDGE_FETCH) {
             String url = stringValue(toolResult.metadata().get("url"));
             if (url.isBlank()) {
                 url = extractJsonValue(toolCall.arguments(), "url");
@@ -327,6 +329,18 @@ public class ResearchLoopObserver extends DefaultAgentLoopObserver {
         }
 
         return null;
+    }
+
+    private static McpSemanticType semanticType(String toolName, Map<String, Object> metadata) {
+        if (metadata != null && metadata.get("semanticType") != null) {
+            try {
+                return McpSemanticType.valueOf(String.valueOf(metadata.get("semanticType")));
+            }
+            catch (IllegalArgumentException ignored) { }
+        }
+        if ("web_search".equals(toolName)) return McpSemanticType.WEB_SEARCH;
+        if ("web_fetch".equals(toolName)) return McpSemanticType.WEB_FETCH;
+        return McpSemanticType.GENERIC;
     }
 
     @Override

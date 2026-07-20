@@ -14,6 +14,7 @@ import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.thread.ThreadManager;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.upload.UploadStorageService;
+import org.wrj.haifa.ai.deerflow.mcp.McpConnectionManager;
 
 import reactor.core.publisher.Mono;
 
@@ -28,11 +29,13 @@ public class HealthController {
     private final MessageStore messageStore;
     private final UploadStorageService uploadStorageService;
     private final SandboxCapabilityService sandboxCapabilityService;
+    private final McpConnectionManager mcpConnectionManager;
 
     public HealthController(DeerFlowProperties properties, ToolRegistry toolRegistry,
                             RunManager runManager, ThreadManager threadManager, MessageStore messageStore,
                             UploadStorageService uploadStorageService,
-                            SandboxCapabilityService sandboxCapabilityService) {
+                            SandboxCapabilityService sandboxCapabilityService,
+                            McpConnectionManager mcpConnectionManager) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.runManager = runManager;
@@ -40,6 +43,7 @@ public class HealthController {
         this.messageStore = messageStore;
         this.uploadStorageService = uploadStorageService;
         this.sandboxCapabilityService = sandboxCapabilityService;
+        this.mcpConnectionManager = mcpConnectionManager;
     }
 
     @GetMapping("/health")
@@ -56,6 +60,13 @@ public class HealthController {
         body.put("messageCount", messageStore.count());
         body.put("uploadCount", uploadStorageService.count());
         body.put("sandbox", sandboxCapabilityService.health());
+        var mcpSnapshot = mcpConnectionManager.snapshot();
+        body.put("mcp", Map.of(
+                "enabled", mcpConnectionManager.isEnabled(),
+                "running", mcpConnectionManager.isRunning(),
+                "snapshotVersion", mcpSnapshot.version(),
+                "snapshotAgeSeconds", Math.max(0, java.time.Duration.between(mcpSnapshot.generatedAt(), Instant.now()).toSeconds()),
+                "connections", mcpSnapshot.connectionStates()));
         return Mono.just(body);
     }
 }

@@ -8,16 +8,21 @@ import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.sandbox.SandboxBackend;
 import org.wrj.haifa.ai.deerflow.sandbox.SandboxExecutionPolicy;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
+import org.wrj.haifa.ai.deerflow.mcp.McpConnectionManager;
+import org.wrj.haifa.ai.deerflow.mcp.McpRiskClassification;
 
 @Component
 public class ToolPolicyService {
 
     private final Set<String> builtinToolNames;
     private final DeerFlowProperties properties;
+    private final McpConnectionManager mcpConnectionManager;
 
     @Autowired
-    public ToolPolicyService(List<AgentTool> builtinTools, DeerFlowProperties properties) {
+    public ToolPolicyService(List<AgentTool> builtinTools, DeerFlowProperties properties,
+            McpConnectionManager mcpConnectionManager) {
         this.properties = properties == null ? new DeerFlowProperties() : properties;
+        this.mcpConnectionManager = mcpConnectionManager;
         this.builtinToolNames = new java.util.HashSet<>();
         for (AgentTool tool : builtinTools) {
             String name = tool.name();
@@ -29,7 +34,11 @@ public class ToolPolicyService {
     }
 
     public ToolPolicyService(List<AgentTool> builtinTools) {
-        this(builtinTools, new DeerFlowProperties());
+        this(builtinTools, new DeerFlowProperties(), null);
+    }
+
+    public ToolPolicyService(List<AgentTool> builtinTools, DeerFlowProperties properties) {
+        this(builtinTools, properties, null);
     }
 
     private static boolean isStandardToolName(String name) {
@@ -65,6 +74,17 @@ public class ToolPolicyService {
         ToolPolicyDecision configuredDecision = configuredToolDecision(toolName);
         if (configuredDecision != null) {
             return configuredDecision;
+        }
+
+        if (toolName.startsWith("mcp__")) {
+            if (mcpConnectionManager == null) {
+                return ToolPolicyDecision.deny("MCP connection manager is unavailable");
+            }
+            return mcpConnectionManager.findIdentity(toolName)
+                    .map(identity -> identity.localRiskClassification() == McpRiskClassification.UNKNOWN
+                            ? ToolPolicyDecision.deny("MCP tool has no trusted local risk classification")
+                            : ToolPolicyDecision.allow())
+                    .orElseGet(() -> ToolPolicyDecision.deny("MCP tool is not present in the active catalog snapshot"));
         }
 
         if (activeSkills != null) {
@@ -141,4 +161,5 @@ public class ToolPolicyService {
                 "list_uploaded_files", "read_uploaded_file", "task", "run_script"
         );
     }
+
 }

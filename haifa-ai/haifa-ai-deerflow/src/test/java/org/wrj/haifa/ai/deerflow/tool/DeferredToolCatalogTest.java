@@ -44,13 +44,13 @@ class DeferredToolCatalogTest {
     @Test
     void emptyKeywordListsAll() {
         List<ToolDescriptor> results = catalog.search("");
-        assertThat(results).hasSize(22);
+        assertThat(results).hasSize(21);
     }
 
     @Test
     void listAllReturnsEverything() {
         List<ToolDescriptor> results = catalog.listAll();
-        assertThat(results).hasSize(22);
+        assertThat(results).hasSize(21);
         assertThat(results).extracting(ToolDescriptor::name).doesNotContain("summarize");
     }
 

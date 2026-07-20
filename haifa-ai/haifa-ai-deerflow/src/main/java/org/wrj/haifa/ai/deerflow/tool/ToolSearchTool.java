@@ -3,16 +3,26 @@ package org.wrj.haifa.ai.deerflow.tool;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.wrj.haifa.ai.deerflow.mcp.McpToolSelectionStore;
 
 @Component
 public class ToolSearchTool implements AgentTool {
 
     private final DeferredToolCatalog catalog;
     private final boolean enabled;
+    private final McpToolSelectionStore selectionStore;
 
     public ToolSearchTool(DeferredToolCatalog catalog, org.wrj.haifa.ai.deerflow.config.DeerFlowProperties properties) {
+        this(catalog, properties, null);
+    }
+
+    @Autowired
+    public ToolSearchTool(DeferredToolCatalog catalog, org.wrj.haifa.ai.deerflow.config.DeerFlowProperties properties,
+            McpToolSelectionStore selectionStore) {
         this.catalog = catalog;
         this.enabled = properties.isToolSearchEnabled();
+        this.selectionStore = selectionStore;
     }
 
     @Override
@@ -44,6 +54,9 @@ public class ToolSearchTool implements AgentTool {
     public ToolResult execute(ToolRequest request) {
         String keyword = extractKeyword(request.userMessage());
         List<ToolDescriptor> results = keyword.isBlank() ? catalog.listAll() : catalog.search(keyword);
+        if (selectionStore != null) {
+            selectionStore.select(request.runId(), results.stream().map(ToolDescriptor::name).toList());
+        }
         if (results.isEmpty()) {
             return ToolResult.of(name(), "No tools found matching '" + keyword + "'.");
         }

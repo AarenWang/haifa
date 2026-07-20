@@ -24,6 +24,7 @@ public class DeerFlowProperties {
     private String skillsContainerPath = "/mnt/skills";
     private boolean skillsEnabled = true;
     private boolean mcpEnabled = false;
+    private Mcp mcp = new Mcp();
     private boolean toolSearchEnabled = true;
 
     @Min(1_000)
@@ -123,6 +124,91 @@ public class DeerFlowProperties {
         public void setWebFetch(WebFetchToolConfig webFetch) {
             this.webFetch = webFetch;
         }
+    }
+
+    public static class Mcp {
+        private boolean enabled = false;
+        private int directExposureThreshold = 20;
+        private Map<String, String> capabilityOwners = new LinkedHashMap<>();
+        private Map<String, McpServer> servers = new LinkedHashMap<>();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getDirectExposureThreshold() { return directExposureThreshold; }
+        public void setDirectExposureThreshold(int directExposureThreshold) {
+            this.directExposureThreshold = Math.max(1, directExposureThreshold);
+        }
+        public Map<String, String> getCapabilityOwners() { return capabilityOwners; }
+        public void setCapabilityOwners(Map<String, String> capabilityOwners) {
+            this.capabilityOwners = capabilityOwners == null ? new LinkedHashMap<>() : new LinkedHashMap<>(capabilityOwners);
+        }
+        public Map<String, McpServer> getServers() { return servers; }
+        public void setServers(Map<String, McpServer> servers) {
+            this.servers = servers == null ? new LinkedHashMap<>() : new LinkedHashMap<>(servers);
+        }
+    }
+
+    public static class McpServer {
+        private boolean enabled;
+        private boolean required;
+        private String transport = "STREAMABLE_HTTP";
+        private String url = "";
+        private String endpoint = "/mcp";
+        private String command = "";
+        private java.util.List<String> args = new java.util.ArrayList<>();
+        private String cwd = "";
+        private java.util.List<String> environmentNames = new java.util.ArrayList<>();
+        private String bearerTokenEnvironment = "";
+        private String origin = "";
+        private java.util.List<String> allowedTools = new java.util.ArrayList<>();
+        private java.util.List<String> deniedTools = new java.util.ArrayList<>();
+        private String defaultRisk = "UNKNOWN";
+        private String stalePolicy = "DENY_NEW_CALLS";
+        private long requestTimeoutMs = 15_000;
+        private Map<String, String> semanticMappings = new LinkedHashMap<>();
+        private Map<String, String> capabilityMappings = new LinkedHashMap<>();
+        private Map<String, String> riskMappings = new LinkedHashMap<>();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public boolean isRequired() { return required; }
+        public void setRequired(boolean required) { this.required = required; }
+        public String getTransport() { return transport; }
+        public void setTransport(String transport) { this.transport = transport; }
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
+        public String getEndpoint() { return endpoint; }
+        public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
+        public String getCommand() { return command; }
+        public void setCommand(String command) { this.command = command; }
+        public java.util.List<String> getArgs() { return args; }
+        public void setArgs(java.util.List<String> args) { this.args = args == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(args); }
+        public String getCwd() { return cwd; }
+        public void setCwd(String cwd) { this.cwd = cwd; }
+        public java.util.List<String> getEnvironmentNames() { return environmentNames; }
+        public void setEnvironmentNames(java.util.List<String> environmentNames) {
+            this.environmentNames = environmentNames == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(environmentNames);
+        }
+        public String getBearerTokenEnvironment() { return bearerTokenEnvironment; }
+        public void setBearerTokenEnvironment(String bearerTokenEnvironment) { this.bearerTokenEnvironment = bearerTokenEnvironment; }
+        public String getOrigin() { return origin; }
+        public void setOrigin(String origin) { this.origin = origin; }
+        public java.util.List<String> getAllowedTools() { return allowedTools; }
+        public void setAllowedTools(java.util.List<String> allowedTools) { this.allowedTools = allowedTools == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(allowedTools); }
+        public java.util.List<String> getDeniedTools() { return deniedTools; }
+        public void setDeniedTools(java.util.List<String> deniedTools) { this.deniedTools = deniedTools == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(deniedTools); }
+        public String getDefaultRisk() { return defaultRisk; }
+        public void setDefaultRisk(String defaultRisk) { this.defaultRisk = defaultRisk; }
+        public String getStalePolicy() { return stalePolicy; }
+        public void setStalePolicy(String stalePolicy) { this.stalePolicy = stalePolicy; }
+        public long getRequestTimeoutMs() { return requestTimeoutMs; }
+        public void setRequestTimeoutMs(long requestTimeoutMs) { this.requestTimeoutMs = Math.max(1_000, requestTimeoutMs); }
+        public Map<String, String> getSemanticMappings() { return semanticMappings; }
+        public void setSemanticMappings(Map<String, String> semanticMappings) { this.semanticMappings = semanticMappings == null ? new LinkedHashMap<>() : new LinkedHashMap<>(semanticMappings); }
+        public Map<String, String> getCapabilityMappings() { return capabilityMappings; }
+        public void setCapabilityMappings(Map<String, String> capabilityMappings) { this.capabilityMappings = capabilityMappings == null ? new LinkedHashMap<>() : new LinkedHashMap<>(capabilityMappings); }
+        public Map<String, String> getRiskMappings() { return riskMappings; }
+        public void setRiskMappings(Map<String, String> riskMappings) { this.riskMappings = riskMappings == null ? new LinkedHashMap<>() : new LinkedHashMap<>(riskMappings); }
     }
 
     public static class Sandbox {
@@ -562,11 +648,19 @@ public class DeerFlowProperties {
     }
 
     public boolean isMcpEnabled() {
-        return mcpEnabled;
+        return mcpEnabled || (mcp != null && mcp.isEnabled());
     }
 
     public void setMcpEnabled(boolean mcpEnabled) {
         this.mcpEnabled = mcpEnabled;
+    }
+
+    public Mcp getMcp() {
+        return mcp;
+    }
+
+    public void setMcp(Mcp mcp) {
+        this.mcp = mcp == null ? new Mcp() : mcp;
     }
 
     public boolean isToolSearchEnabled() {

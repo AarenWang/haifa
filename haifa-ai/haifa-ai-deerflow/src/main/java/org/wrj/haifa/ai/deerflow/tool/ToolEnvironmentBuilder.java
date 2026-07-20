@@ -20,9 +20,14 @@ public class ToolEnvironmentBuilder {
     public record ToolEnvironment(String systemInstruction, List<ModelToolDefinition> toolDefinitions) {}
 
     public static ToolEnvironment build(ToolRegistry toolRegistry, ToolPolicyService toolPolicyService, List<Skill> activeSkills, RunMode mode) {
+        return build(toolRegistry, toolPolicyService, activeSkills, mode, null);
+    }
+
+    public static ToolEnvironment build(ToolRegistry toolRegistry, ToolPolicyService toolPolicyService,
+            List<Skill> activeSkills, RunMode mode, String runId) {
         List<ModelToolDefinition> toolDefinitions = new ArrayList<>();
-        if (toolRegistry != null && toolRegistry.tools() != null) {
-            for (AgentTool tool : toolRegistry.tools()) {
+        if (toolRegistry != null && toolRegistry.modelVisibleTools(runId) != null) {
+            for (AgentTool tool : toolRegistry.modelVisibleTools(runId)) {
                 if (tool == null || !StringUtils.hasText(tool.name())) {
                     continue;
                 }

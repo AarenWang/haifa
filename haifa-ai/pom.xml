@@ -21,6 +21,7 @@
        <module>haifa-ai-spring</module>
        <module>haifa-ai-alibaba</module>
        <module>haifa-ai-deerflow</module>
+       <module>haifa-ai-utility-mcp-server</module>
     </modules>
 
     <dependencies>

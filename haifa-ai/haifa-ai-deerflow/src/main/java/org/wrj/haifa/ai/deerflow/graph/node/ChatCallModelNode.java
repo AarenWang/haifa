@@ -97,7 +97,7 @@ public class ChatCallModelNode implements AsyncNodeAction {
             applyStateUserPrompt(typedHistory, stateUserPrompt);
 
             org.wrj.haifa.ai.deerflow.tool.ToolEnvironmentBuilder.ToolEnvironment toolEnv =
-                    org.wrj.haifa.ai.deerflow.tool.ToolEnvironmentBuilder.build(toolRegistry, toolPolicyService, activeSkills, view.mode());
+                    org.wrj.haifa.ai.deerflow.tool.ToolEnvironmentBuilder.build(toolRegistry, toolPolicyService, activeSkills, view.mode(), runId);
 
             String promptReinforcement = "\nIf a user asks for information that can be measured from the local runtime or workspace, and a sandbox execution tool is available, do not claim you lack access. Use the smallest appropriate script, inspect the tool result, then answer from observed output. If the tool is disabled or denied, explain the configuration limitation.";
             String fullSystemPrompt = systemPromptBase + "\n\n" + toolEnv.systemInstruction() + promptReinforcement;

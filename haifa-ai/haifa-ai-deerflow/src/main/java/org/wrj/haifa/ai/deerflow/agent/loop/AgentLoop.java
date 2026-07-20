@@ -182,7 +182,7 @@ public class AgentLoop {
                     runConfig, seq, activeSkills, uploadedFileIds, history, typedHistory, emitter);
 
             ToolEnvironment toolEnvironment = buildToolEnvironment(
-                    systemPrompt, toolPolicy, activeSkills, runConfig.mode());
+                    systemPrompt, toolPolicy, activeSkills, runConfig.mode(), runConfig.runId());
             String fullSystemPrompt = toolEnvironment.systemPrompt();
             List<ModelToolDefinition> toolDefinitions = toolEnvironment.toolDefinitions();
 
@@ -231,6 +231,8 @@ public class AgentLoop {
                 }
 
                 long modelStartTime = System.currentTimeMillis();
+                toolDefinitions = buildToolEnvironment(systemPrompt, toolPolicy, activeSkills,
+                        runConfig.mode(), runConfig.runId()).toolDefinitions();
                 emitter.emit(event(seq, runConfig, AgentEventType.MODEL_STARTED,
                         "Model step " + (step + 1) + "/" + config.maxSteps(),
                         Map.of("step", step + 1, "maxSteps", config.maxSteps())));
@@ -627,9 +629,10 @@ public class AgentLoop {
     }
 
     private ToolEnvironment buildToolEnvironment(String systemPrompt, ToolPolicyService toolPolicy,
-            List<Skill> activeSkills, RunMode runMode) {
+            List<Skill> activeSkills, RunMode runMode, String runId) {
         org.wrj.haifa.ai.deerflow.tool.ToolEnvironmentBuilder.ToolEnvironment toolEnv =
-                org.wrj.haifa.ai.deerflow.tool.ToolEnvironmentBuilder.build(toolRegistry, toolPolicy, activeSkills, runMode != null ? runMode : RunMode.RESEARCH);
+                org.wrj.haifa.ai.deerflow.tool.ToolEnvironmentBuilder.build(toolRegistry, toolPolicy, activeSkills,
+                        runMode != null ? runMode : RunMode.RESEARCH, runId);
 
 
 

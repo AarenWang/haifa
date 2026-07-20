@@ -38,7 +38,7 @@ class ToolSearchToolTest {
     void returnsAllToolsForEmptyKeyword() {
         ToolRequest request = new ToolRequest("list tools", java.nio.file.Path.of("."));
         ToolResult result = searchTool.execute(request);
-        assertThat(result.content()).contains("Available tools (22 total):");
+        assertThat(result.content()).contains("Available tools (21 total):");
         assertThat(result.content()).contains("read_file");
         assertThat(result.content()).contains("web_search");
         assertThat(result.content()).doesNotContain("[requires skill]", "Provided by skill");
@@ -48,7 +48,7 @@ class ToolSearchToolTest {
     void returnsAllToolsForChineseInventoryQuestion() {
         ToolRequest request = new ToolRequest("请告诉我目前的智能体有多少工具可以使用", java.nio.file.Path.of("."));
         ToolResult result = searchTool.execute(request);
-        assertThat(result.content()).contains("Available tools (22 total):");
+        assertThat(result.content()).contains("Available tools (21 total):");
         assertThat(result.content()).contains("read_file");
         assertThat(result.content()).contains("web_search");
     }

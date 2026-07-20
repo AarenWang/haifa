@@ -244,4 +244,25 @@ java -jar haifa-ai/haifa-ai-deerflow/target/haifa-ai-deerflow-1.0-SNAPSHOT.jar
 - `GraphResearchRuntime`、`ResearchAgentGraph` 仍在代码中，但当前入口未启用。
 - `ApprovalStore` 是内存态，pending approval 不能跨进程重启恢复。
 - `ArtifactService` 的 registry 不是数据库表，而是内存 + `${userDataRoot}/artifacts.json`。
-- `mcp-enabled` 有配置项，但主运行链路尚未接入 MCP 工具实现。
+- MCP 已接入 Graph First 与 legacy AgentLoop；默认关闭，启用后从动态、版本化的工具快照暴露受治理工具。
+
+## MCP integration
+
+DeerFlow supports named Streamable HTTP and restricted STDIO MCP connections. Remote tools are exposed as `mcp__<connection>__<tool>` and routed through a structured snapshot identity; runtime routing never reparses the exposed string. The default topology connects only the self-hosted utility server and assigns it weather, time, currency, holiday/workday, calculation, unit and encyclopedia ownership.
+
+Enable the local utility connection with environment-backed configuration:
+
+```powershell
+$env:HAIFA_DEERFLOW_MCP_ENABLED='true'
+$env:UTILITY_MCP_URL='http://127.0.0.1:8091'
+```
+
+The local utility profile does not require a token or Origin. For a secured production utility endpoint, additionally
+set `UTILITY_MCP_ORIGIN` to an allowlisted Origin, put the bearer token in a secret environment variable, and set
+`UTILITY_MCP_TOKEN_ENV` to that variable's **name** (for example `UTILITY_MCP_TOKEN`), never to the token value itself.
+
+Third-party compatibility connections are disabled by default. Each requires a static URL/command, explicit tool allowlist, local risk, semantic mappings and capability ownership. Unknown tools are not exposed. Required connection failure prevents startup; optional failure is degraded. Refresh failure preserves last-known-good definitions as `STALE` and denies new calls by default.
+
+Fetch MCP is an experimental, high-risk connection and remains disabled until server-side egress controls are proven. See [Fetch security and parity](docs/fetch-mcp-security-and-parity.md).
+
+Health output includes the active tool count; MCP connection status is available from the connection manager without secrets. Disable the feature with `haifa.ai.deerflow.mcp.enabled=false` to return to the pre-MCP runtime without a placeholder tool.

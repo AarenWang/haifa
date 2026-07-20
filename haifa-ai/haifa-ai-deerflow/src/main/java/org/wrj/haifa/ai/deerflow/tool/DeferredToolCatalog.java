@@ -131,16 +131,28 @@ public class DeferredToolCatalog {
                 new ToolDescriptor("bash", "Run a shell command inside the workspace sandbox.", "configured", "Shell 执行", false),
                 new ToolDescriptor("run_script", "Generate and execute short scripts (python, powershell, node, bash) for local observation and lightweight tasks.", "configured", "Shell 执行", false),
                 
-                new ToolDescriptor("task", "Delegate a sub-task to a subagent.", "delegation", "子 Agent 委派", false),
-                
-                new ToolDescriptor("mcp__placeholder", "Dynamic MCP tool placeholder. Runs MCP server tools.", "mcp", "MCP 动态工具", false)
+                new ToolDescriptor("task", "Delegate a sub-task to a subagent.", "delegation", "子 Agent 委派", false)
         );
+    }
+
+    private List<ToolDescriptor> mcpDescriptors() {
+        if (toolRegistry == null) return List.of();
+        return toolRegistry.tools().stream()
+                .filter(tool -> tool.name().startsWith("mcp__"))
+                .map(tool -> new ToolDescriptor(tool.name(), tool.description(), "mcp", "MCP 动态工具", false))
+                .toList();
+    }
+
+    private List<ToolDescriptor> allDescriptors() {
+        List<ToolDescriptor> result = new java.util.ArrayList<>(standardDescriptors());
+        result.addAll(mcpDescriptors());
+        return List.copyOf(result);
     }
 
     public List<ToolDescriptor> search(String keyword) {
         String lower = keyword == null ? "" : keyword.toLowerCase();
         List<ToolDescriptor> results = new java.util.ArrayList<>();
-        for (ToolDescriptor td : standardDescriptors()) {
+        for (ToolDescriptor td : allDescriptors()) {
             if (matches(td.name(), td.description(), lower)) {
                 results.add(td);
             }
@@ -149,7 +161,7 @@ public class DeferredToolCatalog {
     }
 
     public List<ToolDescriptor> listAll() {
-        return standardDescriptors();
+        return allDescriptors();
     }
 
     private static boolean matches(String name, String description, String keyword) {

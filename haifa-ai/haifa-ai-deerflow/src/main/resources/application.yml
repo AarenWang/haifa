@@ -21,6 +21,9 @@ spring:
       hibernate:
         dialect: org.hibernate.community.dialect.SQLiteDialect
   ai:
+    mcp:
+      client:
+        enabled: false
     openai:
       api-key: ${OPENAI_API_KEY:}
       # OPENAI_BASE_URL is the complete chat-completions endpoint. Spring AI 1.1.x
@@ -114,7 +117,122 @@ haifa:
       skills-root: ${HAIFA_DEERFLOW_SKILLS:${user.dir}/skills}
       skills-container-path: /mnt/skills
       skills-enabled: true
-      mcp-enabled: false
+      mcp-enabled: true
+      mcp:
+        enabled: ${HAIFA_DEERFLOW_MCP_ENABLED:true}
+        direct-exposure-threshold: 20
+        capability-owners:
+          WEATHER: utility
+          TIME: utility
+          CURRENCY: utility
+          HOLIDAY_WORKDAY: utility
+          CALCULATION: utility
+          UNIT_CONVERSION: utility
+          ENCYCLOPEDIA_SEARCH: utility
+          ENCYCLOPEDIA_FETCH: utility
+          WEB_FETCH: builtin-web-fetch
+        servers:
+          utility:
+            enabled: true
+            required: true
+            transport: STREAMABLE_HTTP
+            url: ${UTILITY_MCP_URL:http://127.0.0.1:8091}
+            endpoint: /mcp
+            origin: ${UTILITY_MCP_ORIGIN:}
+            bearer-token-environment: ${UTILITY_MCP_TOKEN_ENV:}
+            default-risk: READ_ONLY
+            stale-policy: DENY_NEW_CALLS
+            allowed-tools:
+              - location_search
+              - weather_current
+              - weather_forecast
+              - air_quality
+              - time_now
+              - time_convert
+              - currency_rate
+              - currency_convert
+              - holiday_list
+              - holiday_next
+              - workday_is_workday
+              - workday_add
+              - calculate
+              - unit_convert
+              - wikipedia_search
+              - wikipedia_summary
+            semantic-mappings:
+              location_search: EXTERNAL_READ
+              weather_current: EXTERNAL_READ
+              weather_forecast: EXTERNAL_READ
+              air_quality: EXTERNAL_READ
+              time_now: EXTERNAL_READ
+              time_convert: EXTERNAL_READ
+              currency_rate: EXTERNAL_READ
+              currency_convert: EXTERNAL_READ
+              holiday_list: EXTERNAL_READ
+              holiday_next: EXTERNAL_READ
+              workday_is_workday: EXTERNAL_READ
+              workday_add: EXTERNAL_READ
+              calculate: GENERIC
+              unit_convert: GENERIC
+              wikipedia_search: KNOWLEDGE_SEARCH
+              wikipedia_summary: KNOWLEDGE_FETCH
+            capability-mappings:
+              location_search: WEATHER
+              weather_current: WEATHER
+              weather_forecast: WEATHER
+              air_quality: WEATHER
+              time_now: TIME
+              time_convert: TIME
+              currency_rate: CURRENCY
+              currency_convert: CURRENCY
+              holiday_list: HOLIDAY_WORKDAY
+              holiday_next: HOLIDAY_WORKDAY
+              workday_is_workday: HOLIDAY_WORKDAY
+              workday_add: HOLIDAY_WORKDAY
+              calculate: CALCULATION
+              unit_convert: UNIT_CONVERSION
+              wikipedia_search: ENCYCLOPEDIA_SEARCH
+              wikipedia_summary: ENCYCLOPEDIA_FETCH
+          open-meteo:
+            enabled: false
+            required: false
+            transport: STREAMABLE_HTTP
+            url: ${OPEN_METEO_MCP_URL:https://example.invalid}
+            endpoint: /mcp
+            default-risk: READ_ONLY
+            allowed-tools: []
+          time-reference:
+            enabled: false
+            required: false
+            transport: STDIO
+            command: uvx
+            args: [mcp-server-time]
+            default-risk: READ_ONLY
+            allowed-tools: []
+          frankfurter-remote:
+            enabled: false
+            required: false
+            transport: STREAMABLE_HTTP
+            url: ${FRANKFURTER_MCP_URL:https://mcp.frankfurter.dev}
+            endpoint: /
+            default-risk: READ_ONLY
+            allowed-tools: []
+          wikipedia-reference:
+            enabled: false
+            required: false
+            transport: STDIO
+            command: uvx
+            args: [wikipedia-mcp]
+            default-risk: READ_ONLY
+            allowed-tools: []
+          fetch:
+            enabled: false
+            required: false
+            transport: STDIO
+            command: uvx
+            args: [mcp-server-fetch]
+            default-risk: UNKNOWN
+            allowed-tools: []
       write-file-enabled: true
       str-replace-enabled: true
       bash-enabled: true
