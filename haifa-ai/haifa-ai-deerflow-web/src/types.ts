@@ -20,7 +20,16 @@ export type DeerFlowEventType =
   | 'REPORT_STARTED'
   | 'REPORT_COMPLETED'
   | 'ARTIFACT_CREATED'
+  | 'SUBAGENT_QUEUED'
   | 'SUBAGENT_STARTED'
+  | 'SUBAGENT_STEP_STARTED'
+  | 'SUBAGENT_STEP_COMPLETED'
+  | 'SUBAGENT_OUTPUT'
+  | 'SUBAGENT_TOOL_STARTED'
+  | 'SUBAGENT_TOOL_COMPLETED'
+  | 'SUBAGENT_FAILED'
+  | 'SUBAGENT_CANCELLED'
+  | 'SUBAGENT_TIMED_OUT'
   | 'SUBAGENT_COMPLETED'
   | 'MODEL_DELTA'
   | 'TOOL_CALL_REQUESTED'
@@ -236,6 +245,41 @@ export interface RunSourceTrace {
 export interface RunResearchTraceability {
   sources: RunSourceTrace[];
   orphanEvidenceCount: number;
+}
+
+export type SubagentStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'TIMED_OUT';
+
+export type SubagentOutputChannel = 'stdout' | 'stderr' | 'model_delta' | 'system';
+
+export interface SubagentOutputChunk {
+  sequence: number;
+  channel: SubagentOutputChannel;
+  text: string;
+  createdAt?: string;
+}
+
+export interface SubagentRunSummary {
+  taskId: string;
+  subagentRunId?: string;
+  parentRunId?: string;
+  parentToolCallId: string;
+  displayName: string;
+  description: string;
+  status: SubagentStatus;
+  durationMs?: number;
+  retryable: boolean;
+  error?: string;
+  errorCode?: string;
+  progress?: { current: number; total?: number };
+  latestAction?: string;
+  events: DeerFlowEvent[];
+  output: SubagentOutputChunk[];
 }
 
 export interface RunModelUsageTotals {

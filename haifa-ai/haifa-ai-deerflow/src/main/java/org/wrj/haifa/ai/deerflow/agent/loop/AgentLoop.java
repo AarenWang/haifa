@@ -1163,10 +1163,17 @@ public class AgentLoop {
                     "Executing " + pending.targetToolName(),
                     Map.of("toolCallId", pending.toolCall().id(), "toolName", pending.targetToolName())));
             if ("task".equals(pending.targetToolName())) {
+                Map<String, Object> subagentMetadata = new HashMap<>();
+                subagentMetadata.put("toolCallId", pending.toolCall().id());
+                subagentMetadata.put("toolName", pending.targetToolName());
+                subagentMetadata.put("arguments", pending.toolCall().arguments());
+                subagentMetadata.put("parentRunId", runConfig.runId());
+                subagentMetadata.put("status", "QUEUED");
+                emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_QUEUED,
+                        "Subagent task queued", subagentMetadata));
+                subagentMetadata.put("status", "RUNNING");
                 emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_STARTED,
-                        "Subagent task started",
-                        Map.of("toolCallId", pending.toolCall().id(), "toolName", pending.targetToolName(),
-                                "arguments", pending.toolCall().arguments())));
+                        "Subagent task started", subagentMetadata));
             }
             AgentTool tool = findTool(pending.targetToolName());
             executionTasks.add(new ToolExecutionTask<>(pending.toolCall().id(),
@@ -1288,11 +1295,15 @@ public class AgentLoop {
 
             if ("task".equals(pending.targetToolName())) {
                 Object subagentStatus = completionMetadata.getOrDefault("subagentStatus", rawToolResult.status().name());
-                emitter.emit(event(seq, runConfig, AgentEventType.SUBAGENT_COMPLETED,
-                        "COMPLETED".equals(subagentStatus) || "SUCCESS".equals(subagentStatus)
-                                ? "Subagent task completed"
-                                : "Subagent task failed",
-                        completionMetadata));
+                boolean completed = "COMPLETED".equals(subagentStatus) || "SUCCESS".equals(subagentStatus);
+                AgentEventType subagentEventType = completed ? AgentEventType.SUBAGENT_COMPLETED
+                        : "TIMED_OUT".equals(subagentStatus) ? AgentEventType.SUBAGENT_TIMED_OUT
+                        : "CANCELLED".equals(subagentStatus) ? AgentEventType.SUBAGENT_CANCELLED
+                        : AgentEventType.SUBAGENT_FAILED;
+                completionMetadata.put("parentRunId", runConfig.runId());
+                completionMetadata.put("status", subagentStatus);
+                emitter.emit(event(seq, runConfig, subagentEventType,
+                        completed ? "Subagent task completed" : "Subagent task failed", completionMetadata));
             }
 
             emitter.emit(event(seq, runConfig,

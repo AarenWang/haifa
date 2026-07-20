@@ -73,19 +73,19 @@ public class TaskTool implements AgentTool {
         try {
             String jsonInput = request.userMessage();
             if (jsonInput == null || jsonInput.isBlank()) {
-                return ToolResult.of(name(), "Error: arguments JSON required");
+                return ToolResult.failed(name(), "Error: arguments JSON required");
             }
             JsonNode node;
             try {
                 node = MAPPER.readTree(jsonInput);
             } catch (Exception jsonEx) {
-                return ToolResult.of(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
+                return ToolResult.failed(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
             }
 
             String prompt = node.has("prompt") ? node.get("prompt").asText() : null;
             String description = node.has("description") ? node.get("description").asText() : "";
             if (prompt == null || prompt.isBlank()) {
-                return ToolResult.of(name(), "Error: prompt is required");
+                return ToolResult.failed(name(), "Error: prompt is required");
             }
 
             String subagentType = node.has("subagent_type") ? node.get("subagent_type").asText()
@@ -94,7 +94,7 @@ public class TaskTool implements AgentTool {
             // Validate subagent type
             if (!subagentRegistry.isAvailable(subagentType)) {
                 String available = String.join(", ", subagentRegistry.getAvailableNames());
-                return ToolResult.of(name(), "Error: Unknown subagent type '" + subagentType
+                return ToolResult.failed(name(), "Error: Unknown subagent type '" + subagentType
                         + "'. Available types: " + available);
             }
 
@@ -117,11 +117,13 @@ public class TaskTool implements AgentTool {
             }
 
             // Fallback when runtime is not wired (should not happen in production)
-            return ToolResult.of(name(), "Subagent runtime not available. "
-                    + "Would delegate: [" + subagentType + "] " + description);
+            return ToolResult.failed(name(), "Subagent runtime not available. "
+                    + "Would delegate: [" + subagentType + "] " + description,
+                    Map.of("subagent", true, "status", "FAILED", "subagentStatus", "FAILED",
+                            "errorCode", "SUBAGENT_RUNTIME_UNAVAILABLE", "retryable", true));
 
         } catch (Exception e) {
-            return ToolResult.of(name(), "Error: " + e.getMessage());
+            return ToolResult.failed(name(), "Error: " + e.getMessage());
         }
     }
 
@@ -145,16 +147,45 @@ public class TaskTool implements AgentTool {
             sb.append("Token usage: ").append(result.tokenUsage()).append("\n");
         }
 
-        return ToolResult.of(name(), sb.toString().trim(), Map.of(
-                "subagent", true,
-                "status", result.status(),
-                "subagentStatus", result.status(),
-                "taskId", result.taskId(),
-                "parentRunId", result.parentRunId(),
-                "sourceIds", result.sourceIds(),
-                "evidenceIds", result.evidenceIds(),
-                "durationMs", result.durationMs()
-        ));
+        java.util.LinkedHashMap<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("subagent", true);
+        metadata.put("status", result.status());
+        metadata.put("subagentStatus", result.status());
+        metadata.put("taskId", result.taskId());
+        metadata.put("subagentRunId", result.taskId());
+        metadata.put("parentRunId", result.parentRunId());
+        metadata.put("sourceIds", result.sourceIds());
+        metadata.put("evidenceIds", result.evidenceIds());
+        metadata.put("durationMs", result.durationMs());
+        metadata.put("retryable", isRetryable(result.status()));
+        if (!result.error().isBlank()) {
+            metadata.put("error", safeErrorSummary(result.error()));
+            metadata.put("errorCode", errorCode(result.error()));
+            metadata.put("errorStage", "MODEL_CALL");
+        }
+
+        return result.isSuccess()
+                ? ToolResult.success(name(), sb.toString().trim(), metadata)
+                : ToolResult.failed(name(), sb.toString().trim(), metadata);
+    }
+
+    private static boolean isRetryable(String status) {
+        return "FAILED".equals(status) || "TIMED_OUT".equals(status);
+    }
+
+    private static String errorCode(String error) {
+        String normalized = error == null ? "" : error.toLowerCase(java.util.Locale.ROOT);
+        if (normalized.contains("400") || normalized.contains("bad request")) return "PROVIDER_HTTP_400";
+        if (normalized.contains("401") || normalized.contains("unauthorized")) return "PROVIDER_AUTH_FAILED";
+        if (normalized.contains("404") || normalized.contains("not found")) return "PROVIDER_HTTP_404";
+        if (normalized.contains("timeout") || normalized.contains("timed out")) return "PROVIDER_TIMEOUT";
+        return "SUBAGENT_EXECUTION_FAILED";
+    }
+
+    private static String safeErrorSummary(String error) {
+        String compact = error == null ? "" : error.replaceAll("(?i)(authorization|api[-_ ]?key)\\s*[:=]\\s*\\S+", "$1=[redacted]")
+                .replaceAll("\\s+", " ").trim();
+        return compact.length() <= 160 ? compact : compact.substring(0, 159) + "…";
     }
 
     private String normalizeModelOverride(String modelOverride) {

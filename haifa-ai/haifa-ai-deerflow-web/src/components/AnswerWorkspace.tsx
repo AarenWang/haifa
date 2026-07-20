@@ -4,6 +4,7 @@ import type { AppPhase, AppStatus, ClarificationAnswer, MessageRecord, DeerFlowE
 import { renderMarkdown } from '../utils/markdownRenderer';
 import ApprovalCard from './ApprovalCard';
 import ClarificationCard from './ClarificationCard';
+import SubagentSummaryPanel from './subagents/SubagentSummaryPanel';
 import type { PendingClarification } from './TaskComposer';
 
 interface AnswerWorkspaceProps {
@@ -732,6 +733,7 @@ export default function AnswerWorkspace({
 
                   {messageIndex === latestUserMessageIndex && events && events.length > 0 && (
                     <div className="steps-accordion-card">
+                      <SubagentSummaryPanel events={events} />
                       <div
                         className="steps-accordion-header"
                         onClick={() => setStepsExpanded(!stepsExpanded)}

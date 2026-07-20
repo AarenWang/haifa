@@ -125,6 +125,28 @@ class TaskToolTest {
     }
 
     @Test
+    void executePropagatesSubagentFailureAsFailedToolResult() {
+        when(subagentRegistry.isAvailable("general-purpose")).thenReturn(true);
+        SubagentResult subResult = SubagentResult.failed("sub-failed", "run-1",
+                "Model call failed: 400 Bad Request", 1234);
+        when(subagentRuntime.execute(
+                eq("failed-desc"), eq("failed prompt"), eq("general-purpose"),
+                eq("thread-1"), eq("run-1"), eq("qwen-plus"),
+                isNull(), isNull(), isNull(), isNull(), eq(RunMode.RESEARCH), any()
+        )).thenReturn(subResult);
+
+        ToolResult result = taskTool.execute(new ToolRequest(
+                "{\"description\":\"failed-desc\",\"prompt\":\"failed prompt\"}",
+                Path.of("."), List.of(), "thread-1", "run-1", RunMode.RESEARCH, List.of(), "qwen-plus"));
+
+        assertThat(result.status()).isEqualTo(ToolResult.Status.FAILED);
+        assertThat(result.metadata()).containsEntry("subagentStatus", "FAILED")
+                .containsEntry("subagentRunId", "sub-failed")
+                .containsEntry("errorCode", "PROVIDER_HTTP_400")
+                .containsEntry("retryable", true);
+    }
+
+    @Test
     void executeTreatsInheritModelAsParentModelRequestMetadata() {
         when(subagentRegistry.isAvailable("general-purpose")).thenReturn(true);
         SubagentResult subResult = SubagentResult.success("sub-inherit", "run-1", "done",
