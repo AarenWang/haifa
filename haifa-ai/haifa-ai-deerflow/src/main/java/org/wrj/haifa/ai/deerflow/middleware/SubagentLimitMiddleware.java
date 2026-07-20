@@ -73,6 +73,17 @@ public class SubagentLimitMiddleware implements AgentLoopObserver {
                 continue;
             }
 
+            // A 4xx provider failure is configuration/request-shape related, so retrying task
+            // dispatch in the same parent run cannot make progress and used to cause retry loops.
+            if (subagentRuntime != null && subagentRuntime.hasProviderConfigurationFailure(runId)) {
+                String reason = subagentRuntime.providerConfigurationFailureReason(runId);
+                log.warn("layer=middleware SubagentLimitMiddleware: rejecting task call {} for run {}. {}",
+                        tc.id(), runId, reason);
+                incrementRejections(runId);
+                result.add(new FilteredToolCall(tc, false, reason));
+                continue;
+            }
+
             // Check per-response limit
             taskCount++;
             if (taskCount > maxPerResponse) {

@@ -100,4 +100,20 @@ class SubagentLimitMiddlewareTest {
 
         assertThat(middleware.getRejectionCount("run-1")).isEqualTo(1);
     }
+
+    @Test
+    void rejectsTaskCallsAfterProviderConfigurationFailure() {
+        when(subagentRuntime.hasProviderConfigurationFailure("run-1")).thenReturn(true);
+        when(subagentRuntime.providerConfigurationFailureReason("run-1"))
+                .thenReturn("Subagent dispatch circuit is open because an earlier provider request returned HTTP 400.");
+
+        List<FilteredToolCall> filtered = middleware.afterToolCallsParsed(
+                runConfig, List.of(ToolCall.of("call-1", "task", "{}")));
+
+        assertThat(filtered).singleElement().satisfies(call -> {
+            assertThat(call.allowed()).isFalse();
+            assertThat(call.reason()).contains("circuit is open");
+        });
+        assertThat(middleware.getRejectionCount("run-1")).isEqualTo(1);
+    }
 }

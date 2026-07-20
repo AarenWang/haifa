@@ -3,6 +3,7 @@ package org.wrj.haifa.ai.deerflow.subagent;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -64,6 +65,10 @@ public class SubagentRuntime implements ApplicationContextAware {
     // In-memory tracking of active subagent executions per parent run
     private final ConcurrentHashMap<String, Set<String>> activeSubagentTasks = new ConcurrentHashMap<>();
 
+    // A provider request failure is deterministic for the remainder of one parent run. Remember it
+    // so the parent cannot keep dispatching the same invalid subagent request in a tight loop.
+    private final ConcurrentHashMap<String, String> providerFailureReasons = new ConcurrentHashMap<>();
+
     public SubagentRuntime(AgentModelClient modelClient,
                            ResearchRuntimeSupport researchRuntimeSupport,
                            SubagentRegistry subagentRegistry,
@@ -112,6 +117,10 @@ public class SubagentRuntime implements ApplicationContextAware {
 
         // Track active subagent for this parent run
         activeSubagentTasks.computeIfAbsent(parentRunId, k -> ConcurrentHashMap.newKeySet()).add(taskId);
+        log.info("subagent_diagnostic phase=created taskId={} parentRunId={} subagentType={} parentModel={} "
+                        + "modelOverride={} activeCount={}",
+                taskId, parentRunId, subagentType, safeLogValue(parentModelName), safeLogValue(modelOverride),
+                activeCount(parentRunId));
 
         try {
             // 1. Resolve subagent config
@@ -127,6 +136,10 @@ public class SubagentRuntime implements ApplicationContextAware {
 
             // 3. Build filtered tool set
             List<AgentTool> filteredTools = buildFilteredTools(config, allowedTools, parentMode, activeSkills);
+            log.info("subagent_diagnostic phase=prepared taskId={} parentRunId={} subagentType={} effectiveModel={} "
+                            + "filteredTools={} activeCount={}",
+                    taskId, parentRunId, subagentType, safeLogValue(effectiveModel),
+                    filteredTools.stream().map(AgentTool::name).toList(), activeCount(parentRunId));
             if (filteredTools.isEmpty()) {
                 return SubagentResult.failed(taskId, parentRunId,
                         "No tools available for subagent after policy filtering", 0);
@@ -215,13 +228,7 @@ public class SubagentRuntime implements ApplicationContextAware {
             List<String> sourceIds = subagentObserver.getSourceIds();
             Map<String, Integer> tokenUsage = estimateTokenUsage(events);
 
-            // 11. Remove from active tracking
-            Set<String> active = activeSubagentTasks.get(parentRunId);
-            if (active != null) {
-                active.remove(taskId);
-            }
-
-            // 12. Check if run failed
+            // 11. Check if run failed
             if (events != null) {
                 boolean runFailed = events.stream().anyMatch(e -> e.type() == AgentEventType.RUN_FAILED);
                 if (runFailed) {
@@ -229,6 +236,7 @@ public class SubagentRuntime implements ApplicationContextAware {
                             .filter(e -> e.type() == AgentEventType.RUN_FAILED)
                             .map(AgentEvent::content)
                             .findFirst().orElse("Subagent run failed");
+                    recordProviderFailure(parentRunId, taskId, subagentType, effectiveModel, filteredTools, error);
                     return SubagentResult.failed(taskId, parentRunId, error, duration);
                 }
             }
@@ -239,11 +247,11 @@ public class SubagentRuntime implements ApplicationContextAware {
             long duration = System.currentTimeMillis() - startTime;
             log.error("Subagent execution failed. taskId={}, parentRunId={}, subagentType={}",
                     taskId, parentRunId, subagentType, ex);
-            Set<String> active = activeSubagentTasks.get(parentRunId);
-            if (active != null) {
-                active.remove(taskId);
-            }
-            return SubagentResult.failed(taskId, parentRunId, "Subagent execution error: " + ex.getMessage(), duration);
+            String error = "Subagent execution error: " + ex.getMessage();
+            recordProviderFailure(parentRunId, taskId, subagentType, null, List.of(), error);
+            return SubagentResult.failed(taskId, parentRunId, error, duration);
+        } finally {
+            releaseActiveTask(parentRunId, taskId);
         }
     }
 
@@ -261,6 +269,22 @@ public class SubagentRuntime implements ApplicationContextAware {
     public Set<String> activeTaskIds(String parentRunId) {
         Set<String> active = activeSubagentTasks.get(parentRunId);
         return active == null ? Set.of() : Set.copyOf(active);
+    }
+
+    /**
+     * Whether this parent run has already received a deterministic provider request failure.
+     * New {@code task} calls should be rejected rather than retried until the next parent run.
+     */
+    public boolean hasProviderConfigurationFailure(String parentRunId) {
+        return providerFailureReasons.containsKey(parentRunId);
+    }
+
+    /**
+     * Safe, model-facing explanation for the subagent dispatch circuit breaker.
+     */
+    public String providerConfigurationFailureReason(String parentRunId) {
+        return providerFailureReasons.getOrDefault(parentRunId,
+                "A previous subagent provider request failed. Do not retry subagent dispatch in this run.");
     }
 
     // ---------------------------------------------------------------------------
@@ -282,6 +306,64 @@ public class SubagentRuntime implements ApplicationContextAware {
 
     private boolean hasExplicitModel(String modelName) {
         return modelName != null && !modelName.isBlank() && !"inherit".equalsIgnoreCase(modelName.trim());
+    }
+
+    private void releaseActiveTask(String parentRunId, String taskId) {
+        activeSubagentTasks.computeIfPresent(parentRunId, (runId, active) -> {
+            active.remove(taskId);
+            return active.isEmpty() ? null : active;
+        });
+        log.info("subagent_diagnostic phase=slot_released taskId={} parentRunId={} activeCount={}",
+                taskId, parentRunId, activeCount(parentRunId));
+    }
+
+    private void recordProviderFailure(String parentRunId, String taskId, String subagentType,
+                                       String effectiveModel, List<AgentTool> filteredTools, String error) {
+        if (!isProviderConfigurationFailure(error)) {
+            return;
+        }
+        String reason = "Subagent dispatch circuit is open because an earlier provider request returned "
+                + providerStatus(error) + ". Do not call the task tool again in this run; return the provider "
+                + "configuration failure to the user.";
+        providerFailureReasons.putIfAbsent(parentRunId, reason);
+        log.warn("subagent_diagnostic phase=provider_failure taskId={} parentRunId={} subagentType={} effectiveModel={} "
+                        + "filteredTools={} providerStatus={} error={}",
+                taskId, parentRunId, subagentType, safeLogValue(effectiveModel),
+                filteredTools.stream().map(AgentTool::name).toList(), providerStatus(error), safeErrorSummary(error));
+    }
+
+    private boolean isProviderConfigurationFailure(String error) {
+        if (error == null || error.isBlank()) {
+            return false;
+        }
+        String normalized = error.toLowerCase(Locale.ROOT);
+        return normalized.contains("model call failed")
+                && (normalized.contains("400 bad request")
+                || normalized.contains("401 unauthorized")
+                || normalized.contains("403 forbidden")
+                || normalized.contains("404 not found"));
+    }
+
+    private String providerStatus(String error) {
+        String normalized = error == null ? "" : error.toLowerCase(Locale.ROOT);
+        for (String status : List.of("400", "401", "403", "404")) {
+            if (normalized.contains(status)) {
+                return "HTTP " + status;
+            }
+        }
+        return "an HTTP error";
+    }
+
+    private String safeErrorSummary(String error) {
+        if (error == null) {
+            return "";
+        }
+        String sanitized = error.replaceAll("(?i)(authorization|api[-_ ]?key)\\s*[:=]\\s*[^,\\s]+", "$1=[REDACTED]");
+        return sanitized.length() > 500 ? sanitized.substring(0, 500) + "..." : sanitized;
+    }
+
+    private String safeLogValue(String value) {
+        return value == null || value.isBlank() ? "<none>" : value;
     }
 
     private List<AgentTool> buildFilteredTools(SubagentConfig config, List<String> allowedTools,

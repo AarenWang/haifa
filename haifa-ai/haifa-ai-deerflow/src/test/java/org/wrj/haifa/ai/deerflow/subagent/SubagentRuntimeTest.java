@@ -88,6 +88,7 @@ class SubagentRuntimeTest {
         assertThat(result.isSuccess()).isFalse();
         assertThat(result.status()).isEqualTo("FAILED");
         assertThat(result.error()).contains("Unknown subagent type 'unknown'");
+        assertThat(subagentRuntime.activeCount("run-1")).isZero();
     }
 
     @Test
@@ -147,6 +148,31 @@ class SubagentRuntimeTest {
 
         assertThat(result.isSuccess()).isFalse();
         assertThat(result.error()).contains("No tools available for subagent");
+        assertThat(subagentRuntime.activeCount("run-1")).isZero();
+    }
+
+    @Test
+    void opensProviderFailureCircuitAndReleasesSlot() {
+        when(subagentRegistry.getConfig("general-purpose")).thenReturn(SubagentConfig.generalPurpose());
+        when(modelClient.generate(any(ModelPrompt.class)))
+                .thenReturn(Mono.error(new IllegalStateException("Model call failed: 400 Bad Request")));
+
+        AgentTool searchTool = mock(AgentTool.class);
+        when(searchTool.name()).thenReturn("web_search");
+        when(toolRegistry.tools()).thenReturn(List.of(searchTool));
+        when(toolPolicyService.evaluateTool(eq("web_search"), any(), any())).thenReturn(ToolPolicyDecision.allow());
+
+        SubagentResult result = subagentRuntime.execute(
+                "desc", "prompt", "general-purpose",
+                "thread-1", "run-provider-failure", "parent-model", null, null, null, null,
+                RunMode.RESEARCH, List.of()
+        );
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(subagentRuntime.activeCount("run-provider-failure")).isZero();
+        assertThat(subagentRuntime.hasProviderConfigurationFailure("run-provider-failure")).isTrue();
+        assertThat(subagentRuntime.providerConfigurationFailureReason("run-provider-failure"))
+                .contains("HTTP 400");
     }
 
     @Test
