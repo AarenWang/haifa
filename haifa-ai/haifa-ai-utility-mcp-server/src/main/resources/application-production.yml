@@ -1,0 +1,13 @@
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${UTILITY_MCP_JWT_ISSUER:}
+haifa:
+  ai:
+    utility-mcp:
+      security:
+        allow-missing-origin: false
+        allowed-origins: ${UTILITY_MCP_ALLOWED_ORIGINS:}
+        audience: ${UTILITY_MCP_JWT_AUDIENCE:}

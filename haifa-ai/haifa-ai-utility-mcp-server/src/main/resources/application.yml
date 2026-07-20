@@ -1,0 +1,43 @@
+server:
+  port: ${UTILITY_MCP_PORT:8091}
+
+spring:
+  application:
+    name: haifa-ai-utility-mcp-server
+  ai:
+    mcp:
+      server:
+        enabled: true
+        name: haifa-utility
+        version: 1.0.0-SNAPSHOT
+        type: SYNC
+        protocol: STATELESS
+        request-timeout: 15s
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: /mcp
+          disallow-delete: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+haifa:
+  ai:
+    utility-mcp:
+      target-result-bytes: 65536
+      max-result-bytes: 262144
+      security:
+        allow-missing-origin: true
+        allowed-origins: []
+        requests-per-minute: 120
