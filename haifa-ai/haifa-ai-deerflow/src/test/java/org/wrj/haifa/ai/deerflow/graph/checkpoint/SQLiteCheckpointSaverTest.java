@@ -21,6 +21,7 @@ import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.persistence.repository.AgentGraphCheckpointExternalRefRepository;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentGraphCheckpointStore;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import reactor.core.publisher.Mono;
@@ -55,13 +56,16 @@ class SQLiteCheckpointSaverTest {
     @Autowired
     private AgentGraphCheckpointExternalRefRepository externalRefRepository;
 
+    @Autowired
+    private AgentGraphCheckpointStore checkpointStore;
+
     @MockitoBean
     private AgentModelClient modelClient;
 
     @Test
     void savesAndRetrievesCheckpointDirectly() {
         String threadId = "thread-direct-" + UUID.randomUUID();
-        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
+        RunnableConfig config = checkpointConfig(threadId, "run-123");
 
         Checkpoint checkpoint = Checkpoint.builder()
                 .id("cp-123")
@@ -85,7 +89,7 @@ class SQLiteCheckpointSaverTest {
         String threadId = "thread-external-ref-" + UUID.randomUUID();
         String runId = "run-external-ref-" + UUID.randomUUID();
         String largeContent = ("large-content-" + UUID.randomUUID() + "-").repeat(400);
-        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
+        RunnableConfig config = checkpointConfig(threadId, runId);
 
         long before = externalRefRepository.count();
         checkpointSaver.put(config, Checkpoint.builder()
@@ -112,6 +116,51 @@ class SQLiteCheckpointSaverTest {
         Optional<Checkpoint> loaded = checkpointSaver.get(config);
         assertThat(loaded).isPresent();
         assertThat(loaded.get().getState()).containsEntry("large-c", largeContent);
+    }
+
+    @Test
+    void isolatesCheckpointsByRunWithinTheSameThread() {
+        String threadId = "thread-isolation-" + UUID.randomUUID();
+        RunnableConfig first = checkpointConfig(threadId, "run-a");
+        RunnableConfig second = checkpointConfig(threadId, "run-b");
+        checkpointSaver.put(first, Checkpoint.builder().id("cp-a").nodeId("a").nextNodeId("next-a")
+                .state(Map.of("runId", "run-a", "owner", "a")).build());
+        checkpointSaver.put(second, Checkpoint.builder().id("cp-b").nodeId("b").nextNodeId("next-b")
+                .state(Map.of("runId", "run-b", "owner", "b")).build());
+
+        assertThat(checkpointSaver.get(first)).get().extracting(Checkpoint::getId).isEqualTo("cp-a");
+        assertThat(checkpointSaver.get(second)).get().extracting(Checkpoint::getId).isEqualTo("cp-b");
+    }
+
+    @Test
+    void resumesOnlyTheExplicitlySelectedCheckpoint() {
+        RunnableConfig config = checkpointConfig("thread-explicit", "run-explicit");
+        checkpointSaver.put(config, Checkpoint.builder().id("cp-first").nodeId("model")
+                .nextNodeId("tools").state(Map.of("runId", "run-explicit", "step", 1)).build());
+        checkpointSaver.put(config, Checkpoint.builder().id("cp-second").nodeId("tools")
+                .nextNodeId("gate").state(Map.of("runId", "run-explicit", "step", 2)).build());
+
+        RunnableConfig explicit = RunnableConfig.builder(config).checkPointId("cp-first").build();
+        assertThat(checkpointSaver.get(explicit)).get().satisfies(checkpoint -> {
+            assertThat(checkpoint.getId()).isEqualTo("cp-first");
+            assertThat(checkpoint.getNextNodeId()).isEqualTo("tools");
+            assertThat(checkpoint.getState()).containsEntry("step", 1);
+        });
+    }
+
+    @Test
+    void rejectsEndAndLegacyVersionCheckpointsForResume() {
+        String threadId = "thread-safe-reject-" + UUID.randomUUID();
+        RunnableConfig terminal = checkpointConfig(threadId, "run-end");
+        checkpointSaver.put(terminal, Checkpoint.builder().id("cp-end").nodeId("finalize").nextNodeId("")
+                .state(Map.of("runId", "run-end")).build());
+        assertThat(checkpointSaver.get(terminal)).isEmpty();
+
+        checkpointStore.saveAll(List.of(new AgentGraphCheckpointRecord(
+                UUID.randomUUID().toString(), "cp-legacy", "run-legacy", threadId,
+                "haifa-active-chat", "call_model", "parse_model_output", 1, "legacy",
+                Map.of(), Map.of("runId", "run-legacy"), java.time.Instant.now())));
+        assertThat(checkpointSaver.get(checkpointConfig(threadId, "run-legacy"))).isEmpty();
     }
     @Test
     void savesCheckpointsDuringGraphExecutionUsingSQLiteSaver() {
@@ -180,13 +229,21 @@ class SQLiteCheckpointSaverTest {
             });
 
             // Verify a terminal checkpoint was successfully saved in SQLite.
-            RunnableConfig runnableConfig = RunnableConfig.builder().threadId(threadId).build();
-            Optional<Checkpoint> cp = checkpointSaver.get(runnableConfig);
-            assertThat(cp).isPresent();
-            assertThat(cp.get().getNextNodeId()).isBlank();
+            var saved = checkpointStore.findByIdentity(threadId, runId, "haifa-active-chat");
+            assertThat(saved).isNotEmpty();
+            assertThat(saved.get(saved.size() - 1).nextNodeId()).isBlank();
+            assertThat(checkpointSaver.get(checkpointConfig(threadId, runId)))
+                    .get().extracting(Checkpoint::getNextNodeId).isNotEqualTo("");
 
         } finally {
             properties.getGraph().getCheckpoint().setEnabled(originalCheckpointEnabled);
         }
+    }
+
+    private static RunnableConfig checkpointConfig(String threadId, String runId) {
+        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
+        config.context().put("runId", runId);
+        config.context().put("graphName", "haifa-active-chat");
+        return config;
     }
 }

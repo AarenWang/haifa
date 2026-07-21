@@ -6,12 +6,13 @@ import com.alibaba.cloud.ai.graph.checkpoint.BaseCheckpointSaver;
 import com.alibaba.cloud.ai.graph.checkpoint.Checkpoint;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
-import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentGraphCheckpointStore;
 import org.wrj.haifa.ai.deerflow.persistence.entity.AgentGraphCheckpointExternalRefEntity;
 import org.wrj.haifa.ai.deerflow.persistence.repository.AgentGraphCheckpointExternalRefRepository;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
+import org.wrj.haifa.ai.deerflow.run.RunManager;
+import org.wrj.haifa.ai.deerflow.run.RunStatus;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -30,11 +31,17 @@ import java.util.UUID;
 @Component
 public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
 
+    public static final int CURRENT_SCHEMA_VERSION = 2;
+    public static final String CURRENT_GRAPH_DEFINITION_VERSION = "lead-agent-v2";
+
     private static final int EXTERNAL_REF_THRESHOLD_CHARS = 5000;
     private static final String EXTERNAL_REF_PREFIX = "[EXTERNAL_REF:";
     private static final String EXTERNAL_REF_SUFFIX = "]";
 
     private final AgentGraphCheckpointStore store;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private RunManager runManager;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private AgentGraphCheckpointExternalRefRepository externalRefRepository;
@@ -52,18 +59,12 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
         String runId = (String) config.context().get("runId");
         String graphName = (String) config.context().get("graphName");
 
-        List<AgentGraphCheckpointRecord> records;
-        if (runId != null && !runId.isBlank()) {
-            records = store.findByRunId(runId);
-        } else {
-            records = store.findByThreadId(threadId);
+        if (isBlank(runId) || isBlank(graphName) || terminal(runId)) {
+            return Optional.empty();
         }
-
-        if (graphName != null && !graphName.isBlank()) {
-            records = records.stream()
-                    .filter(r -> graphName.equals(r.graphName()))
-                    .toList();
-        }
+        List<AgentGraphCheckpointRecord> records = store.findByIdentity(threadId, runId, graphName).stream()
+                .filter(this::isResumable)
+                .toList();
 
         if (records.isEmpty()) {
             return Optional.empty();
@@ -91,7 +92,17 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
         String threadId = config.threadId().orElse("");
         AgentGraphStateView view = AgentGraphStateView.of(checkpoint.getState());
         String runId = view.runId();
-        String graphName = graphName(view.mode());
+        if (isBlank(threadId) || isBlank(runId)) {
+            throw new IllegalArgumentException("threadId and runId are required when persisting a checkpoint");
+        }
+        String graphName = stringContext(config, "graphName");
+        if (graphName.isBlank()) {
+            throw new IllegalArgumentException("graphName is required when persisting a checkpoint");
+        }
+        String contextRunId = stringContext(config, "runId");
+        if (!contextRunId.isBlank() && !contextRunId.equals(runId)) {
+            throw new IllegalArgumentException("Checkpoint state runId does not match RunnableConfig runId");
+        }
         String nextNodeId = normalizeNextNodeId(checkpoint.getNextNodeId());
 
         Map<String, String> externalRefs = new LinkedHashMap<>();
@@ -101,11 +112,13 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
         AgentGraphCheckpointRecord record = new AgentGraphCheckpointRecord(
                 UUID.randomUUID().toString(),
                 checkpoint.getId(),
-                runId == null ? "" : runId,
+                runId,
                 threadId,
                 graphName,
                 checkpoint.getNodeId(),
                 nextNodeId,
+                CURRENT_SCHEMA_VERSION,
+                CURRENT_GRAPH_DEFINITION_VERSION,
                 summarize(checkpoint.getState(), graphName, checkpoint.getNodeId(), nextNodeId),
                 externalizedState,
                 Instant.now()
@@ -123,19 +136,13 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
         String runId = (String) config.context().get("runId");
         String graphName = (String) config.context().get("graphName");
 
-        List<AgentGraphCheckpointRecord> records;
-        if (runId != null && !runId.isBlank()) {
-            records = store.findByRunId(runId);
-        } else {
-            records = store.findByThreadId(threadId);
+        if (isBlank(runId) || isBlank(graphName) || terminal(runId)) {
+            return List.of();
         }
-
-        if (graphName != null && !graphName.isBlank()) {
-            records = records.stream()
-                    .filter(r -> graphName.equals(r.graphName()))
-                    .toList();
-        }
-        return records.stream().map(this::toCheckpoint).toList();
+        return store.findByIdentity(threadId, runId, graphName).stream()
+                .filter(this::isResumable)
+                .map(this::toCheckpoint)
+                .toList();
     }
 
     @Override
@@ -160,8 +167,31 @@ public class SQLiteCheckpointSaver implements BaseCheckpointSaver {
         return nextNodeId;
     }
 
-    private static String graphName(RunMode mode) {
-        return mode == RunMode.RESEARCH ? "haifa-active-research" : "haifa-active-chat";
+    private boolean isResumable(AgentGraphCheckpointRecord record) {
+        return record != null
+                && !isBlank(record.runId())
+                && !isBlank(record.nextNodeId())
+                && record.schemaVersion() == CURRENT_SCHEMA_VERSION
+                && CURRENT_GRAPH_DEFINITION_VERSION.equals(record.graphDefinitionVersion());
+    }
+
+    private boolean terminal(String runId) {
+        if (runManager == null || isBlank(runId)) {
+            return false;
+        }
+        return runManager.find(runId)
+                .map(record -> record.status() == RunStatus.COMPLETED || record.status() == RunStatus.FAILED
+                        || record.status() == RunStatus.CANCELLED)
+                .orElse(false);
+    }
+
+    private static String stringContext(RunnableConfig config, String key) {
+        Object value = config == null ? null : config.context().get(key);
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private static Map<String, Object> summarize(Map<String, Object> state, String graphName, String nodeId, String nextNodeId) {

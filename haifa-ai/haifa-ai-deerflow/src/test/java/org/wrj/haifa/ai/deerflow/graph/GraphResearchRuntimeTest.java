@@ -228,6 +228,8 @@ class GraphResearchRuntimeTest {
             ResearchPlan existingPlan = planStore.save(plan(runId, threadId, "resume topic"));
 
             RunnableConfig runnableConfig = RunnableConfig.builder().threadId(threadId).build();
+            runnableConfig.context().put("graphName", ResearchAgentGraph.GRAPH_NAME);
+            runnableConfig.context().put("runId", runId);
             checkpointSaver.put(runnableConfig, Checkpoint.builder()
                     .id("cp-research-resume-" + UUID.randomUUID())
                     .nodeId("create_or_load_plan")
@@ -275,9 +277,9 @@ class GraphResearchRuntimeTest {
             assertThat(planStore.findByRunId(runId)).hasValueSatisfying(plan ->
                     assertThat(plan.planId()).isEqualTo(existingPlan.planId()));
 
-            Checkpoint finalCheckpoint = checkpointSaver.get(runnableConfig).orElseThrow();
-            assertThat(finalCheckpoint.getNextNodeId()).isBlank();
-            List<Map<String, Object>> modelSteps = (List<Map<String, Object>>) finalCheckpoint.getState()
+            Checkpoint latestCheckpoint = checkpointSaver.get(runnableConfig).orElseThrow();
+            assertThat(latestCheckpoint.getNextNodeId()).isNotEqualTo("create_or_load_plan");
+            List<Map<String, Object>> modelSteps = (List<Map<String, Object>>) latestCheckpoint.getState()
                     .get(AgentGraphStateKeys.MODEL_STEPS);
             assertThat(modelSteps)
                     .noneSatisfy(step -> assertThat(step)

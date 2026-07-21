@@ -12,4 +12,7 @@ public interface AgentGraphCheckpointRepository extends JpaRepository<AgentGraph
     List<AgentGraphCheckpointEntity> findByRunIdOrderByCreatedAtAsc(String runId);
 
     List<AgentGraphCheckpointEntity> findByThreadIdOrderByCreatedAtAsc(String threadId);
+
+    List<AgentGraphCheckpointEntity> findByThreadIdAndRunIdAndGraphNameOrderByCreatedAtAsc(
+            String threadId, String runId, String graphName);
 }

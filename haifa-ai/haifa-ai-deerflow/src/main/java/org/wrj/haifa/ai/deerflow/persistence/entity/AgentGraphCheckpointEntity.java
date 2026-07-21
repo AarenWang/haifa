@@ -12,7 +12,8 @@ import java.time.Instant;
 @Table(name = "agent_graph_checkpoints", indexes = {
         @Index(name = "idx_graph_checkpoint_run_id", columnList = "run_id"),
         @Index(name = "idx_graph_checkpoint_thread_id", columnList = "thread_id"),
-        @Index(name = "idx_graph_checkpoint_checkpoint_id", columnList = "checkpoint_id")
+        @Index(name = "idx_graph_checkpoint_checkpoint_id", columnList = "checkpoint_id"),
+        @Index(name = "idx_graph_checkpoint_identity", columnList = "thread_id, run_id, graph_name, checkpoint_id")
 })
 public class AgentGraphCheckpointEntity {
 
@@ -37,6 +38,12 @@ public class AgentGraphCheckpointEntity {
 
     @Column(name = "next_node_id", length = 128)
     private String nextNodeId;
+
+    @Column(name = "schema_version")
+    private Integer schemaVersion;
+
+    @Column(name = "graph_definition_version", length = 64)
+    private String graphDefinitionVersion;
 
     @Column(name = "state_summary_json", length = 4000)
     private String stateSummaryJson;
@@ -101,6 +108,22 @@ public class AgentGraphCheckpointEntity {
 
     public void setNextNodeId(String nextNodeId) {
         this.nextNodeId = nextNodeId;
+    }
+
+    public Integer getSchemaVersion() {
+        return schemaVersion;
+    }
+
+    public void setSchemaVersion(Integer schemaVersion) {
+        this.schemaVersion = schemaVersion;
+    }
+
+    public String getGraphDefinitionVersion() {
+        return graphDefinitionVersion;
+    }
+
+    public void setGraphDefinitionVersion(String graphDefinitionVersion) {
+        this.graphDefinitionVersion = graphDefinitionVersion;
     }
 
     public String getStateSummaryJson() {

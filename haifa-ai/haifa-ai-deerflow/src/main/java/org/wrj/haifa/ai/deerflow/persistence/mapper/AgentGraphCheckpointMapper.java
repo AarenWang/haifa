@@ -22,6 +22,8 @@ public class AgentGraphCheckpointMapper {
         entity.setGraphName(record.graphName());
         entity.setNodeId(record.nodeId());
         entity.setNextNodeId(record.nextNodeId());
+        entity.setSchemaVersion(record.schemaVersion());
+        entity.setGraphDefinitionVersion(record.graphDefinitionVersion());
         entity.setStateSummaryJson(jsonMapper.toJson(record.stateSummary()));
         entity.setFullStateJson(jsonMapper.toJson(record.fullState()));
         entity.setCreatedAt(record.createdAt());
@@ -37,6 +39,8 @@ public class AgentGraphCheckpointMapper {
                 entity.getGraphName(),
                 entity.getNodeId(),
                 entity.getNextNodeId(),
+                entity.getSchemaVersion() == null ? 1 : entity.getSchemaVersion(),
+                entity.getGraphDefinitionVersion() == null ? "legacy" : entity.getGraphDefinitionVersion(),
                 jsonMapper.fromJson(entity.getStateSummaryJson()),
                 jsonMapper.fromJson(entity.getFullStateJson()),
                 entity.getCreatedAt()

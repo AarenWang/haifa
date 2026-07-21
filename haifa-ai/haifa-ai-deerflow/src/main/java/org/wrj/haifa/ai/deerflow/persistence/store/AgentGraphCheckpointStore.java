@@ -40,4 +40,11 @@ public class AgentGraphCheckpointStore {
                 .map(mapper::toRecord)
                 .toList();
     }
+
+    @Transactional(readOnly = true)
+    public List<AgentGraphCheckpointRecord> findByIdentity(String threadId, String runId, String graphName) {
+        return repository.findByThreadIdAndRunIdAndGraphNameOrderByCreatedAtAsc(threadId, runId, graphName).stream()
+                .map(mapper::toRecord)
+                .toList();
+    }
 }
