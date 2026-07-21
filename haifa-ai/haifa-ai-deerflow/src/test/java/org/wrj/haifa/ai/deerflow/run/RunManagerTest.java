@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,6 +19,12 @@ class RunManagerTest {
 
     @Autowired
     private RunManager manager;
+
+    @Autowired
+    private RunConcurrencyCoordinator concurrencyCoordinator;
+
+    @Autowired
+    private DeerFlowProperties properties;
 
     @Test
     void tracksRunStatusTransitions() {
@@ -47,7 +54,7 @@ class RunManagerTest {
     }
 
     @Test
-    void listByThreadCancelsOlderRunningRunsSupersededByNewerRun() {
+    void listByThreadIsReadOnlyAndDoesNotPassivelyCancelRuns() {
         RunRecord older = manager.create("thread-superseded", "model", Map.of());
         manager.markRunning(older.runId());
         RunRecord newer = manager.create("thread-superseded", "model", Map.of());
@@ -58,9 +65,47 @@ class RunManagerTest {
                 .extracting(RunRecord::runId)
                 .containsExactly(newer.runId(), older.runId());
         assertThat(manager.find(older.runId())).hasValueSatisfying(record -> {
-            assertThat(record.status()).isEqualTo(RunStatus.CANCELLED);
-            assertThat(record.error()).contains("newer run");
+            assertThat(record.status()).isEqualTo(RunStatus.RUNNING);
         });
+    }
+
+    @Test
+    void singleActiveModeAtomicallySupersedesConcurrentCreates() throws Exception {
+        RunConcurrencyMode original = properties.getRunConcurrencyMode();
+        properties.setRunConcurrencyMode(RunConcurrencyMode.SINGLE_ACTIVE_RUN);
+        String threadId = "thread-concurrent-single-" + java.util.UUID.randomUUID();
+        CountDownLatch start = new CountDownLatch(1);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var first = workers.submit(() -> {
+                start.await(1, TimeUnit.SECONDS);
+                return concurrencyCoordinator.create(threadId, "model", Map.of());
+            });
+            var second = workers.submit(() -> {
+                start.await(1, TimeUnit.SECONDS);
+                return concurrencyCoordinator.create(threadId, "model", Map.of());
+            });
+            start.countDown();
+            first.get(3, TimeUnit.SECONDS);
+            second.get(3, TimeUnit.SECONDS);
+            assertThat(manager.listByThread(threadId)).filteredOn(run -> run.status() == RunStatus.PENDING).hasSize(1);
+            assertThat(manager.listByThread(threadId)).filteredOn(run -> run.status() == RunStatus.CANCELLED).hasSize(1);
+        } finally {
+            properties.setRunConcurrencyMode(original);
+        }
+    }
+
+    @Test
+    void parallelModeKeepsBothRunsActive() {
+        RunConcurrencyMode original = properties.getRunConcurrencyMode();
+        properties.setRunConcurrencyMode(RunConcurrencyMode.ALLOW_PARALLEL_RUNS);
+        String threadId = "thread-concurrent-parallel-" + java.util.UUID.randomUUID();
+        try {
+            concurrencyCoordinator.create(threadId, "model", Map.of());
+            concurrencyCoordinator.create(threadId, "model", Map.of());
+            assertThat(manager.listByThread(threadId)).filteredOn(run -> run.status() == RunStatus.PENDING).hasSize(2);
+        } finally {
+            properties.setRunConcurrencyMode(original);
+        }
     }
 
     @Test

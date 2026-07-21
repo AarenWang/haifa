@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType;
 import org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType;
+import org.wrj.haifa.ai.deerflow.run.RunConcurrencyMode;
 
 @ConfigurationProperties(prefix = "haifa.ai.deerflow")
 public class DeerFlowProperties {
@@ -26,6 +27,8 @@ public class DeerFlowProperties {
     private boolean mcpEnabled = false;
     private Mcp mcp = new Mcp();
     private boolean toolSearchEnabled = true;
+    /** Phase-62 compatibility default; production choice is made at manual gate 2. */
+    private RunConcurrencyMode runConcurrencyMode = RunConcurrencyMode.ALLOW_PARALLEL_RUNS;
 
     @Min(1_000)
     private long modelTimeout = 300_000; // 5 minutes in ms
@@ -713,6 +716,15 @@ public class DeerFlowProperties {
 
     public int getMaxIterations() {
         return maxIterations;
+    }
+
+    public RunConcurrencyMode getRunConcurrencyMode() {
+        return runConcurrencyMode;
+    }
+
+    public void setRunConcurrencyMode(RunConcurrencyMode runConcurrencyMode) {
+        this.runConcurrencyMode = runConcurrencyMode == null
+                ? RunConcurrencyMode.ALLOW_PARALLEL_RUNS : runConcurrencyMode;
     }
 
     public void setMaxIterations(int maxIterations) {

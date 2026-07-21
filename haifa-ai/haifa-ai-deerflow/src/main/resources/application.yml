@@ -59,6 +59,7 @@ deerflow:
 haifa:
   ai:
     deerflow:
+      run-concurrency-mode: ${HAIFA_DEERFLOW_RUN_CONCURRENCY_MODE:ALLOW_PARALLEL_RUNS}
       voice:
         enabled: ${HAIFA_DEERFLOW_VOICE_ENABLED:true}
         websocket:

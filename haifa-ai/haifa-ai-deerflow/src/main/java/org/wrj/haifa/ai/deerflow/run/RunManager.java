@@ -61,30 +61,31 @@ public class RunManager {
     @Transactional
     public List<RunRecord> listByThread(String threadId) {
         List<RunEntity> runs = runRepository.findByThreadIdOrderByCreatedAtDesc(threadId);
-        cancelSupersededRunningRuns(runs);
         return runs.stream()
                 .map(runMapper::toRecord)
                 .toList();
     }
 
-    private void cancelSupersededRunningRuns(List<RunEntity> runsNewestFirst) {
-        boolean hasNewerRun = false;
-        for (RunEntity entity : runsNewestFirst) {
-            if (entity.getStatus() == RunStatus.RUNNING && hasNewerRun) {
-                String reason = "Run cancelled because a newer run exists for this thread.";
-                boolean cancelled = transition(entity.getRunId(), Set.of(RunStatus.RUNNING),
-                        RunStatus.CANCELLED, reason);
-                if (cancelled) {
-                    entity.setStatus(RunStatus.CANCELLED);
-                    entity.setError(reason);
-                    entity.setUpdatedAt(Instant.now());
-                }
-                if (cancelled && this.agentLoopRunStore != null) {
-                    this.agentLoopRunStore.markCancelled(entity.getRunId(), "SUPERSEDED_BY_NEWER_RUN");
+    @Transactional
+    public List<String> supersedeActiveRuns(String threadId) {
+        List<RunEntity> runs = runRepository.findByThreadIdOrderByCreatedAtDesc(threadId);
+        List<String> superseded = new java.util.ArrayList<>();
+        for (RunEntity entity : runs) {
+            if (entity.getStatus() != RunStatus.PENDING && entity.getStatus() != RunStatus.RUNNING
+                    && entity.getStatus() != RunStatus.SUSPENDED) {
+                continue;
+            }
+            boolean cancelled = transition(entity.getRunId(),
+                    Set.of(RunStatus.PENDING, RunStatus.RUNNING, RunStatus.SUSPENDED), RunStatus.CANCELLED,
+                    "SUPERSEDED_BY_NEWER_RUN");
+            if (cancelled) {
+                superseded.add(entity.getRunId());
+                if (agentLoopRunStore != null) {
+                    agentLoopRunStore.markCancelled(entity.getRunId(), "SUPERSEDED_BY_NEWER_RUN");
                 }
             }
-            hasNewerRun = true;
         }
+        return List.copyOf(superseded);
     }
 
     @Transactional
