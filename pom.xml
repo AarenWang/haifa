@@ -22,7 +22,7 @@
         <haifa.project.version>1.0-SNAPSHOT</haifa.project.version>
         <grpc.version>1.55.1</grpc.version>
         <flink.version>1.18.0</flink.version>
-        <jackson.version>2.15.4</jackson.version>
+        <jackson.version>2.18.9</jackson.version>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <maven.compiler.release>21</maven.compiler.release>
