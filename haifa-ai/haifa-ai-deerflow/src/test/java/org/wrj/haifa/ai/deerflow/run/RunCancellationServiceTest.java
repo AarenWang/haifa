@@ -40,6 +40,22 @@ class RunCancellationServiceTest {
         verify(fixture.eventStore).save(event);
     }
 
+    @Test
+    void cancellingParentPropagatesToChildAndCompletionRemovesRelationship() {
+        Fixture fixture = fixture(RunStatus.RUNNING, true);
+        fixture.service.register("parent-run", "thread-1");
+        fixture.service.register("child-run", "thread-1");
+        fixture.service.registerChild("parent-run", "child-run");
+
+        assertThat(fixture.service.activeChildren("parent-run")).containsExactly("child-run");
+        assertThat(fixture.service.requestCancel("parent-run", "USER_CANCELLED")).isTrue();
+        assertThat(fixture.service.isCancelled("parent-run")).isTrue();
+        assertThat(fixture.service.isCancelled("child-run")).isTrue();
+
+        fixture.service.finishExecution("child-run");
+        assertThat(fixture.service.activeChildren("parent-run")).isEmpty();
+    }
+
     private static Fixture fixture(RunStatus status, boolean transition) {
         RunManager runManager = mock(RunManager.class);
         ThreadManager threadManager = mock(ThreadManager.class);

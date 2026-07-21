@@ -1,6 +1,5 @@
 package org.wrj.haifa.ai.deerflow.subagent;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -8,15 +7,13 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.springframework.context.ApplicationContext;
-import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
-import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.ExecutionToolCall;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.ExecutionToolResult;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.middleware.ToolOutputBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
-import org.wrj.haifa.ai.deerflow.model.ModelResponse;
-import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
 import org.wrj.haifa.ai.deerflow.research.SearchIngestionResult;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
@@ -44,15 +41,9 @@ class SubagentRuntimeTest {
     private ApplicationContext applicationContext;
     private ToolPolicyService toolPolicyService;
     private ToolRegistry toolRegistry;
+    private SubgraphRunner subgraphRunner;
 
     private SubagentRuntime subagentRuntime;
-
-    @Test
-    void observerIsAStandaloneTopLevelClass() {
-        assertThat(SubagentLoopObserver.class.getEnclosingClass()).isNull();
-        assertThat(SubagentLoopObserver.class.getName())
-                .isEqualTo("org.wrj.haifa.ai.deerflow.subagent.SubagentLoopObserver");
-    }
 
     @BeforeEach
     void setUp() {
@@ -64,9 +55,11 @@ class SubagentRuntimeTest {
         applicationContext = mock(ApplicationContext.class);
         toolPolicyService = mock(ToolPolicyService.class);
         toolRegistry = mock(ToolRegistry.class);
+        subgraphRunner = mock(SubgraphRunner.class);
 
         when(properties.getModel()).thenReturn("test-model");
         when(properties.getWorkspaceRoot()).thenReturn(".");
+        when(properties.getSubagentMaxConcurrent()).thenReturn(3);
 
         when(applicationContext.getBean(ToolRegistry.class)).thenReturn(toolRegistry);
         when(applicationContext.getBean(ToolPolicyService.class)).thenReturn(toolPolicyService);
@@ -79,6 +72,13 @@ class SubagentRuntimeTest {
                 budgetMiddleware
         );
         subagentRuntime.setApplicationContext(applicationContext);
+        subagentRuntime.setSubgraphRunner(subgraphRunner);
+        when(subgraphRunner.execute(any(SubgraphRunner.ChildRequest.class), any(SubagentExecutionHook.class)))
+                .thenAnswer(invocation -> {
+                    SubgraphRunner.ChildRequest request = invocation.getArgument(0);
+                    return SubagentResult.success(request.parentToolCallId(), request.parentRunId(),
+                            "Task complete summary", List.of(), List.of(), Map.of(), 1);
+                });
     }
 
     @Test
@@ -102,10 +102,6 @@ class SubagentRuntimeTest {
     void executeRunsSuccessfullyAndFiltersTools() {
         SubagentConfig config = SubagentConfig.generalPurpose();
         when(subagentRegistry.getConfig("general-purpose")).thenReturn(config);
-
-        // Mock model response
-        when(modelClient.generate(any(org.wrj.haifa.ai.deerflow.model.ModelPrompt.class)))
-                .thenReturn(Mono.just(new ModelResponse("Task complete summary")));
 
         // Setup tools
         AgentTool tool1 = mock(AgentTool.class);
@@ -134,9 +130,11 @@ class SubagentRuntimeTest {
         // Verify active tasks tracking
         assertThat(subagentRuntime.activeCount("run-456")).isEqualTo(0);
 
-        ArgumentCaptor<ModelPrompt> promptCaptor = ArgumentCaptor.forClass(ModelPrompt.class);
-        verify(modelClient).generate(promptCaptor.capture());
-        assertThat(promptCaptor.getValue().modelName()).isEqualTo("qwen-plus");
+        ArgumentCaptor<SubgraphRunner.ChildRequest> requestCaptor =
+                ArgumentCaptor.forClass(SubgraphRunner.ChildRequest.class);
+        verify(subgraphRunner).execute(requestCaptor.capture(), any(SubagentExecutionHook.class));
+        assertThat(requestCaptor.getValue().modelName()).isEqualTo("qwen-plus");
+        assertThat(requestCaptor.getValue().allowedToolNames()).containsExactly("web_search");
     }
 
     @Test
@@ -161,8 +159,12 @@ class SubagentRuntimeTest {
     @Test
     void opensProviderFailureCircuitAndReleasesSlot() {
         when(subagentRegistry.getConfig("general-purpose")).thenReturn(SubagentConfig.generalPurpose());
-        when(modelClient.generate(any(ModelPrompt.class)))
-                .thenReturn(Mono.error(new IllegalStateException("Model call failed: 400 Bad Request")));
+        when(subgraphRunner.execute(any(SubgraphRunner.ChildRequest.class), any(SubagentExecutionHook.class)))
+                .thenAnswer(invocation -> {
+                    SubgraphRunner.ChildRequest request = invocation.getArgument(0);
+                    return SubagentResult.failed(request.parentToolCallId(), request.parentRunId(),
+                            "Model call failed: 400 Bad Request", 1);
+                });
 
         AgentTool searchTool = mock(AgentTool.class);
         when(searchTool.name()).thenReturn("web_search");
@@ -186,12 +188,6 @@ class SubagentRuntimeTest {
     void registersSubagentSearchResultsUnderParentRun() {
         SubagentConfig config = SubagentConfig.generalPurpose();
         when(subagentRegistry.getConfig("general-purpose")).thenReturn(config);
-        when(modelClient.generate(any(org.wrj.haifa.ai.deerflow.model.ModelPrompt.class)))
-                .thenReturn(Mono.just(new ModelResponse("", List.of(
-                        new ModelToolCall("call-search", "web_search", "{\"query\":\"parent evidence\"}")
-                ))))
-                .thenReturn(Mono.just(new ModelResponse("Subagent summary")));
-
         AgentTool searchTool = new AgentTool() {
             @Override
             public String name() {
@@ -218,6 +214,18 @@ class SubagentRuntimeTest {
         when(toolPolicyService.evaluateTool(eq("web_search"), any(), any())).thenReturn(ToolPolicyDecision.allow());
         when(researchRuntimeSupport.ingestSearchResults(eq("thread-parent"), eq("run-parent"), eq("search raw")))
                 .thenReturn(new SearchIngestionResult(List.of(), "registered"));
+        when(subgraphRunner.execute(any(SubgraphRunner.ChildRequest.class), any(SubagentExecutionHook.class)))
+                .thenAnswer(invocation -> {
+                    SubgraphRunner.ChildRequest request = invocation.getArgument(0);
+                    SubagentExecutionHook hook = invocation.getArgument(1);
+                    hook.afterTool(null,
+                            new ExecutionToolCall("call-search", "web_search", "{}", Map.of()),
+                            new ExecutionToolResult("call-search", "web_search", "{}",
+                                    ExecutionToolResult.Status.SUCCESS, "search raw", "", 1, Map.of()),
+                            new java.util.ArrayList<>(), new java.util.concurrent.atomic.AtomicInteger(), List.of());
+                    return SubagentResult.success(request.parentToolCallId(), request.parentRunId(),
+                            "Subagent summary", hook.evidenceIds(), hook.sourceIds(), Map.of(), 1);
+                });
 
         SubagentResult result = subagentRuntime.execute(
                 "desc", "prompt", "general-purpose",

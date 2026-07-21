@@ -1,6 +1,5 @@
 package org.wrj.haifa.ai.deerflow.subagent;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -8,7 +7,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,8 +16,6 @@ import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
-import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
-import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.middleware.ToolOutputBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
@@ -28,7 +24,6 @@ import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 
-import reactor.core.publisher.Flux;
 
 /**
  * Runtime for executing subagent tasks.
@@ -54,6 +49,14 @@ public class SubagentRuntime implements ApplicationContextAware {
     private final DeerFlowProperties properties;
     private final ToolOutputBudgetMiddleware toolOutputBudgetMiddleware;
     private org.springframework.context.ApplicationContext applicationContext;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private SubgraphRunner subgraphRunner;
+
+    void setSubgraphRunner(SubgraphRunner subgraphRunner) {
+        this.subgraphRunner = subgraphRunner;
+    }
 
     // In-memory tracking of active subagent executions per parent run
     private final ConcurrentHashMap<String, Set<String>> activeSubagentTasks = new ConcurrentHashMap<>();
@@ -109,7 +112,10 @@ public class SubagentRuntime implements ApplicationContextAware {
         String taskId = "sub-" + UUID.randomUUID().toString().substring(0, 8);
 
         // Track active subagent for this parent run
-        activeSubagentTasks.computeIfAbsent(parentRunId, k -> ConcurrentHashMap.newKeySet()).add(taskId);
+        if (!reserveActiveTask(parentRunId, taskId)) {
+            return SubagentResult.failed(taskId, parentRunId,
+                    "Subagent concurrency limit exceeded: max " + properties.getSubagentMaxConcurrent(), 0);
+        }
         log.info("subagent_diagnostic phase=created taskId={} parentRunId={} subagentType={} parentModel={} "
                         + "modelOverride={} activeCount={}",
                 taskId, parentRunId, subagentType, safeLogValue(parentModelName), safeLogValue(modelOverride),
@@ -138,103 +144,25 @@ public class SubagentRuntime implements ApplicationContextAware {
                         "No tools available for subagent after policy filtering", 0);
             }
 
-            // 4. Build subagent run config
-            String subagentRunId = taskId;
-            AgentRunConfig subagentRunConfig = new AgentRunConfig(
-                    parentThreadId,
-                    subagentRunId,
-                    effectiveModel,
-                    false, // thinking enabled
-                    false, // plan mode
-                    maxTurnsOverride != null ? maxTurnsOverride : config.maxTurns(),
-                    Path.of(properties.getWorkspaceRoot()),
-                    parentMode,
-                    org.wrj.haifa.ai.deerflow.agent.ResearchOptions.defaults(),
-                    Map.of("parentRunId", parentRunId, "subagentType", subagentType,
-                            "description", description, "taskId", taskId)
-            );
-
-            // 5. Build system prompt for subagent
+            // 4. Build child prompt and neutral execution hook.
             String subagentSystemPrompt = buildSubagentSystemPrompt(config, parentThreadId, parentRunId, description);
-
-            // 6. Build loop config
-            LoopConfig loopConfig = new LoopConfig(
-                    maxTurnsOverride != null ? maxTurnsOverride : config.maxTurns(),
-                    Math.max(5, (maxTurnsOverride != null ? maxTurnsOverride : config.maxTurns()) * 2),
-                    (timeoutOverride != null ? timeoutOverride : config.timeoutSeconds()) * 1000L,
-                    org.wrj.haifa.ai.deerflow.agent.ResearchOptions.defaults()
-            );
-
-            // 7. Create a filtered tool registry for this subagent
-            ToolRegistry subagentToolRegistry = new FilteredToolRegistry(filteredTools);
-
-            // 8. Create observer that captures sources/evidence and registers them under the parent run.
-            SubagentLoopObserver subagentObserver = new SubagentLoopObserver(
-                    researchRuntimeSupport, parentThreadId, parentRunId, subagentRunId);
-
-            // 9. Build and run the subagent loop
-            AgentLoop subagentLoop = new AgentLoop(
-                    modelClient,
-                    subagentToolRegistry,
-                    null, // modelStepStore - not persisted for subagent
-                    null, // toolCallStore - not persisted for subagent
-                    null, // agentLoopRunStore - not persisted for subagent
-                    subagentObserver,
-                    toolOutputBudgetMiddleware,
-                    properties
-            );
-            try {
-                var batchExecutor = applicationContext.getBean(
-                        org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchExecutor.class);
-                var cancellationService = applicationContext.getBean(
-                        org.wrj.haifa.ai.deerflow.run.RunCancellationService.class);
-                var executorProperties = applicationContext.getBean(
-                        org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties.class);
-                if (batchExecutor != null && executorProperties != null) {
-                    subagentLoop.configureToolExecution(batchExecutor, cancellationService,
-                            executorProperties.getToolCorePoolSize());
-                }
+            SubagentExecutionHook hook = new SubagentExecutionHook(
+                    researchRuntimeSupport, parentThreadId, parentRunId);
+            if (subgraphRunner == null) {
+                return SubagentResult.failed(taskId, parentRunId,
+                        "SubgraphRunner is not available; child Legacy Loop fallback is disabled", 0);
             }
-            catch (org.springframework.beans.BeansException ignored) {
-                // Standalone tests retain the conservative serial fallback.
+            int maxTurns = maxTurnsOverride != null ? maxTurnsOverride : config.maxTurns();
+            long timeoutMs = (timeoutOverride != null ? timeoutOverride : config.timeoutSeconds()) * 1000L;
+            SubagentResult result = subgraphRunner.execute(new SubgraphRunner.ChildRequest(
+                    parentRunId, taskId, parentThreadId, effectiveModel, subagentType,
+                    subagentSystemPrompt + "\n\n<task>\n" + prompt + "\n</task>",
+                    filteredTools.stream().map(AgentTool::name).collect(java.util.stream.Collectors.toSet()),
+                    activeSkills, maxTurns, timeoutMs, 1), hook);
+            if (!result.isSuccess()) {
+                recordProviderFailure(parentRunId, taskId, subagentType, effectiveModel, filteredTools, result.error());
             }
-
-            AtomicInteger seq = new AtomicInteger();
-            Flux<AgentEvent> eventFlux = subagentLoop.run(
-                    loopConfig,
-                    subagentRunConfig,
-                    subagentSystemPrompt,
-                    prompt,
-                    seq,
-                    getToolPolicyService(),
-                    activeSkills,
-                    List.of()
-            );
-
-            // Block to collect all events and extract result
-            List<AgentEvent> events = eventFlux.collectList().block();
-            long duration = System.currentTimeMillis() - startTime;
-
-            // 10. Extract final answer and collect sources/evidence from observer
-            String finalAnswer = extractFinalAnswer(events);
-            List<String> evidenceIds = subagentObserver.getEvidenceIds();
-            List<String> sourceIds = subagentObserver.getSourceIds();
-            Map<String, Integer> tokenUsage = estimateTokenUsage(events);
-
-            // 11. Check if run failed
-            if (events != null) {
-                boolean runFailed = events.stream().anyMatch(e -> e.type() == AgentEventType.RUN_FAILED);
-                if (runFailed) {
-                    String error = events.stream()
-                            .filter(e -> e.type() == AgentEventType.RUN_FAILED)
-                            .map(AgentEvent::content)
-                            .findFirst().orElse("Subagent run failed");
-                    recordProviderFailure(parentRunId, taskId, subagentType, effectiveModel, filteredTools, error);
-                    return SubagentResult.failed(taskId, parentRunId, error, duration);
-                }
-            }
-
-            return SubagentResult.success(taskId, parentRunId, finalAnswer, evidenceIds, sourceIds, tokenUsage, duration);
+            return result;
 
         } catch (Exception ex) {
             long duration = System.currentTimeMillis() - startTime;
@@ -254,6 +182,16 @@ public class SubagentRuntime implements ApplicationContextAware {
     public int activeCount(String parentRunId) {
         Set<String> active = activeSubagentTasks.get(parentRunId);
         return active == null ? 0 : active.size();
+    }
+
+    private boolean reserveActiveTask(String parentRunId, String taskId) {
+        Set<String> active = activeSubagentTasks.computeIfAbsent(parentRunId, ignored -> ConcurrentHashMap.newKeySet());
+        synchronized (active) {
+            if (active.size() >= properties.getSubagentMaxConcurrent()) {
+                return false;
+            }
+            return active.add(taskId);
+        }
     }
 
     /**

@@ -24,6 +24,8 @@ public class RunCancellationService {
     private final MessageStore messageStore;
     private final AgentEventStore agentEventStore;
     private final Map<String, CancellationState> states = new ConcurrentHashMap<>();
+    private final Map<String, java.util.Set<String>> childrenByParent = new ConcurrentHashMap<>();
+    private final Map<String, String> parentByChild = new ConcurrentHashMap<>();
 
     public RunCancellationService(RunManager runManager,
                                   ThreadManager threadManager,
@@ -63,7 +65,25 @@ public class RunCancellationService {
         if (task != null) {
             task.cancel(true);
         }
+        for (String childRunId : childrenByParent.getOrDefault(runId, java.util.Set.of())) {
+            requestCancel(childRunId, "PARENT_CANCELLED:" + normalizeReason(reason));
+        }
         return changed;
+    }
+
+    public void registerChild(String parentRunId, String childRunId) {
+        if (isBlank(parentRunId) || isBlank(childRunId) || parentRunId.equals(childRunId)) {
+            return;
+        }
+        childrenByParent.computeIfAbsent(parentRunId, ignored -> ConcurrentHashMap.newKeySet()).add(childRunId);
+        parentByChild.put(childRunId, parentRunId);
+        if (isCancelled(parentRunId)) {
+            requestCancel(childRunId, "PARENT_CANCELLED");
+        }
+    }
+
+    public java.util.Set<String> activeChildren(String parentRunId) {
+        return java.util.Set.copyOf(childrenByParent.getOrDefault(parentRunId, java.util.Set.of()));
     }
 
     public AgentEvent recordCancelled(String runId, String threadId, String reason, long totalDurationMs) {
@@ -151,6 +171,14 @@ public class RunCancellationService {
             return;
         }
         states.remove(runId);
+        String parent = parentByChild.remove(runId);
+        if (parent != null) {
+            childrenByParent.computeIfPresent(parent, (ignored, children) -> {
+                children.remove(runId);
+                return children.isEmpty() ? null : children;
+            });
+        }
+        childrenByParent.remove(runId);
     }
 
     private CancellationState state(String runId) {
