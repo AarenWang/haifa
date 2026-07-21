@@ -34,11 +34,26 @@ public class ToolCallStore {
     }
 
     @Transactional
+    public ToolCallEntity saveRequested(
+            org.wrj.haifa.ai.deerflow.agent.lifecycle.ExecutionToolCall call, String runId, String threadId) {
+        return saveRequested(new ToolCall(call.id(), call.toolName(), call.arguments(), ToolCall.Status.PENDING,
+                call.metadata()), runId, threadId);
+    }
+
+    @Transactional
     public void saveResult(String toolCallId, ToolCallResult result) {
         toolCallRepository.findById(toolCallId).ifPresent(entity -> {
             toolCallMapper.updateFromResult(entity, result);
             toolCallRepository.save(entity);
         });
+    }
+
+    @Transactional
+    public void saveResult(String toolCallId,
+            org.wrj.haifa.ai.deerflow.agent.lifecycle.ExecutionToolResult result) {
+        ToolCallResult.Status status = ToolCallResult.Status.valueOf(result.status().name());
+        saveResult(toolCallId, new ToolCallResult(result.id(), result.toolName(), result.arguments(), status,
+                result.result(), result.error(), result.durationMs(), result.metadata()));
     }
 
     @Transactional(readOnly = true)

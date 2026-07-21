@@ -14,11 +14,12 @@ import org.wrj.haifa.ai.deerflow.agent.AgentRequest;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
 import org.wrj.haifa.ai.deerflow.agent.RunMode;
-import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.ExecutionLimits;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.NoopExecutionHook;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContext;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContextRegistry;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleContext;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.middleware.AgentMiddleware;
@@ -29,14 +30,16 @@ import org.wrj.haifa.ai.deerflow.middleware.MiddlewareOrder;
 import org.wrj.haifa.ai.deerflow.middleware.MiddlewarePhase;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import reactor.core.publisher.Mono;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class ChatPromptLifecycleNodesTest {
 
     private static final String RUN_ID = "run-prompt-lifecycle";
+    private final RunExecutionContextRegistry contextRegistry = new RunExecutionContextRegistry();
 
     @AfterEach
     void cleanupLifecycle() {
-        GraphChatLifecycleRegistry.deregister(RUN_ID);
+        contextRegistry.close(RUN_ID);
     }
 
     @Test
@@ -51,14 +54,16 @@ class ChatPromptLifecycleNodesTest {
                 properties, List.of(modelStep, runOnce), executionManager);
         ChatAssembleModelInputNode assembleNode = new ChatAssembleModelInputNode(
                 properties, List.of(modelStep, runOnce), executionManager);
+        ReflectionTestUtils.setField(prepareNode, "executionContextRegistry", contextRegistry);
+        ReflectionTestUtils.setField(assembleNode, "executionContextRegistry", contextRegistry);
 
         AgentRunConfig config = new AgentRunConfig(
                 "thread-prompt-lifecycle", RUN_ID, "test-model", false, false, 4,
                 Path.of("."), RunMode.CHAT, ResearchOptions.defaults(), Map.of());
         AgentRequest request = new AgentRequest(config.threadId(), "hello", config.modelName());
-        GraphChatLifecycleRegistry.register(RUN_ID, new GraphChatLifecycleContext(
-                config, request, new LoopConfig(4, 4, 30_000, ResearchOptions.defaults()),
-                null, new AtomicInteger(), List.of(), List.of()));
+        contextRegistry.register(RUN_ID, new RunExecutionContext(config, request,
+                new ExecutionLimits(4, 4, 30_000, ResearchOptions.defaults()), NoopExecutionHook.INSTANCE,
+                new AtomicInteger(), null, List.of(), List.of(), java.util.Set.of(), "", "", 0));
 
         Map<String, Object> state = new HashMap<>();
         state.put(AgentGraphStateKeys.RUN_ID, RUN_ID);

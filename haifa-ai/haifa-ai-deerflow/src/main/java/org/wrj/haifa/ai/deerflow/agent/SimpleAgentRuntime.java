@@ -20,6 +20,10 @@ import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
 import org.wrj.haifa.ai.deerflow.agent.loop.CompositeAgentLoopObserver;
 import org.wrj.haifa.ai.deerflow.agent.loop.DefaultAgentLoopObserver;
 import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
+import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserverAdapter;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.AgentExecutionHook;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.ExecutionLimits;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContext;
 import org.wrj.haifa.ai.deerflow.artifact.ReportWriteResult;
 import org.wrj.haifa.ai.deerflow.artifact.ReportWriterService;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
@@ -86,6 +90,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final MessageStore messageStore;
     private final List<AgentMiddleware> middlewares;
     private final AgentLoop agentLoop;
+    private final AgentExecutionHook graphExecutionHook;
     private final AgentEventStore agentEventStore;
     private final ToolExecutionStore toolExecutionStore;
     private final ModelStepStore modelStepStore;
@@ -168,6 +173,9 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
     @Autowired(required = false)
     private org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties graphExecutorProperties;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.run.RunConcurrencyCoordinator runConcurrencyCoordinator;
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
             RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
@@ -288,8 +296,10 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 threadFileStore
         ));
 
+        CompositeAgentLoopObserver legacyObserver = new CompositeAgentLoopObserver(observers);
+        this.graphExecutionHook = new AgentLoopObserverAdapter(legacyObserver);
         this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
-                new CompositeAgentLoopObserver(observers),
+                legacyObserver,
                 toolOutputBudgetMiddleware,
                 clarificationStore,
                 approvalPolicyService,
@@ -332,7 +342,21 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 runMetadata.put("outputFormat", researchOptions.outputFormat().name());
             }
             Map<String, Object> runMetadataCopy = Map.copyOf(runMetadata);
-            RunRecord run = this.runManager.create(threadId, modelName, runMetadataCopy);
+            boolean activeChatGraph = shouldUseActiveChatGraph(this.properties, this.graphChatRuntime, effectiveRequest);
+            boolean resumingGraphRun = activeChatGraph && isResumedRun(request.metadata());
+            RunRecord run;
+            if (resumingGraphRun) {
+                String resumedRunId = String.valueOf(request.metadata().get("resumedFromRunId"));
+                run = this.runManager.find(resumedRunId)
+                        .filter(candidate -> candidate.threadId().equals(threadId))
+                        .filter(candidate -> candidate.status() == org.wrj.haifa.ai.deerflow.run.RunStatus.SUSPENDED)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Graph resume requires a suspended run in the same thread: " + resumedRunId));
+            } else {
+                run = this.runConcurrencyCoordinator == null
+                        ? this.runManager.create(threadId, modelName, runMetadataCopy)
+                        : this.runConcurrencyCoordinator.create(threadId, modelName, runMetadataCopy);
+            }
             this.runManager.markRunning(run.runId());
             inheritTodosFromResumedRun(threadId, run.runId(), request.metadata());
 
@@ -369,12 +393,13 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
             AtomicInteger seq = new AtomicInteger();
             List<AgentEvent> prefixEvents = new ArrayList<>();
-            prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED,
-                    request.isResearchMode() ? "Research run started" : "Run started",
+            prefixEvents.add(event(seq, config, resumingGraphRun ? AgentEventType.RUN_RESUMED : AgentEventType.RUN_STARTED,
+                    resumingGraphRun ? "Run resumed"
+                            : request.isResearchMode() ? "Research run started" : "Run started",
                     runMetadataCopy));
 
             List<Skill> activeSkills = new ArrayList<>(resolveActiveSkills(effectiveRequest));
-            if (request.isResearchMode()) {
+            if (request.isResearchMode() && !resumingGraphRun) {
                 boolean hasDeepResearch = activeSkills.stream().anyMatch(s -> "deep-research".equals(s.name()));
                 if (!hasDeepResearch) {
                     this.skillStorage.findAny("deep-research").ifPresent(activeSkills::add);
@@ -415,7 +440,6 @@ public class SimpleAgentRuntime implements AgentRuntime {
                 }}
 
             List<ToolResult> toolResults = List.of();
-            boolean activeChatGraph = shouldUseActiveChatGraph(this.properties, this.graphChatRuntime, effectiveRequest);
             boolean activeResearchGraph = false;
             AgentRuntimeContext runtimeContext = AgentRuntimeContext.of(
                     config, effectiveRequest, toolResults, this.properties, activeSkills);
@@ -454,14 +478,20 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
                 Flux<AgentEvent> loopEvents = activeChatGraph
                         ? this.graphChatRuntime.run(new GraphChatRuntimeRequest(
-                                this.agentLoop,
-                                loopConfig,
-                                config,
-                                effectiveRequest,
-                                seq,
-                                this.toolPolicyService,
-                                activeSkills,
-                                request.uploadedFileIds(),
+                                new RunExecutionContext(
+                                        config,
+                                        effectiveRequest,
+                                        new ExecutionLimits(loopConfig.maxSteps(), loopConfig.maxToolCalls(),
+                                                loopConfig.timeoutMs(), loopConfig.researchOptions()),
+                                        this.graphExecutionHook,
+                                        seq,
+                                        this.toolPolicyService,
+                                        activeSkills,
+                                        request.uploadedFileIds(),
+                                        java.util.Set.of(),
+                                        "",
+                                        "",
+                                        0),
                                 this.messageStore.listByThread(config.threadId())
                         ))
                         : activeResearchGraph

@@ -12,10 +12,10 @@ import java.util.concurrent.CompletableFuture;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
-import org.wrj.haifa.ai.deerflow.agent.loop.FinalAnswerDecision;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.CompletionDecision;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContext;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContextRegistry;
 import org.wrj.haifa.ai.deerflow.completion.CompletionPolicyEngine;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleContext;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
@@ -40,6 +40,9 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
     @Autowired
     private GraphExecutionManager graphExecutionManager;
 
+    @Autowired(required = false)
+    private RunExecutionContextRegistry executionContextRegistry;
+
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
@@ -58,9 +61,10 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
             update.put("accepted_final_metadata", Map.of());
             update.put(AgentGraphStateKeys.MODEL_STEPS, List.of(Map.of("node", "final_answer_gate", "status", "accepted")));
 
-            GraphChatLifecycleContext context = GraphChatLifecycleRegistry.get(runId).orElse(null);
-            boolean maxStepsReached = context != null && context.loopConfig() != null
-                    && step >= context.loopConfig().maxSteps();
+            RunExecutionContext context = executionContextRegistry == null ? null
+                    : executionContextRegistry.get(runId).orElse(null);
+            boolean maxStepsReached = context != null && context.limits() != null
+                    && step >= context.limits().maxSteps();
             CompletionPolicyEngine.Decision completionDecision = completionPolicyEngine.evaluate(
                     runId,
                     view.listOfMaps(AgentGraphStateKeys.COMPLETION_REQUIREMENTS),
@@ -91,7 +95,7 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
                         "node", "final_answer_gate", "status", "requirements_rejected")));
                 return update;
             }
-            if (context == null || context.observer() == null || context.runConfig() == null) {
+            if (context == null || context.hook() == null || context.runConfig() == null) {
                 return update;
             }
 
@@ -100,7 +104,7 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
 
             if (!maxStepsReached) {
                 int before = history.size();
-                boolean shouldContinue = context.observer().shouldContinue(
+                boolean shouldContinue = context.hook().shouldContinue(
                         context.runConfig(), answer, observerEvents, context.eventSequence(), step, totalToolCalls, history);
                 publishObserverEvents(runId, observerEvents);
                 if (shouldContinue) {
@@ -112,7 +116,7 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
                 }
             }
 
-            FinalAnswerDecision decision = context.observer().onFinalAnswerProposed(
+            CompletionDecision decision = context.hook().evaluateFinalAnswer(
                     context.runConfig(), answer, observerEvents, context.eventSequence(), step, totalToolCalls);
             publishObserverEvents(runId, observerEvents);
             if (decision != null && !decision.accepted() && !maxStepsReached) {
@@ -143,7 +147,7 @@ public class ChatFinalAnswerGateNode implements AsyncNodeAction {
                 update.put("accepted_final_metadata", decision.metadata());
             }
             if (maxStepsReached) {
-                context.observer().onMaxStepsReached(context.runConfig(), answer,
+                context.hook().onMaxSteps(context.runConfig(), answer,
                         observerEvents, context.eventSequence(), step, totalToolCalls);
                 publishObserverEvents(runId, observerEvents);
             }

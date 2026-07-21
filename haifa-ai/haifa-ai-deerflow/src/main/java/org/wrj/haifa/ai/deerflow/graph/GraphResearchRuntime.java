@@ -33,6 +33,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
 @Component
+@Deprecated(forRemoval = true)
 public class GraphResearchRuntime {
 
     private static final String GRAPH_NAME = ResearchAgentGraph.GRAPH_NAME;
@@ -116,7 +117,7 @@ public class GraphResearchRuntime {
                 initialState.put(AgentGraphStateKeys.RESEARCH_EVIDENCE_COUNT, 0);
 
                 BaseCheckpointSaver saver = checkpointEnabled() ? sqliteCheckpointSaver : null;
-                int maxIterations = request.loopConfig().maxSteps();
+                int maxIterations = request.limits().maxSteps();
                 StateGraph activeGraph = activeResearchGraph(maxIterations);
                 CompiledGraph graph = saver == null ? activeGraph.compile() : activeGraph.compile(
                         CompileConfig.builder()
@@ -152,7 +153,7 @@ public class GraphResearchRuntime {
                         ), executionConfig)
                         : graph.stream(initialState, runnableConfig);
 
-                streamResult.collectList().block(Duration.ofMillis(request.loopConfig().timeoutMs()));
+                streamResult.collectList().block(Duration.ofMillis(request.limits().timeoutMs()));
                 GraphEventRegistry.complete(runId);
             }
             catch (Exception ex) {

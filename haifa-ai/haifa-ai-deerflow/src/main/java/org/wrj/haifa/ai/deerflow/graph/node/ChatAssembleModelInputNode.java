@@ -9,8 +9,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleContext;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleRegistry;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContext;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContextRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
@@ -31,6 +31,9 @@ public class ChatAssembleModelInputNode implements AsyncNodeAction {
     private final List<AgentMiddleware> modelInputMiddlewares;
     private final GraphExecutionManager graphExecutionManager;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private RunExecutionContextRegistry executionContextRegistry;
+
     public ChatAssembleModelInputNode(DeerFlowProperties properties, List<AgentMiddleware> middlewares,
             GraphExecutionManager graphExecutionManager) {
         this.properties = properties;
@@ -45,7 +48,7 @@ public class ChatAssembleModelInputNode implements AsyncNodeAction {
 
     private Map<String, Object> assemble(OverAllState state) {
         AgentGraphStateView view = AgentGraphStateView.of(state);
-        GraphChatLifecycleContext lifecycle = GraphChatLifecycleRegistry.get(view.runId())
+        RunExecutionContext lifecycle = executionContextRegistry == null ? null : executionContextRegistry.get(view.runId())
                 .orElseThrow(() -> new IllegalStateException(
                         "Graph lifecycle context missing for run " + view.runId()));
         Map<String, Object> baseState = view.map(AgentGraphStateKeys.RUN_PROMPT_BASE);

@@ -9,6 +9,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.config.GraphRuntimeMode;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContextRegistry;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
@@ -35,6 +36,9 @@ public class SimpleAgentRuntimeGraphFirstChatTest {
 
     @Autowired
     private MessageStore messageStore;
+
+    @Autowired
+    private RunExecutionContextRegistry executionContextRegistry;
 
     @MockitoBean
     private AgentModelClient modelClient;
@@ -89,5 +93,6 @@ public class SimpleAgentRuntimeGraphFirstChatTest {
         // Assert exactly one assistant message was saved to message store
         assertThat(assistantMsgs).hasSize(1);
         assertThat(assistantMsgs.get(0).content()).isEqualTo("Hello from active chat graph");
+        assertThat(executionContextRegistry.activeCount()).isZero();
     }
 }

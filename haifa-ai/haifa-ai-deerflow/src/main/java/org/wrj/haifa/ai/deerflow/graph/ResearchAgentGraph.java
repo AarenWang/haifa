@@ -18,6 +18,7 @@ import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateStrategies;
 
 @Component
+@Deprecated(forRemoval = true)
 public class ResearchAgentGraph {
 
     public static final String GRAPH_NAME = "haifa-active-research";

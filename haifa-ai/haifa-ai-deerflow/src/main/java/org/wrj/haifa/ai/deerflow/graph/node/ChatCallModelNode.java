@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleRegistry;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContextRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
@@ -21,7 +21,7 @@ import org.wrj.haifa.ai.deerflow.model.ModelToolCallSanitizer;
 import org.wrj.haifa.ai.deerflow.model.ModelToolDefinition;
 import org.wrj.haifa.ai.deerflow.model.ModelProtocolState;
 import org.wrj.haifa.ai.deerflow.model.ModelResponseAccumulator;
-import org.wrj.haifa.ai.deerflow.agent.loop.PromptAssembler;
+import org.wrj.haifa.ai.deerflow.prompt.PromptAssembler;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
@@ -67,6 +67,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
     @Autowired
     private GraphExecutionManager graphExecutionManager;
 
+    @Autowired(required = false)
+    private RunExecutionContextRegistry executionContextRegistry;
+
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         String schedulingRunId = state.<String>value(AgentGraphStateKeys.RUN_ID).orElse("");
@@ -106,8 +109,8 @@ public class ChatCallModelNode implements AsyncNodeAction {
 
             // Emit MODEL_STARTED
             int stepNum = state.<Integer>value("chat_steps").orElse(0) + 1;
-            int maxSteps = GraphChatLifecycleRegistry.get(runId)
-                    .map(context -> context.loopConfig() == null ? properties.getMaxIterations() : context.loopConfig().maxSteps())
+            int maxSteps = executionContextRegistry == null ? properties.getMaxIterations() : executionContextRegistry.get(runId)
+                    .map(context -> context.limits() == null ? properties.getMaxIterations() : context.limits().maxSteps())
                     .orElse(properties.getMaxIterations());
             Map<String, Object> modelStartedMetadata = new LinkedHashMap<>();
             modelStartedMetadata.put("step", stepNum);
@@ -165,19 +168,9 @@ public class ChatCallModelNode implements AsyncNodeAction {
 
             if (modelStepStore != null) {
                 try {
-                    org.wrj.haifa.ai.deerflow.agent.loop.ModelStep modelStep = new org.wrj.haifa.ai.deerflow.agent.loop.ModelStep(
-                            stepNum,
-                            prompt.effectiveUserPrompt(),
-                            responseContent,
-                            List.of(),
-                            startTime,
-                            duration,
-                            modelResponse.usage(),
-                            prompt.cacheContext().fingerprint(),
-                            org.wrj.haifa.ai.deerflow.model.cache.ModelCallPurpose.AGENT_STEP,
-                            prompt.cacheContext().eligibility()
-                    );
-                    modelStepStore.save(modelStep, runId, threadId);
+                    modelStepStore.saveGraphStep(stepNum, prompt.effectiveUserPrompt(), responseContent,
+                            startTime, duration, modelResponse.usage(), prompt.cacheContext().fingerprint(),
+                            prompt.cacheContext().eligibility(), runId, threadId);
                 } catch (Exception e) {
                     org.slf4j.LoggerFactory.getLogger(ChatCallModelNode.class).warn("Failed to persist model step in ChatCallModelNode: {}", e.getMessage());
                 }

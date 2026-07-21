@@ -11,9 +11,9 @@ import java.util.concurrent.CompletableFuture;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
-import org.wrj.haifa.ai.deerflow.agent.loop.FinalAnswerResult;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleContext;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleRegistry;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.CompletionResult;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContext;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContextRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphLifecycleService;
 import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
@@ -36,6 +36,9 @@ public class ChatFinalizeNode implements AsyncNodeAction {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private RunCancellationService runCancellationService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private RunExecutionContextRegistry executionContextRegistry;
+
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         java.util.concurrent.Executor executor = graphExecutionManager != null ? graphExecutionManager.getExecutor() : GraphExecutionManager.fallbackExecutor();
@@ -52,18 +55,19 @@ public class ChatFinalizeNode implements AsyncNodeAction {
             String finalAnswer = content == null ? "" : content.trim();
             Map<String, Object> finalMetadata = new HashMap<>(state.<Map<String, Object>>value("accepted_final_metadata").orElse(Map.of()));
 
-            GraphChatLifecycleContext context = GraphChatLifecycleRegistry.get(runId).orElse(null);
-            if (context != null && context.observer() != null && context.runConfig() != null) {
+            RunExecutionContext context = executionContextRegistry == null ? null
+                    : executionContextRegistry.get(runId).orElse(null);
+            if (context != null && context.hook() != null && context.runConfig() != null) {
                 List<AgentEvent> observerEvents = new ArrayList<>();
-                FinalAnswerResult result = context.observer().onFinalAnswerAccepted(
+                CompletionResult result = context.hook().completeFinalAnswer(
                         context.runConfig(), finalAnswer, observerEvents, context.eventSequence(), stepNum, totalToolCalls);
                 publishObserverEvents(runId, observerEvents);
                 if (result != null) {
                     if (result.finalAnswer() != null) {
                         finalAnswer = result.finalAnswer();
                     }
-                    if (result.extraMetadata() != null) {
-                        finalMetadata.putAll(result.extraMetadata());
+                    if (result.metadata() != null) {
+                        finalMetadata.putAll(result.metadata());
                     }
                 }
             }

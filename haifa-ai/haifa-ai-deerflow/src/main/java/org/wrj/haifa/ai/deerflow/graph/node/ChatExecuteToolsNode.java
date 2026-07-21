@@ -17,17 +17,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
-import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver;
-import org.wrj.haifa.ai.deerflow.agent.loop.ToolCall;
-import org.wrj.haifa.ai.deerflow.agent.loop.ToolCallResult;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.ExecutionToolCall;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.ExecutionToolResult;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContext;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContextRegistry;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.ToolCallFilterResult;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties;
 import org.wrj.haifa.ai.deerflow.completion.CompletionRequirement;
 import org.wrj.haifa.ai.deerflow.completion.EvidenceRecord;
 import org.wrj.haifa.ai.deerflow.completion.Freshness;
 import org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleContext;
-import org.wrj.haifa.ai.deerflow.graph.GraphChatLifecycleRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphEventRegistry;
 import org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager;
 import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateKeys;
@@ -35,6 +35,7 @@ import org.wrj.haifa.ai.deerflow.graph.state.AgentGraphStateView;
 import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.tool.ParallelSafeAgentTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyDecision;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
@@ -46,6 +47,7 @@ import org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchExecutor;
 import org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchItemResult;
 import org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchRequest;
 import org.wrj.haifa.ai.deerflow.tool.execution.ToolExecutionTask;
+import org.wrj.haifa.ai.deerflow.tool.execution.ToolExecutionIdempotencyService;
 
 @Component
 public class ChatExecuteToolsNode implements AsyncNodeAction {
@@ -65,6 +67,12 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
 
     @Autowired(required = false)
     private GraphExecutorProperties executorProperties;
+
+    @Autowired(required = false)
+    private RunExecutionContextRegistry executionContextRegistry;
+
+    @Autowired(required = false)
+    private ToolExecutionIdempotencyService idempotencyService;
 
     public ChatExecuteToolsNode(ToolRegistry toolRegistry, DeerFlowProperties properties) {
         this(toolRegistry, properties, null);
@@ -95,7 +103,8 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             throwIfCancelled(runId);
 
             AgentGraphStateView view = AgentGraphStateView.of(state);
-            GraphChatLifecycleContext lifecycle = GraphChatLifecycleRegistry.get(runId).orElse(null);
+            RunExecutionContext lifecycle = executionContextRegistry == null ? null
+                    : executionContextRegistry.get(runId).orElse(null);
             List<String> uploadedFileIds = lifecycle != null
                     ? lifecycle.uploadedFileIds()
                     : view.list(AgentGraphStateKeys.UPLOADED_FILE_IDS).stream()
@@ -103,7 +112,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                             .map(String.class::cast)
                             .toList();
             List<Map<String, Object>> pending = view.listOfMaps(AgentGraphStateKeys.PENDING_TOOL_CALLS);
-            List<AgentLoopObserver.FilteredToolCall> filteredCalls = filterToolCalls(lifecycle, pending);
+            List<ToolCallFilterResult> filteredCalls = filterToolCalls(lifecycle, pending);
             List<Map<String, Object>> toolMessages = new ArrayList<>();
             List<Map<String, Object>> toolResultsList = new ArrayList<>();
             List<Map<String, Object>> completionRequirements = new ArrayList<>();
@@ -111,16 +120,16 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             Map<String, ToolBatchItemResult<ToolExecution>> batchResults = executeBatch(
                     filteredCalls, uploadedFileIds, runId, threadId, view, lifecycle);
 
-            for (AgentLoopObserver.FilteredToolCall filtered : filteredCalls) {
+            for (ToolCallFilterResult filtered : filteredCalls) {
 
                 throwIfCancelled(runId);
-                ToolCall toolCall = filtered.toolCall();
+                ExecutionToolCall toolCall = filtered.toolCall();
                 String safeName = nullToEmpty(toolCall.toolName());
                 String safeArguments = nullToEmpty(toolCall.arguments());
                 List<ToolCompletionContract> completionContracts = completionContracts(safeName);
                 if (!filtered.allowed()) {
                     String reason = nullToEmpty(filtered.reason()).isBlank() ? "Tool call rejected by middleware" : filtered.reason();
-                    ToolCallResult deniedResult = ToolCallResult.fromError(toolCall, reason, 0);
+                    ExecutionToolResult deniedResult = failedResult(toolCall, reason, 0);
                     Map<String, Object> metadata = resultMetadata("REJECTED", safeName, toolCall.id(), 0, true, reason, "");
                     persistToolCallResult(deniedResult, metadata);
                     publishToolEvent(runId, threadId, AgentEventType.TOOL_DENIED, reason, metadata);
@@ -132,22 +141,22 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
                 }
 
                 ToolExecution execution = batchExecution(toolCall, batchResults.get(toolCall.id()));
-                ToolCallResult rawResult = execution.rawResult();
+                ExecutionToolResult rawResult = execution.rawResult();
                 Map<String, Object> metadata = resultMetadata(execution.status(), safeName, toolCall.id(),
                         rawResult.durationMs(), execution.deniedByPolicy(), execution.deniedReason(), execution.errorType());
                 metadata.putAll(rawResult.metadata());
                 completionContracts = mergeCompletionContracts(completionContracts, runtimeCompletionContracts(metadata));
                 persistToolCallResult(rawResult, metadata);
 
-                String eventContent = rawResult.status() == ToolCallResult.Status.SUCCESS ? rawResult.result() : rawResult.error();
+                String eventContent = rawResult.status() == ExecutionToolResult.Status.SUCCESS ? rawResult.result() : rawResult.error();
                 List<AgentEvent> observerEvents = new ArrayList<>();
                 String observation = notifyObserver(lifecycle, toolCall, rawResult, observerEvents, view.messageWindow(), eventContent);
                 publishObserverEvents(runId, observerEvents);
 
                 publishToolEvent(runId, threadId,
-                        execution.deniedByPolicy() || rawResult.status() == ToolCallResult.Status.DENIED
+                        execution.deniedByPolicy() || rawResult.status() == ExecutionToolResult.Status.DENIED
                                 ? AgentEventType.TOOL_DENIED
-                                : rawResult.status() == ToolCallResult.Status.SUCCESS
+                                : rawResult.status() == ExecutionToolResult.Status.SUCCESS
                                         ? AgentEventType.TOOL_COMPLETED : AgentEventType.TOOL_FAILED,
                         eventContent,
                         metadata);
@@ -190,11 +199,11 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
     }
 
     private Map<String, ToolBatchItemResult<ToolExecution>> executeBatch(
-            List<AgentLoopObserver.FilteredToolCall> filteredCalls, List<String> uploadedFileIds,
-            String runId, String threadId, AgentGraphStateView view, GraphChatLifecycleContext lifecycle) {
+            List<ToolCallFilterResult> filteredCalls, List<String> uploadedFileIds,
+            String runId, String threadId, AgentGraphStateView view, RunExecutionContext lifecycle) {
         List<ToolExecutionTask<ToolExecution>> tasks = new ArrayList<>();
-        for (AgentLoopObserver.FilteredToolCall filtered : filteredCalls) {
-            ToolCall call = filtered.toolCall();
+        for (ToolCallFilterResult filtered : filteredCalls) {
+            ExecutionToolCall call = filtered.toolCall();
             persistToolCallRequested(call.id(), nullToEmpty(call.toolName()), nullToEmpty(call.arguments()), runId, threadId);
             if (!filtered.allowed()) {
                 continue;
@@ -233,7 +242,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
         return indexed;
     }
 
-    private ToolExecution batchExecution(ToolCall call, ToolBatchItemResult<ToolExecution> item) {
+    private ToolExecution batchExecution(ExecutionToolCall call, ToolBatchItemResult<ToolExecution> item) {
         if (item == null || item.status() == ToolBatchItemResult.Status.CANCELLED) {
             return failedExecution(call, "FAILED", "Tool execution cancelled", System.currentTimeMillis(), "Cancelled");
         }
@@ -249,8 +258,8 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
         }
         Map<String, Object> metadata = new LinkedHashMap<>(execution.rawResult().metadata());
         metadata.put("lateCompletionAfterCancel", true);
-        ToolCallResult raw = execution.rawResult();
-        return new ToolExecution(execution.status(), new ToolCallResult(raw.id(), raw.toolName(), raw.arguments(),
+        ExecutionToolResult raw = execution.rawResult();
+        return new ToolExecution(execution.status(), new ExecutionToolResult(raw.id(), raw.toolName(), raw.arguments(),
                 raw.status(), raw.result(), raw.error(), raw.durationMs(), metadata), execution.errorType(),
                 execution.deniedByPolicy(), execution.deniedReason());
     }
@@ -375,32 +384,34 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
         }
     }
 
-    private List<AgentLoopObserver.FilteredToolCall> filterToolCalls(GraphChatLifecycleContext lifecycle,
+    private List<ToolCallFilterResult> filterToolCalls(RunExecutionContext lifecycle,
             List<Map<String, Object>> pending) {
-        List<ToolCall> calls = pending == null ? List.of() : pending.stream()
-                .map(call -> ToolCall.of(
+        List<ExecutionToolCall> calls = pending == null ? List.of() : pending.stream()
+                .map(call -> new ExecutionToolCall(
                         nullToEmpty(call.get("id")),
                         nullToEmpty(call.get("name")),
-                        nullToEmpty(call.get("arguments"))))
+                        nullToEmpty(call.get("arguments")), Map.of()))
                 .toList();
-        if (lifecycle == null || lifecycle.observer() == null) {
-            return calls.stream().map(call -> new AgentLoopObserver.FilteredToolCall(call, true, null)).toList();
+        if (lifecycle == null || lifecycle.hook() == null) {
+            return calls.stream().map(call -> new ToolCallFilterResult(call, true, null)).toList();
         }
-        return lifecycle.observer().afterToolCallsParsed(lifecycle.runConfig(), calls);
+        return lifecycle.hook().filterToolCalls(lifecycle.runConfig(), calls);
     }
 
-    private ToolExecution executeTool(ToolCall toolCall, List<String> uploadedFileIds, String runId, String threadId,
-                                      AgentGraphStateView view, GraphChatLifecycleContext lifecycle) {
+    private ToolExecution executeTool(ExecutionToolCall toolCall, List<String> uploadedFileIds, String runId, String threadId,
+                                      AgentGraphStateView view, RunExecutionContext lifecycle) {
         String toolName = nullToEmpty(toolCall.toolName());
         publishToolEvent(runId, threadId, AgentEventType.TOOL_STARTED, "Executing tool " + toolName,
                 Map.of("toolCallId", toolCall.id(), "toolName", toolName, "arguments", nullToEmpty(toolCall.arguments())));
         long startTime = System.currentTimeMillis();
+        String idempotencyKey = "";
+        boolean highRisk = true;
         try {
-            if (lifecycle != null && lifecycle.observer() != null && lifecycle.runConfig() != null) {
-                ToolCallResult observerBypass = lifecycle.observer().beforeToolExecute(lifecycle.runConfig(), toolCall);
+            if (lifecycle != null && lifecycle.hook() != null && lifecycle.runConfig() != null) {
+                ExecutionToolResult observerBypass = lifecycle.hook().beforeTool(lifecycle.runConfig(), toolCall);
                 if (observerBypass != null) {
                     long duration = observerBypass.durationMs() > 0 ? observerBypass.durationMs() : System.currentTimeMillis() - startTime;
-                    ToolCallResult result = new ToolCallResult(toolCall.id(), toolName, toolCall.arguments(),
+                    ExecutionToolResult result = new ExecutionToolResult(toolCall.id(), toolName, toolCall.arguments(),
                             observerBypass.status(), observerBypass.result(), observerBypass.error(), duration, observerBypass.metadata());
                     return new ToolExecution(result.status().name(), result, "", false, "");
                 }
@@ -413,15 +424,47 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             if (tool == null) {
                 return failedExecution(toolCall, "NOT_FOUND", "Error: tool not found: " + toolName, startTime, "ToolNotFound");
             }
-            if (toolPolicyService != null) {
-                ToolPolicyDecision decision = toolPolicyService.evaluateTool(toolName, view.activeSkills(), view.mode());
+            if (lifecycle != null && !lifecycle.isToolAllowed(toolName)) {
+                return deniedExecution(toolCall, "Tool is outside the child run allowlist", startTime);
+            }
+            ToolPolicyService effectivePolicy = lifecycle != null && lifecycle.toolPolicyService() != null
+                    ? lifecycle.toolPolicyService() : toolPolicyService;
+            if (effectivePolicy != null) {
+                ToolPolicyDecision decision = effectivePolicy.evaluateTool(toolName, view.activeSkills(), view.mode());
                 if (!decision.allowed()) {
                     String reason = decision.reason() == null || decision.reason().isBlank() ? "Tool denied by policy" : decision.reason();
-                    ToolCallResult result = new ToolCallResult(toolCall.id(), toolName, toolCall.arguments(),
-                            ToolCallResult.Status.DENIED, "", "Error: tool denied by policy: " + reason,
+                    ExecutionToolResult result = new ExecutionToolResult(toolCall.id(), toolName, toolCall.arguments(),
+                            ExecutionToolResult.Status.DENIED, "", "Error: tool denied by policy: " + reason,
                             System.currentTimeMillis() - startTime, Map.of("denied", true, "reason", reason));
                     return new ToolExecution("DENIED", result, "", true, reason);
                 }
+            }
+
+            highRisk = !(tool instanceof ParallelSafeAgentTool);
+            if (idempotencyService != null) {
+                var reservation = idempotencyService.reserve(runId, toolCall.id(), toolName,
+                        toolCall.arguments(), highRisk);
+                idempotencyKey = reservation.idempotencyKey();
+                if (reservation.decision()
+                        == ToolExecutionIdempotencyService.Decision.REPLAY_SUCCEEDED) {
+                    ExecutionToolResult replay = new ExecutionToolResult(toolCall.id(), toolName, toolCall.arguments(),
+                            ExecutionToolResult.Status.SUCCESS, reservation.result(), "",
+                            System.currentTimeMillis() - startTime,
+                            Map.of("idempotencyReplay", true, "idempotencyKey", idempotencyKey));
+                    return new ToolExecution("SUCCESS", replay, "", false, "");
+                }
+                if (reservation.decision()
+                        == ToolExecutionIdempotencyService.Decision.BLOCK_UNKNOWN_OUTCOME
+                        || reservation.decision()
+                        == ToolExecutionIdempotencyService.Decision.BLOCK_RETRY_POLICY) {
+                    ExecutionToolResult blocked = new ExecutionToolResult(toolCall.id(), toolName, toolCall.arguments(),
+                            ExecutionToolResult.Status.FAILED, "", reservation.reason(),
+                            System.currentTimeMillis() - startTime,
+                            Map.of("unknownOutcome", true, "automaticRetryBlocked", true,
+                                    "idempotencyKey", idempotencyKey));
+                    return new ToolExecution("UNKNOWN_OUTCOME", blocked, "UnknownOutcome", false, "");
+                }
+                idempotencyService.markRunning(idempotencyKey);
             }
 
             Path workspaceRoot = Path.of(properties.getWorkspaceRoot() != null ? properties.getWorkspaceRoot() : ".");
@@ -439,37 +482,64 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             );
             ToolResult result = tool.execute(toolRequest);
             long duration = System.currentTimeMillis() - startTime;
-            ToolCallResult raw = ToolCallResult.from(toolCall, result, duration);
-            return new ToolExecution(raw.status().name(), raw, "", raw.status() == ToolCallResult.Status.DENIED,
-                    raw.status() == ToolCallResult.Status.DENIED ? result.content() : "");
+            ExecutionToolResult raw = ExecutionToolResult.from(toolCall, result, duration);
+            if (idempotencyService != null && !idempotencyKey.isBlank()) {
+                if (raw.status() == ExecutionToolResult.Status.SUCCESS) {
+                    idempotencyService.markSucceeded(idempotencyKey, raw.result());
+                } else {
+                    idempotencyService.markFailed(idempotencyKey,
+                            raw.error().isBlank() ? raw.result() : raw.error());
+                }
+            }
+            return new ToolExecution(raw.status().name(), raw, "", raw.status() == ExecutionToolResult.Status.DENIED,
+                    raw.status() == ExecutionToolResult.Status.DENIED ? result.content() : "");
         }
         catch (Exception ex) {
+            if (idempotencyService != null && !idempotencyKey.isBlank()) {
+                if (highRisk) {
+                    idempotencyService.markUnknownOutcome(idempotencyKey, ex.getMessage());
+                } else {
+                    idempotencyService.markFailed(idempotencyKey, ex.getMessage());
+                }
+            }
             return failedExecution(toolCall, "FAILED", "Error executing tool " + toolName + ": " + ex.getMessage(), startTime,
                     ex.getClass().getSimpleName());
         }
     }
 
-    private ToolExecution failedExecution(ToolCall toolCall, String status, String error, long startTime, String errorType) {
-        ToolCallResult.Status rawStatus;
+    private ToolExecution failedExecution(ExecutionToolCall toolCall, String status, String error, long startTime, String errorType) {
+        ExecutionToolResult.Status rawStatus;
         try {
-            rawStatus = ToolCallResult.Status.valueOf(status);
+            rawStatus = ExecutionToolResult.Status.valueOf(status);
         } catch (IllegalArgumentException ex) {
-            rawStatus = ToolCallResult.Status.FAILED;
+            rawStatus = ExecutionToolResult.Status.FAILED;
         }
-        ToolCallResult raw = new ToolCallResult(toolCall.id(), toolCall.toolName(), toolCall.arguments(),
+        ExecutionToolResult raw = new ExecutionToolResult(toolCall.id(), toolCall.toolName(), toolCall.arguments(),
                 rawStatus, "", error, System.currentTimeMillis() - startTime,
                 Map.of("failed", true, "errorType", errorType));
         return new ToolExecution(status, raw, errorType, false, "");
     }
 
-    private String notifyObserver(GraphChatLifecycleContext lifecycle, ToolCall toolCall, ToolCallResult rawResult,
+    private ToolExecution deniedExecution(ExecutionToolCall toolCall, String reason, long startTime) {
+        ExecutionToolResult result = new ExecutionToolResult(toolCall.id(), toolCall.toolName(), toolCall.arguments(),
+                ExecutionToolResult.Status.DENIED, "", reason, System.currentTimeMillis() - startTime,
+                Map.of("denied", true, "reason", reason));
+        return new ToolExecution("DENIED", result, "", true, reason);
+    }
+
+    private static ExecutionToolResult failedResult(ExecutionToolCall call, String reason, long duration) {
+        return new ExecutionToolResult(call.id(), call.toolName(), call.arguments(),
+                ExecutionToolResult.Status.FAILED, "", reason, duration, Map.of("failed", true));
+    }
+
+    private String notifyObserver(RunExecutionContext lifecycle, ExecutionToolCall toolCall, ExecutionToolResult rawResult,
             List<AgentEvent> observerEvents, List<Map<String, Object>> window, String eventContent) {
-        if (lifecycle == null || lifecycle.observer() == null || lifecycle.runConfig() == null) {
+        if (lifecycle == null || lifecycle.hook() == null || lifecycle.runConfig() == null) {
             return "";
         }
         List<String> history = historyFromWindow(window);
         history.add("Tool result (" + toolCall.toolName() + "): " + eventContent);
-        return lifecycle.observer().onToolCompleted(lifecycle.runConfig(), toolCall, rawResult,
+        return lifecycle.hook().afterTool(lifecycle.runConfig(), toolCall, rawResult,
                 observerEvents, lifecycle.eventSequence(), history);
     }
 
@@ -478,7 +548,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
             return;
         }
         try {
-            toolCallStore.saveRequested(new ToolCall(callId, toolName, arguments, ToolCall.Status.PENDING, Map.of()),
+            toolCallStore.saveRequested(new ExecutionToolCall(callId, toolName, arguments, Map.of()),
                     runId, threadId);
         }
         catch (Exception ignored) {
@@ -486,12 +556,12 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
         }
     }
 
-    private void persistToolCallResult(ToolCallResult rawResult, Map<String, Object> metadata) {
+    private void persistToolCallResult(ExecutionToolResult rawResult, Map<String, Object> metadata) {
         if (toolCallStore == null || rawResult == null) {
             return;
         }
         try {
-            ToolCallResult persisted = new ToolCallResult(rawResult.id(), rawResult.toolName(), rawResult.arguments(),
+            ExecutionToolResult persisted = new ExecutionToolResult(rawResult.id(), rawResult.toolName(), rawResult.arguments(),
                     rawResult.status(), rawResult.result(), rawResult.error(), rawResult.durationMs(), metadata);
             toolCallStore.saveResult(rawResult.id(), persisted);
         }
@@ -507,8 +577,8 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
     }
 
     private static void publishTodoMutationEventIfNeeded(String runId, String threadId, String toolName,
-            String toolCallId, ToolCallResult result, String content, Map<String, Object> metadata) {
-        if (!"write_todos".equals(toolName) || result.status() != ToolCallResult.Status.SUCCESS
+            String toolCallId, ExecutionToolResult result, String content, Map<String, Object> metadata) {
+        if (!"write_todos".equals(toolName) || result.status() != ExecutionToolResult.Status.SUCCESS
                 || Boolean.TRUE.equals(result.metadata().get("error"))) {
             return;
         }
@@ -616,7 +686,7 @@ public class ChatExecuteToolsNode implements AsyncNodeAction {
         return value == null ? "" : String.valueOf(value);
     }
 
-    private record ToolExecution(String status, ToolCallResult rawResult, String errorType,
+    private record ToolExecution(String status, ExecutionToolResult rawResult, String errorType,
                                  boolean deniedByPolicy, String deniedReason) {
     }
 }

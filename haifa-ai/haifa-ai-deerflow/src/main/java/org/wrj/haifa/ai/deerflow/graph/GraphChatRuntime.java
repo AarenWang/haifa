@@ -9,6 +9,8 @@ import com.alibaba.cloud.ai.graph.checkpoint.config.SaverConfig;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContext;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContextRegistry;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 import org.wrj.haifa.ai.deerflow.graph.checkpoint.GraphCheckpointRecorder;
 import org.wrj.haifa.ai.deerflow.graph.checkpoint.SQLiteCheckpointSaver;
@@ -105,12 +107,16 @@ public class GraphChatRuntime {
     @Autowired(required = false)
     private RunCancellationService runCancellationService;
 
+    @Autowired(required = false)
+    private RunExecutionContextRegistry executionContextRegistry;
+
     public Flux<AgentEvent> run(GraphChatRuntimeRequest request) {
         Sinks.Many<AgentEvent> eventSink = Sinks.many().unicast().onBackpressureBuffer();
-        String runId = request.runConfig().runId();
-        GraphEventRegistry.register(runId, eventSink, request.eventSequence());
+        RunExecutionContext context = request.executionContext();
+        String runId = context.runConfig().runId();
+        GraphEventRegistry.register(runId, eventSink, context.eventSequence());
         if (runCancellationService != null) {
-            runCancellationService.register(runId, request.runConfig().threadId());
+            runCancellationService.register(runId, context.runConfig().threadId());
         }
 
         java.util.concurrent.Executor executor = graphExecutionManager != null
@@ -118,28 +124,22 @@ public class GraphChatRuntime {
         CompletableFuture<Void> graphTask = CompletableFuture.runAsync(() -> {
             try {
                 throwIfCancelled(runId);
-                GraphChatLifecycleRegistry.register(runId, new GraphChatLifecycleContext(
-                        request.runConfig(),
-                        request.agentRequest(),
-                        request.loopConfig(),
-                        request.agentLoop() == null ? null : request.agentLoop().observer(),
-                        request.eventSequence(),
-                        request.activeSkills(),
-                        request.uploadedFileIds()
-                ));
+                if (executionContextRegistry != null) {
+                    executionContextRegistry.register(runId, context);
+                }
 
                 Map<String, Object> initialState = new HashMap<>(stateFactory.create(
-                        request.runConfig(),
-                        request.agentRequest(),
+                        context.runConfig(),
+                        context.agentRequest(),
                         request.threadHistory(),
                         null,
-                        request.activeSkills()
+                        context.activeSkills()
                 ));
                 initialState.put("chat_steps", 0);
                 initialState.put("last_assistant_content", "");
 
                 BaseCheckpointSaver saver = checkpointEnabled() ? sqliteCheckpointSaver : null;
-                int maxIterations = request.loopConfig().maxSteps();
+                int maxIterations = context.limits().maxSteps();
                 CompiledGraph graph = saver == null ? chatGraph(maxIterations).compile() : chatGraph(maxIterations).compile(
                         CompileConfig.builder()
                                 .recursionLimit(maxIterations * 5 + 5)
@@ -147,44 +147,50 @@ public class GraphChatRuntime {
                                 .build());
 
                 RunnableConfig runnableConfig = RunnableConfig.builder()
-                        .threadId(request.runConfig().threadId())
+                        .threadId(context.runConfig().threadId())
                         .build();
                 runnableConfig.context().put("runId", runId);
                 runnableConfig.context().put("graphName", GRAPH_NAME);
 
-                boolean isResume = false;
+                java.util.Optional<com.alibaba.cloud.ai.graph.checkpoint.Checkpoint> resumeCheckpoint = java.util.Optional.empty();
                 if (saver != null) {
-                    var latestCp = saver.get(runnableConfig);
-                    if (latestCp.isPresent() && latestCp.get().getNextNodeId() != null && !latestCp.get().getNextNodeId().isBlank()) {
-                        isResume = true;
-                    }
+                    resumeCheckpoint = saver.get(runnableConfig);
                 }
 
+                RunnableConfig executionConfig = resumeCheckpoint
+                        .map(checkpoint -> RunnableConfig.builder(runnableConfig)
+                                .checkPointId(checkpoint.getId())
+                                .nextNode(checkpoint.getNextNodeId())
+                                .build())
+                        .orElse(runnableConfig);
+
                 throwIfCancelled(runId);
-                var streamResult = isResume
-                        ? graph.stream(Map.of(AgentGraphStateKeys.RUN_ID, runId), runnableConfig)
-                        : graph.stream(initialState, runnableConfig);
+                var streamResult = resumeCheckpoint.isPresent()
+                        ? graph.stream(Map.of(AgentGraphStateKeys.RUN_ID, runId), executionConfig)
+                        : graph.stream(initialState, executionConfig);
 
                 streamResult.collectList()
-                        .block(Duration.ofMillis(request.loopConfig().timeoutMs()));
+                        .block(Duration.ofMillis(context.limits().timeoutMs()));
                 throwIfCancelled(runId);
 
                 GraphEventRegistry.complete(runId);
             }
             catch (RunCancelledException ex) {
-                emitCancelledIfNotRecorded(runId, request.runConfig().threadId());
+                emitCancelledIfNotRecorded(runId, context.runConfig().threadId());
                 GraphEventRegistry.complete(runId);
             }
             catch (Exception ex) {
                 if (runCancellationService != null && runCancellationService.isCancelled(runId)) {
-                    emitCancelledIfNotRecorded(runId, request.runConfig().threadId());
+                    emitCancelledIfNotRecorded(runId, context.runConfig().threadId());
                     GraphEventRegistry.complete(runId);
                 } else {
                     GraphEventRegistry.error(runId, ex);
                 }
             }
             finally {
-                GraphChatLifecycleRegistry.deregister(runId);
+                if (executionContextRegistry != null) {
+                    executionContextRegistry.close(runId);
+                }
                 GraphEventRegistry.deregister(runId);
                 if (runCancellationService != null) {
                     runCancellationService.finishExecution(runId);
