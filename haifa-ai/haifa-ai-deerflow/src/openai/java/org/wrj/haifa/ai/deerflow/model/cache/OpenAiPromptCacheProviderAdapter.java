@@ -57,6 +57,9 @@ public class OpenAiPromptCacheProviderAdapter implements PromptCacheProviderAdap
         boolean cacheKeyEnabled = properties.getPromptCache().isEnabled()
                 && properties.getPromptCache().getOpenai().isEnabled()
                 && properties.getPromptCache().getOpenai().isPromptCacheKeyEnabled()
+                // The OpenAI-compatible Gemini endpoint rejects OpenAI's prompt_cache_key field.
+                // This adapter can be the active fallback when only the OpenAI profile is loaded.
+                && !isGoogleCompatibleModel(prompt.modelName())
                 && prompt.cacheContext() != null;
         if (cacheKeyEnabled && StringUtils.hasText(prompt.cacheContext().routingKey())) {
             builder.promptCacheKey(prompt.cacheContext().routingKey());
@@ -69,6 +72,11 @@ public class OpenAiPromptCacheProviderAdapter implements PromptCacheProviderAdap
         }
 
         return builder.build();
+    }
+
+    private static boolean isGoogleCompatibleModel(String modelName) {
+        String model = modelName == null ? "" : modelName.toLowerCase(java.util.Locale.ROOT);
+        return model.contains("gemini") || model.contains("google");
     }
 
     @Override

@@ -35,4 +35,16 @@ class OpenAiPromptCacheProviderAdapterTest {
 
         assertThat(options.getPromptCacheKey()).isNull();
     }
+
+    @Test
+    void omitsOpenAiCacheKeyForGeminiThroughTheCompatibleEndpoint() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        ModelPrompt prompt = PromptCachePlanner.enrich(
+                new ModelPrompt("stable ".repeat(800), "dynamic", "gemini-3.5-flash"), properties);
+
+        OpenAiChatOptions options = (OpenAiChatOptions) new OpenAiPromptCacheProviderAdapter(properties)
+                .buildOptions(prompt, java.util.List.of());
+
+        assertThat(options.getPromptCacheKey()).isNull();
+    }
 }
