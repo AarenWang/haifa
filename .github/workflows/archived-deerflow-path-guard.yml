@@ -16,7 +16,7 @@ jobs:
       ARCHIVE_BASELINE: a3be4445500b8a778009e7fc774fb91d318ebf06
     steps:
       - name: Check out repository history
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
