@@ -107,6 +107,9 @@ export default function Header({
           className={`header-toggle-btn trace-toggle ${isTraceOpen ? 'active' : ''}`}
           onClick={onToggleTrace}
           title="Toggle Activity Trace"
+          aria-label={isTraceOpen ? 'Hide activity panel' : 'Show activity panel'}
+          aria-controls="activity-panel"
+          aria-expanded={isTraceOpen}
           style={{ marginLeft: '4px' }}
         >
           <Activity size={18} />

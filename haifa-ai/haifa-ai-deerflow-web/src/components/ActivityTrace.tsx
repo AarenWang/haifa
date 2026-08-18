@@ -43,7 +43,7 @@ export default function ActivityTrace({
   };
 
   return (
-    <aside className={`trace-panel ${isOpen ? 'open' : ''}`}>
+    <aside id="activity-panel" className={`trace-panel ${isOpen ? 'open' : ''}`}>
       <TodoListPanel
         snapshot={todoSnapshot}
         gateBlocked={todoGateBlocked}

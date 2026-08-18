@@ -1039,11 +1039,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-width: 92%;
+  max-width: 100%;
 }
 
 .conversation-message.user {
   align-self: flex-end;
+  width: fit-content;
+  max-width: 50%;
+  margin-left: auto;
 }
 
 .conversation-message.assistant {
@@ -1076,6 +1079,8 @@ body {
 .conversation-message.user .conversation-message-content {
   background: var(--accent-blue-light);
   border-color: #a5d8ff;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .conversation-message-content p {
@@ -2956,6 +2961,32 @@ body {
   background: var(--accent-blue-light);
 }
 
+/* The right-hand graph and activity trace share one collapsible panel on desktop. */
+@media (min-width: 861px) {
+  .header-toggle-btn.trace-toggle {
+    display: inline-flex;
+  }
+
+  .trace-panel {
+    width: 0;
+    min-width: 0;
+    max-width: 0;
+    border-left-width: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: width 0.2s ease, min-width 0.2s ease, max-width 0.2s ease, opacity 0.15s ease;
+  }
+
+  .trace-panel.open {
+    width: 360px;
+    min-width: 300px;
+    max-width: 420px;
+    border-left-width: 1px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 /* Sidebar close buttons */
 .sidebar-close-btn,
 .trace-close-btn {
@@ -2978,6 +3009,7 @@ body {
 
 /* Sidebar / Drawer Backdrop */
 .sidebar-backdrop {
+  display: none;
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
@@ -3001,6 +3033,10 @@ body {
 }
 
 @media (max-width: 860px) {
+  .sidebar-backdrop {
+    display: block;
+  }
+
   .header-toggle-btn {
     display: none;
   }
@@ -3145,6 +3181,9 @@ body {
   .conversation-message {
     max-width: 100%;
     min-width: 0;
+  }
+  .conversation-message.user {
+    max-width: 50%;
   }
   .conversation-message-content {
     overflow-wrap: anywhere;

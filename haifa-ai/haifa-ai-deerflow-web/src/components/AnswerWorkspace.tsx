@@ -344,7 +344,6 @@ export default function AnswerWorkspace({
   artifacts,
 }: AnswerWorkspaceProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [copied, setCopied] = useState(false);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [stepsExpanded, setStepsExpanded] = useState(false);
@@ -543,29 +542,11 @@ export default function AnswerWorkspace({
     return -1;
   })();
 
-  const hasAssistantContent = visibleMessages.some((message) => message.role === 'ASSISTANT');
-
   useEffect(() => {
     if (panelRef.current) {
       panelRef.current.scrollTop = panelRef.current.scrollHeight;
     }
   }, [visibleMessages.length, status]);
-
-  const handleCopyAll = async () => {
-    const assistantMessages = visibleMessages
-      .filter((message) => message.role === 'ASSISTANT')
-      .map((message) => message.content)
-      .join('\n\n');
-    const copyText = assistantMessages || finalAnswer;
-    if (!copyText) return;
-    try {
-      await navigator.clipboard.writeText(copyText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // ignore
-    }
-  };
 
   const handleCopyMessage = async (content: string, messageId: string) => {
     try {
@@ -617,12 +598,6 @@ export default function AnswerWorkspace({
     <div className="answer-panel" ref={panelRef}>
       <div className="answer-panel-header">
         <div className="answer-panel-title">Conversation</div>
-        {hasAssistantContent && (
-          <button type="button" className="btn btn-ghost" onClick={handleCopyAll}>
-            {copied ? <Check size={16} /> : <Copy size={16} />}
-            {copied ? 'Copied' : 'Copy answers'}
-          </button>
-        )}
       </div>
 
       {isEmpty ? (
