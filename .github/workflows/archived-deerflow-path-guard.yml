@@ -1,0 +1,40 @@
+name: Archived DeerFlow Path Guard
+
+on:
+  pull_request:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archive-guard:
+    name: archived-deerflow-paths
+    runs-on: ubuntu-latest
+    env:
+      ARCHIVE_BASELINE: a3be4445500b8a778009e7fc774fb91d318ebf06
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject changes to archived DeerFlow paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          archived_paths=(
+            "haifa-ai/haifa-ai-deerflow"
+            "haifa-ai/haifa-ai-deerflow-web"
+            "haifa-ai/haifa-ai-utility-mcp-server"
+          )
+
+          if git diff --quiet "$ARCHIVE_BASELINE" "$GITHUB_SHA" -- "${archived_paths[@]}"; then
+            echo "Archived DeerFlow paths are unchanged."
+            exit 0
+          fi
+
+          echo "Changes to archived DeerFlow paths are not allowed."
+          git diff --name-status "$ARCHIVE_BASELINE" "$GITHUB_SHA" -- "${archived_paths[@]}"
+          exit 1
