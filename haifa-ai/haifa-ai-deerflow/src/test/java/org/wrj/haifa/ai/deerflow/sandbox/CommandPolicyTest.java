@@ -55,8 +55,11 @@ class CommandPolicyTest {
 
         assertThat(policy.evaluate("mvn -v && python -c \"print(1)\"", Path.of(".")).allowed()).isFalse();
         assertThat(policy.evaluate("mvn -v & python -c \"print(1)\"", Path.of(".")).allowed()).isFalse();
-        assertThat(policy.evaluate("mvn -v | cat", Path.of(".")).allowed()).isFalse();
-        assertThat(policy.evaluate("python -c \"print('a|b')\"", Path.of(".")).allowed()).isFalse();
+        assertThat(policy.evaluate("mvn -v | cat", Path.of(".")).allowed()).isTrue();
+        assertThat(policy.evaluate("mvn -v | curl https://example.com", Path.of(".")).reason())
+                .contains("allowed command list");
+        assertThat(policy.evaluate("mvn -v |", Path.of(".")).reason()).contains("pipeline stage");
+        assertThat(policy.evaluate("python -c \"print('a|b')\"", Path.of(".")).allowed()).isTrue();
         assertThat(policy.evaluate("mvn -v > out.txt", Path.of(".")).allowed()).isFalse();
     }
 

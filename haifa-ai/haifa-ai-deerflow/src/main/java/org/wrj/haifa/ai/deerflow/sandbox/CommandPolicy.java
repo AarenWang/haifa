@@ -27,38 +27,12 @@ public class CommandPolicy {
             return Decision.deny("command is required");
         }
         String trimmed = command.trim();
-        if (trimmed.indexOf('|') >= 0) {
-            return Decision.deny("command contains disabled pipe character: |");
-        }
         DeerFlowProperties.Sandbox sandbox = properties.getSandbox();
-
-        ShellParseResult parsed = parseTokens(trimmed);
-        if (!parsed.error().isBlank()) {
-            return Decision.deny(parsed.error());
-        }
-        if (parsed.tokens().isEmpty()) {
-            return Decision.deny("command executable is required");
+        PipelineParseResult pipeline = parsePipeline(trimmed);
+        if (!pipeline.error().isBlank()) {
+            return Decision.deny(pipeline.error());
         }
 
-        for (String pattern : splitCsv(sandbox.getDeniedPatterns())) {
-            if (matchesCommandRule(parsed.tokens(), pattern)) {
-                return Decision.deny("command matches denied command rule: " + pattern);
-            }
-        }
-        for (String token : parsed.tokens()) {
-            SensitivePathDecision pathDecision = evaluatePathToken(token, properties.getSkillsContainerPath());
-            if (!pathDecision.allowed()) {
-                return Decision.deny(pathDecision.reason());
-            }
-        }
-
-        String executable = parsed.tokens().get(0);
-        if (executable.isBlank()) {
-            return Decision.deny("command executable is required");
-        }
-        if (executable.indexOf('/') >= 0 || executable.indexOf('\\') >= 0) {
-            return Decision.deny("command executable must be a bare command name: " + executable);
-        }
         Set<String> configuredAllowed = splitCsv(sandbox.getAllowedCommands());
         if (configuredAllowed.isEmpty()) {
             return Decision.deny("allowed command list is empty");
@@ -70,6 +44,41 @@ public class CommandPolicy {
             splitCsv(sandbox.getAllowedScriptLanguages()).stream()
                     .map(CommandPolicy::normalizeExecutable)
                     .forEach(allowed::add);
+        }
+        for (List<String> stage : pipeline.stages()) {
+            Decision stageDecision = evaluateCommandStage(stage, sandbox, allowed);
+            if (!stageDecision.allowed()) {
+                return stageDecision;
+            }
+        }
+        return Decision.allow();
+    }
+
+    /**
+     * Pipelines are deliberately limited to a sequence of independently validated commands.
+     * Shell chaining, redirection, substitutions, and heredocs remain unsupported.
+     */
+    private Decision evaluateCommandStage(List<String> tokens, DeerFlowProperties.Sandbox sandbox, Set<String> allowed) {
+        if (tokens == null || tokens.isEmpty()) {
+            return Decision.deny("pipeline stage executable is required");
+        }
+        for (String pattern : splitCsv(sandbox.getDeniedPatterns())) {
+            if (matchesCommandRule(tokens, pattern)) {
+                return Decision.deny("command matches denied command rule: " + pattern);
+            }
+        }
+        for (String token : tokens) {
+            SensitivePathDecision pathDecision = evaluatePathToken(token, properties.getSkillsContainerPath());
+            if (!pathDecision.allowed()) {
+                return Decision.deny(pathDecision.reason());
+            }
+        }
+        String executable = tokens.get(0);
+        if (executable.isBlank()) {
+            return Decision.deny("pipeline stage executable is required");
+        }
+        if (executable.indexOf('/') >= 0 || executable.indexOf('\\') >= 0) {
+            return Decision.deny("command executable must be a bare command name: " + executable);
         }
         if (!allowed.contains(normalizeExecutable(executable))) {
             return Decision.deny("command is not in allowed command list: " + executable);
@@ -328,6 +337,59 @@ public class CommandPolicy {
         return new ShellParseResult(tokens, "");
     }
 
+    private static PipelineParseResult parsePipeline(String command) {
+        List<List<String>> stages = new ArrayList<>();
+        StringBuilder stage = new StringBuilder();
+        boolean inSingleQuote = false;
+        boolean inDoubleQuote = false;
+        boolean escaping = false;
+        for (int i = 0; i < command.length(); i++) {
+            char ch = command.charAt(i);
+            if (escaping) {
+                stage.append(ch);
+                escaping = false;
+                continue;
+            }
+            if (ch == '\\' && !inSingleQuote) {
+                stage.append(ch);
+                escaping = true;
+                continue;
+            }
+            if (ch == '\'' && !inDoubleQuote) {
+                inSingleQuote = !inSingleQuote;
+                stage.append(ch);
+                continue;
+            }
+            if (ch == '"' && !inSingleQuote) {
+                inDoubleQuote = !inDoubleQuote;
+                stage.append(ch);
+                continue;
+            }
+            if (ch == '|' && !inSingleQuote && !inDoubleQuote) {
+                ShellParseResult parsed = parseTokens(stage.toString().trim());
+                if (!parsed.error().isBlank()) {
+                    return new PipelineParseResult(List.of(), parsed.error());
+                }
+                if (parsed.tokens().isEmpty()) {
+                    return new PipelineParseResult(List.of(), "pipeline stage executable is required");
+                }
+                stages.add(parsed.tokens());
+                stage.setLength(0);
+                continue;
+            }
+            stage.append(ch);
+        }
+        ShellParseResult parsed = parseTokens(stage.toString().trim());
+        if (!parsed.error().isBlank()) {
+            return new PipelineParseResult(List.of(), parsed.error());
+        }
+        if (parsed.tokens().isEmpty()) {
+            return new PipelineParseResult(List.of(), "pipeline stage executable is required");
+        }
+        stages.add(parsed.tokens());
+        return new PipelineParseResult(List.copyOf(stages), "");
+    }
+
     private static String printable(char ch) {
         return switch (ch) {
             case '\n' -> "\\n";
@@ -410,6 +472,9 @@ public class CommandPolicy {
     }
 
     private record ShellParseResult(List<String> tokens, String error) {
+    }
+
+    private record PipelineParseResult(List<List<String>> stages, String error) {
     }
 
     private record SensitivePathDecision(boolean allowed, String reason) {

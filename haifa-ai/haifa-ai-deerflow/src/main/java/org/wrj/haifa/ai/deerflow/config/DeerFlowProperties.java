@@ -220,6 +220,7 @@ public class DeerFlowProperties {
         private String dockerImage = "ubuntu:24.04";
         private boolean networkEnabled = false;
         private long timeoutMs = 30_000;
+        private long imageGenerationTimeoutMs = 120_000;
         private int maxOutputChars = 20_000;
         private String workdirSubdir = "sandbox";
         private String allowedCommands = "mvn,npm,node,python,python3,java,javac,ls,pwd,cat,rg,grep";
@@ -270,6 +271,14 @@ public class DeerFlowProperties {
 
         public void setTimeoutMs(long timeoutMs) {
             this.timeoutMs = timeoutMs;
+        }
+
+        public long getImageGenerationTimeoutMs() {
+            return imageGenerationTimeoutMs;
+        }
+
+        public void setImageGenerationTimeoutMs(long imageGenerationTimeoutMs) {
+            this.imageGenerationTimeoutMs = Math.max(30_000, imageGenerationTimeoutMs);
         }
 
         public int getMaxOutputChars() {

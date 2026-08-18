@@ -181,6 +181,26 @@ class RunScriptToolTest {
     }
 
     @Test
+    void imageGenerationWrapperUsesTheDedicatedTimeout(@TempDir Path tmp) {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setAllowedScriptLanguages("python");
+        properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.getSandbox().setImageGenerationTimeoutMs(120_000);
+        properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
+        properties.setOutputsRoot(tmp.resolve("outputs").toString());
+
+        FakeSandboxRunner runner = new FakeSandboxRunner();
+        ToolResult result = new RunScriptTool(properties, runner, new CommandPolicy(properties)).execute(new ToolRequest(
+                "{\"language\":\"python\",\"code\":\"import runpy\\nrunpy.run_path('/mnt/skills/public/image-generation/scripts/generate.py')\"}",
+                tmp));
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(runner.lastRequest.timeout()).hasMillis(120_000);
+    }
+
+    @Test
     void generatesCorrectCommandArgsForPowershell(@TempDir Path tmp) {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setRunScriptEnabled(true);
@@ -215,7 +235,13 @@ class RunScriptToolTest {
         properties.setOutputsRoot(tmp.resolve("outputs").toString());
 
         FakeSandboxRunner runner = new FakeSandboxRunner();
-        RunScriptTool tool = new RunScriptTool(properties, runner, new CommandPolicy(properties));
+        RunScriptTool tool = new RunScriptTool(properties, runner, new CommandPolicy(properties),
+                new org.wrj.haifa.ai.deerflow.sandbox.RuntimeExecutableResolver(properties) {
+                    @Override
+                    public String resolve(String language, org.wrj.haifa.ai.deerflow.sandbox.SandboxBackend backend) {
+                        return tmp.resolve("bash.exe").toAbsolutePath().toString();
+                    }
+                });
 
         ToolRequest request = new ToolRequest(
                 "{\"language\":\"bash\",\"code\":\"echo 1\",\"args\":[],\"purpose\":\"test\"}",

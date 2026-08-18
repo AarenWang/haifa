@@ -46,7 +46,7 @@ public class BashTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Run one shell command inside the configured sandbox. The pipe character | is forbidden everywhere; use separate tool calls instead. Arguments: {\"description\": \"optional summary\", \"command\": \"command to run\"}. Use /mnt/skills and /mnt/user-data virtual paths.";
+        return "Run one shell command inside the configured sandbox. Pipelines using | are allowed only when every pipeline stage has a bare executable in the configured command allowlist; shell chaining, substitutions, and redirection remain forbidden. Arguments: {\"description\": \"optional summary\", \"command\": \"command to run\"}. Use /mnt/skills and /mnt/user-data virtual paths.";
     }
 
     @Override

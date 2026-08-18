@@ -53,7 +53,7 @@ public class RunScriptTool implements AgentTool {
     @Override
     public String description() {
         return "Generate and execute short scripts for local observation, lightweight tasks, file inspection, environment checks, and output verification. Scripts run under /mnt/user-data/workspace; final deliverables should be written under /mnt/user-data/outputs. "
-                + "The pipe character | is forbidden everywhere in script code; use variables, loops, and separate statements instead. "
+                + "Script code may use normal language syntax, but it must not read or print credential values; use configured provider adapters rather than handwritten provider HTTP calls. "
                 + "Arguments: {\"language\": \"python|powershell|node|bash\", \"code\": \"script code\", \"args\": [\"optional arguments\"], \"purpose\": \"short reason\"}";
     }
 
@@ -177,9 +177,10 @@ public class RunScriptTool implements AgentTool {
                 return ToolResult.failed(name(), "Error: script file path is outside allowed workspace root");
             }
 
+            String rewrittenCode;
             try {
                 Files.createDirectories(normalizedDir);
-                String rewrittenCode = pathResolver.rewriteContainerPathsToLocal(normalizeCode(language, code));
+                rewrittenCode = pathResolver.rewriteContainerPathsToLocal(normalizeCode(language, code));
                 Files.writeString(scriptFile, rewrittenCode, StandardCharsets.UTF_8);
             } catch (IOException ex) {
                 return ToolResult.failed(name(), "Error writing script file: " + ex.getMessage());
@@ -221,7 +222,7 @@ public class RunScriptTool implements AgentTool {
                     cmdArgs,
                     pathResolver.workspaceRoot(),
                     normalizedDir,
-                    Duration.ofMillis(properties.getSandbox().getTimeoutMs()),
+                    timeoutFor(language, rewrittenCode),
                     environment,
                     properties.getSandbox().isNetworkEnabled(),
                     request.runId()
@@ -239,6 +240,16 @@ public class RunScriptTool implements AgentTool {
             return ToolResult.failed(name(), "Error executing script: " + e.getMessage(),
                     Map.of("errorType", e.getClass().getSimpleName()));
         }
+    }
+
+    private Duration timeoutFor(String language, String code) {
+        if ("python".equalsIgnoreCase(language) || "python3".equalsIgnoreCase(language)) {
+            String normalized = code == null ? "" : code.replace('\\', '/');
+            if (normalized.contains("image-generation/scripts/generate.py")) {
+                return Duration.ofMillis(properties.getSandbox().getImageGenerationTimeoutMs());
+            }
+        }
+        return Duration.ofMillis(properties.getSandbox().getTimeoutMs());
     }
 
     private String getExtensionFor(String language) {
