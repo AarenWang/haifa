@@ -17,6 +17,7 @@ import io.netty.handler.logging.LoggingHandler;
 import java.util.concurrent.CountDownLatch;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.wrj.haifa.netty.rsyslog.model.RFC5424Message;
 
 /**
  * Rsyslog server implementation that supports RFC 5424 protocol
@@ -157,7 +158,7 @@ public class RsyslogServer {
         private static final Logger customLogger = Logger.getLogger(CustomMessageProcessor.class.getName());
         
         @Override
-        public void processMessage(org.wrj.haifa.netty.rsyslog.client.RFC5424Message message, io.netty.channel.ChannelHandlerContext ctx) {
+        public void processMessage(RFC5424Message message, io.netty.channel.ChannelHandlerContext ctx) {
             // 在这里可以实现自定义的消息处理逻辑
             // 例如将消息存储到数据库、发送到消息队列、触发告警等
             
@@ -170,27 +171,27 @@ public class RsyslogServer {
                     message.getMessage());
             
             switch (severity) {
-                case org.wrj.haifa.netty.rsyslog.client.RFC5424Message.SEVERITY_EMERGENCY:
-                case org.wrj.haifa.netty.rsyslog.client.RFC5424Message.SEVERITY_ALERT:
-                case org.wrj.haifa.netty.rsyslog.client.RFC5424Message.SEVERITY_CRITICAL:
+                case RFC5424Message.SEVERITY_EMERGENCY:
+                case RFC5424Message.SEVERITY_ALERT:
+                case RFC5424Message.SEVERITY_CRITICAL:
                     customLogger.severe(logMessage);
                     // 可以在这里添加告警逻辑
                     break;
                     
-                case org.wrj.haifa.netty.rsyslog.client.RFC5424Message.SEVERITY_ERROR:
+                case RFC5424Message.SEVERITY_ERROR:
                     customLogger.severe(logMessage);
                     break;
                     
-                case org.wrj.haifa.netty.rsyslog.client.RFC5424Message.SEVERITY_WARNING:
+                case RFC5424Message.SEVERITY_WARNING:
                     customLogger.warning(logMessage);
                     break;
                     
-                case org.wrj.haifa.netty.rsyslog.client.RFC5424Message.SEVERITY_NOTICE:
-                case org.wrj.haifa.netty.rsyslog.client.RFC5424Message.SEVERITY_INFORMATIONAL:
+                case RFC5424Message.SEVERITY_NOTICE:
+                case RFC5424Message.SEVERITY_INFORMATIONAL:
                     customLogger.info(logMessage);
                     break;
                     
-                case org.wrj.haifa.netty.rsyslog.client.RFC5424Message.SEVERITY_DEBUG:
+                case RFC5424Message.SEVERITY_DEBUG:
                     customLogger.fine(logMessage);
                     break;
             }

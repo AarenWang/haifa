@@ -3,6 +3,7 @@ package org.wrj.haifa.netty.rsyslog.client;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.MessageToByteEncoder;
+import org.wrj.haifa.netty.rsyslog.model.RFC5424Message;
 
 /**
  * Encoder for Rsyslog messages using RFC 5424 format
