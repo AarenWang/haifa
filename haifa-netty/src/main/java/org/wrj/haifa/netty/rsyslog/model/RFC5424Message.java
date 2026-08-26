@@ -1,4 +1,4 @@
-package org.wrj.haifa.netty.rsyslog.client;
+package org.wrj.haifa.netty.rsyslog.model;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
