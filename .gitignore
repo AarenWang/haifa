@@ -44,6 +44,18 @@ local.properties
 
 # Log Files
 *.log
+haifa-ai/haifa-ai-deerflow/logs/
+
+# Runtime upload data
+haifa-ai/haifa-ai-deerflow/uploads/
+
+# SQLite database
+data/
+**/data/
+
+# External reference repositories (not part of this project)
+deer-flow/
+deer-flow-research/
 
 # Keystore files
 *.jks
@@ -58,3 +70,9 @@ hs_err_pid*
 
 !pom.xml
 !**/pom.xml
+prompts/
+
+**/outputs/
+scripts/
+haifa-ai/haifa-deerflow-admin
+output/

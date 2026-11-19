@@ -1,0 +1,204 @@
+package org.wrj.haifa.ai.deerflow.skill;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+public final class SkillParser {
+
+    private static final Pattern H1_PATTERN = Pattern.compile("^#\\s+(.+)");
+    private static final Pattern ALLOWED_TOOLS_SECTION = Pattern.compile("(?i)^#{1,3}\\s*allowed\\s*tools\\s*$");
+    private static final Pattern ALLOWED_TOOLS_INLINE = Pattern.compile("(?i)^[-*]\\s*allowed-tools?\\s*:\\s*(.+)$");
+    private static final Pattern LIST_ITEM = Pattern.compile("^[-*]\\s+(.+)$");
+    private static final List<String> SUBDIRS = List.of("references", "templates", "scripts", "assets");
+
+    private SkillParser() {
+    }
+
+    public static Skill parse(Path skillDir, String source) throws IOException {
+        Path skillMd = skillDir.resolve("SKILL.md");
+        String content = Files.readString(skillMd, StandardCharsets.UTF_8);
+        String name = skillDir.getFileName().toString();
+        String description = null;
+        java.util.Set<String> allowedTools = null;
+        java.util.List<String> activationHints = new java.util.ArrayList<>();
+
+        String frontMatter = "";
+        String body = content;
+        String trimmedContent = content.trim();
+        if (trimmedContent.startsWith("---")) {
+            int firstIdx = content.indexOf("---");
+            int secondIdx = content.indexOf("---", firstIdx + 3);
+            if (secondIdx > 0) {
+                frontMatter = content.substring(firstIdx + 3, secondIdx);
+                body = content.substring(secondIdx + 3);
+            }
+        }
+
+        if (!frontMatter.isEmpty()) {
+            String[] lines = frontMatter.split("\r?\n");
+            for (String line : lines) {
+                int colIdx = line.indexOf(':');
+                if (colIdx > 0) {
+                    String key = line.substring(0, colIdx).trim().toLowerCase();
+                    String val = line.substring(colIdx + 1).trim();
+                    if ("name".equals(key)) {
+                        if (!val.isEmpty()) {
+                            name = val;
+                        }
+                    } else if ("description".equals(key)) {
+                        if (!val.isEmpty()) {
+                            description = val;
+                        }
+                    } else if ("allowed-tools".equals(key) || "allowed_tools".equals(key)) {
+                        if (!val.isEmpty()) {
+                            if (allowedTools == null) {
+                                allowedTools = new java.util.HashSet<>();
+                            }
+                            allowedTools.addAll(parseInlineList(val));
+                        }
+                    } else if ("activation-hints".equals(key) || "activation_hints".equals(key)) {
+                        activationHints.addAll(parseInlineList(val));
+                    }
+                }
+            }
+        }
+
+        if (description == null || description.isEmpty()) {
+            description = extractDescription(body);
+        }
+        Set<String> bodyTools = extractAllowedTools(body);
+        if (allowedTools == null) {
+            allowedTools = bodyTools;
+        } else {
+            allowedTools.addAll(bodyTools);
+        }
+
+        Map<String, List<String>> directories = scanSubdirectories(skillDir);
+        return new Skill(name, description, source, content, directories, allowedTools, activationHints);
+    }
+
+    private static List<String> parseInlineList(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        String val = value.trim();
+        if (val.startsWith("[") && val.endsWith("]")) {
+            val = val.substring(1, val.length() - 1);
+        }
+        List<String> items = new java.util.ArrayList<>();
+        for (String raw : val.split(",")) {
+            String item = raw.trim();
+            if ((item.startsWith("\"") && item.endsWith("\"")) || (item.startsWith("'") && item.endsWith("'"))) {
+                item = item.substring(1, item.length() - 1).trim();
+            }
+            if (!item.isEmpty()) {
+                items.add(item);
+            }
+        }
+        return items;
+    }
+
+    private static String extractDescription(String content) {
+        if (content == null || content.isBlank()) {
+            return "";
+        }
+        String[] lines = content.split("\r?\n");
+        for (String line : lines) {
+            Matcher m = H1_PATTERN.matcher(line.trim());
+            if (m.matches()) {
+                return m.group(1).trim();
+            }
+        }
+        // fallback: first non-empty line, limited to 120 chars
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty()) {
+                if (trimmed.length() > 120) {
+                    return trimmed.substring(0, 120) + "...";
+                }
+                return trimmed;
+            }
+        }
+        return "";
+    }
+
+    private static Map<String, List<String>> scanSubdirectories(Path skillDir) {
+        return SUBDIRS.stream()
+                .collect(Collectors.toMap(
+                        dir -> dir,
+                        dir -> listFiles(skillDir.resolve(dir)),
+                        (a, b) -> a
+                ));
+    }
+
+    private static List<String> listFiles(Path dir) {
+        if (!Files.isDirectory(dir)) {
+            return List.of();
+        }
+        try (Stream<Path> paths = Files.list(dir)) {
+            return paths
+                    .filter(Files::isRegularFile)
+                    .map(p -> p.getFileName().toString())
+                    .sorted()
+                    .collect(Collectors.toList());
+        } catch (IOException ex) {
+            return List.of();
+        }
+    }
+
+    private static Set<String> extractAllowedTools(String content) {
+        Set<String> tools = new java.util.HashSet<>();
+        String[] lines = content.split("\r?\n");
+        boolean inSection = false;
+        for (String rawLine : lines) {
+            String line = rawLine.trim();
+            if (line.isEmpty()) {
+                continue;
+            }
+            // Check inline format: - allowed-tools: tool1, tool2
+            Matcher inlineMatcher = ALLOWED_TOOLS_INLINE.matcher(line);
+            if (inlineMatcher.matches()) {
+                String csv = inlineMatcher.group(1);
+                for (String t : csv.split(",")) {
+                    String trimmed = t.trim();
+                    if (!trimmed.isEmpty()) {
+                        tools.add(trimmed);
+                    }
+                }
+                continue;
+            }
+            // Check for "## Allowed tools" section header
+            if (ALLOWED_TOOLS_SECTION.matcher(line).matches()) {
+                inSection = true;
+                continue;
+            }
+            if (inSection) {
+                // New markdown heading ends the section
+                if (line.startsWith("#")) {
+                    inSection = false;
+                } else {
+                    Matcher listMatcher = LIST_ITEM.matcher(line);
+                    if (listMatcher.matches()) {
+                        String item = listMatcher.group(1).trim();
+                        if (!item.isEmpty()) {
+                            tools.add(item);
+                        }
+                        continue;
+                    } else {
+                        inSection = false;
+                    }
+                }
+            }
+        }
+        return Set.copyOf(tools);
+    }
+}

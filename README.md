@@ -2,6 +2,16 @@
 
 A multi-module Maven workspace for exploring the Java ecosystem—from core language features to frameworks, middleware, distributed systems, and AI integrations. Each `haifa-*` module is a self-contained demo or study note that documents experiments, patterns, and lessons learned while revisiting technologies used in day-to-day development.
 
+## DeerFlow Modules Moved
+
+Active development of the DeerFlow runtime, frontend, and Utility MCP Server has moved to [AarenWang/haifa-ai-deerflow](https://github.com/AarenWang/haifa-ai-deerflow).
+
+The following directories remain here as an archived source snapshot and are protected from further changes:
+
+- `haifa-ai/haifa-ai-deerflow`
+- `haifa-ai/haifa-ai-deerflow-web`
+- `haifa-ai/haifa-ai-utility-mcp-server`
+
 ## Repository Overview
 - Parent build: single `pom.xml` at the root orchestrates 40+ modules, all targeting Java 25.
 - Naming: modules follow the `haifa-<topic>` convention (e.g., `haifa-concurrent`, `haifa-springframework`).
