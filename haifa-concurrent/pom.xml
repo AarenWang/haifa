@@ -16,4 +16,19 @@
 
     </dependencies>
 
+    <build>
+        <plugins>
+            <!-- StructuredTaskScope is a Java 21 preview API (JEP 453). -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs>
+                        <arg>--enable-preview</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
 </project>

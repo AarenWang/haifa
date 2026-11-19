@@ -10,11 +10,18 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
 @Component
-public class ReadWorkspaceFileTool implements AgentTool {
+public class ReadWorkspaceFileTool implements ParallelSafeAgentTool {
 
     private static final int MAX_CHARS = 12_000;
     private static final Pattern QUOTED_PATH = Pattern.compile("[\"'`]([^\"'`]+)[\"'`]");
     private static final Pattern READ_PATH = Pattern.compile("(?i)(?:read|open|查看|读取)\\s+([^\\s,;]+)");
+
+    /**
+     * Pattern to extract JSON string values for keys like "filepath", "file_path", "path", or "file".
+     * Matches: "filepath":"pom.xml" or "path": "src/main/resources/app.yml" etc.
+     */
+    private static final Pattern JSON_PATH_VALUE = Pattern.compile(
+            "\"(?:filepath|file_path|path|file)\"\\s*:\\s*\"([^\"]+)\"");
 
     @Override
     public String name() {
@@ -58,14 +65,28 @@ public class ReadWorkspaceFileTool implements AgentTool {
         if (userMessage == null || userMessage.isBlank()) {
             return Optional.empty();
         }
+
+        // 1. Try parsing as JSON tool arguments (e.g. {"filepath":"pom.xml"})
+        String trimmed = userMessage.trim();
+        if (trimmed.startsWith("{")) {
+            Matcher jsonMatcher = JSON_PATH_VALUE.matcher(trimmed);
+            if (jsonMatcher.find()) {
+                return Optional.of(jsonMatcher.group(1));
+            }
+        }
+
+        // 2. Fallback: extract from natural language with quoted path
         Matcher quoted = QUOTED_PATH.matcher(userMessage);
         if (quoted.find()) {
             return Optional.of(quoted.group(1));
         }
+
+        // 3. Fallback: extract from natural language with read/open keywords
         Matcher read = READ_PATH.matcher(userMessage);
         if (read.find()) {
             return Optional.of(read.group(1));
         }
+
         return Optional.empty();
     }
 }

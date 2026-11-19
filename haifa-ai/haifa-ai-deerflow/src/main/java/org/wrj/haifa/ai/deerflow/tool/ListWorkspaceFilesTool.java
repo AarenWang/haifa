@@ -9,7 +9,7 @@ import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
 
 @Component
-public class ListWorkspaceFilesTool implements AgentTool {
+public class ListWorkspaceFilesTool implements ParallelSafeAgentTool {
 
     private static final int MAX_FILES = 80;
 

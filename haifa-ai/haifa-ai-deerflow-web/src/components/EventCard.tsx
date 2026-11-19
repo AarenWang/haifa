@@ -1,0 +1,290 @@
+import { useState } from 'react';
+import type { DeerFlowEvent } from '../types';
+import {
+  Play,
+  Wrench,
+  CheckCircle2,
+  Brain,
+  MessageSquare,
+  Flag,
+  AlertTriangle,
+  Ban,
+  ChevronDown,
+  ChevronUp,
+  Code2,
+  Copy,
+  Check,
+  FileSearch,
+  Layers,
+  Link,
+  Download,
+  Highlighter,
+  Shield,
+  XCircle,
+  FileText,
+  Package,
+  Users,
+  ListTodo,
+} from 'lucide-react';
+
+const eventTitles: Record<string, string> = {
+  RUN_STARTED: 'Run started',
+  TOOL_STARTED: 'Tool started',
+  TOOL_COMPLETED: 'Tool completed',
+  TOOL_DENIED: 'Tool blocked by policy',
+  MODEL_STARTED: 'Model started',
+  MODEL_COMPLETED: 'Model answered',
+  RUN_COMPLETED: 'Run completed',
+  RUN_FAILED: 'Run failed',
+  RUN_CANCELLED: 'Run cancelled',
+  // Research events
+  RESEARCH_PLAN_CREATED: 'Research plan created',
+  RESEARCH_DIMENSION_STARTED: 'Research dimension started',
+  RESEARCH_DIMENSION_COMPLETED: 'Research dimension completed',
+  SOURCE_FOUND: 'Source found',
+  SOURCE_FETCHED: 'Source fetched',
+  EVIDENCE_EXTRACTED: 'Evidence extracted',
+  QUALITY_GATE_STARTED: 'Quality gate started',
+  QUALITY_GATE_PASSED: 'Quality gate passed',
+  QUALITY_GATE_FAILED: 'Quality gate failed',
+  REPORT_STARTED: 'Report started',
+  REPORT_COMPLETED: 'Report completed',
+  ARTIFACT_CREATED: 'Artifact created',
+  SUBAGENT_QUEUED: 'Subagent queued',
+  SUBAGENT_STARTED: 'Subagent started',
+  SUBAGENT_STEP_STARTED: 'Subagent step started',
+  SUBAGENT_STEP_COMPLETED: 'Subagent step completed',
+  SUBAGENT_OUTPUT: 'Subagent output',
+  SUBAGENT_TOOL_STARTED: 'Subagent tool started',
+  SUBAGENT_TOOL_COMPLETED: 'Subagent tool completed',
+  SUBAGENT_FAILED: 'Subagent failed',
+  SUBAGENT_CANCELLED: 'Subagent cancelled',
+  SUBAGENT_TIMED_OUT: 'Subagent timed out',
+  SUBAGENT_COMPLETED: 'Subagent completed',
+  MODEL_DELTA: 'Model delta',
+  TOOL_CALL_REQUESTED: 'Tool call requested',
+  RESEARCH_STEP_COMPLETED: 'Research step completed',
+  CONTEXT_COMPRESSED: 'Context compressed',
+  TOOL_OUTPUT_BUDGET_EXCEEDED: 'Tool output budget exceeded',
+  TODO_CREATED: 'Todo list created',
+  TODO_UPDATED: 'Todo list updated',
+  TODO_INCOMPLETE: 'Todo incomplete',
+  TODO_GATE_BLOCKED: 'Todo gate blocked',
+};
+
+const eventIcons: Record<string, React.ReactNode> = {
+  RUN_STARTED: <Play size={16} />,
+  TOOL_STARTED: <Wrench size={16} />,
+  TOOL_COMPLETED: <CheckCircle2 size={16} />,
+  TOOL_DENIED: <Ban size={16} />,
+  MODEL_STARTED: <Brain size={16} />,
+  MODEL_COMPLETED: <MessageSquare size={16} />,
+  RUN_COMPLETED: <Flag size={16} />,
+  RUN_FAILED: <AlertTriangle size={16} />,
+  RUN_CANCELLED: <Ban size={16} />,
+  // Research events
+  RESEARCH_PLAN_CREATED: <FileSearch size={16} />,
+  RESEARCH_DIMENSION_STARTED: <Layers size={16} />,
+  RESEARCH_DIMENSION_COMPLETED: <Layers size={16} />,
+  SOURCE_FOUND: <Link size={16} />,
+  SOURCE_FETCHED: <Download size={16} />,
+  EVIDENCE_EXTRACTED: <Highlighter size={16} />,
+  QUALITY_GATE_STARTED: <Shield size={16} />,
+  QUALITY_GATE_PASSED: <CheckCircle2 size={16} />,
+  QUALITY_GATE_FAILED: <XCircle size={16} />,
+  REPORT_STARTED: <FileText size={16} />,
+  REPORT_COMPLETED: <FileText size={16} />,
+  ARTIFACT_CREATED: <Package size={16} />,
+  SUBAGENT_QUEUED: <Users size={16} />,
+  SUBAGENT_STARTED: <Users size={16} />,
+  SUBAGENT_STEP_STARTED: <Users size={16} />,
+  SUBAGENT_STEP_COMPLETED: <Users size={16} />,
+  SUBAGENT_OUTPUT: <Users size={16} />,
+  SUBAGENT_TOOL_STARTED: <Users size={16} />,
+  SUBAGENT_TOOL_COMPLETED: <Users size={16} />,
+  SUBAGENT_FAILED: <XCircle size={16} />,
+  SUBAGENT_CANCELLED: <Ban size={16} />,
+  SUBAGENT_TIMED_OUT: <AlertTriangle size={16} />,
+  SUBAGENT_COMPLETED: <Users size={16} />,
+  MODEL_DELTA: <Brain size={16} />,
+  TOOL_CALL_REQUESTED: <Wrench size={16} />,
+  RESEARCH_STEP_COMPLETED: <CheckCircle2 size={16} />,
+  CONTEXT_COMPRESSED: <Layers size={16} />,
+  TOOL_OUTPUT_BUDGET_EXCEEDED: <AlertTriangle size={16} />,
+  TODO_CREATED: <ListTodo size={16} />,
+  TODO_UPDATED: <ListTodo size={16} />,
+  TODO_INCOMPLETE: <AlertTriangle size={16} />,
+  TODO_GATE_BLOCKED: <AlertTriangle size={16} />,
+};
+
+const eventIconColors: Record<string, string> = {
+  RUN_STARTED: 'blue',
+  TOOL_STARTED: 'amber',
+  TOOL_COMPLETED: 'amber',
+  TOOL_DENIED: 'red',
+  MODEL_STARTED: 'green',
+  MODEL_COMPLETED: 'green',
+  RUN_COMPLETED: 'blue',
+  RUN_FAILED: 'red',
+  RUN_CANCELLED: 'gray',
+  // Research events
+  RESEARCH_PLAN_CREATED: 'purple',
+  RESEARCH_DIMENSION_STARTED: 'teal',
+  RESEARCH_DIMENSION_COMPLETED: 'teal',
+  SOURCE_FOUND: 'cyan',
+  SOURCE_FETCHED: 'cyan',
+  EVIDENCE_EXTRACTED: 'indigo',
+  QUALITY_GATE_STARTED: 'orange',
+  QUALITY_GATE_PASSED: 'green',
+  QUALITY_GATE_FAILED: 'red',
+  REPORT_STARTED: 'violet',
+  REPORT_COMPLETED: 'violet',
+  ARTIFACT_CREATED: 'pink',
+  SUBAGENT_QUEUED: 'teal',
+  SUBAGENT_STARTED: 'teal',
+  SUBAGENT_STEP_STARTED: 'teal',
+  SUBAGENT_STEP_COMPLETED: 'teal',
+  SUBAGENT_OUTPUT: 'teal',
+  SUBAGENT_TOOL_STARTED: 'teal',
+  SUBAGENT_TOOL_COMPLETED: 'teal',
+  SUBAGENT_FAILED: 'red',
+  SUBAGENT_CANCELLED: 'gray',
+  SUBAGENT_TIMED_OUT: 'orange',
+  SUBAGENT_COMPLETED: 'teal',
+  MODEL_DELTA: 'green',
+  TOOL_CALL_REQUESTED: 'amber',
+  RESEARCH_STEP_COMPLETED: 'blue',
+  CONTEXT_COMPRESSED: 'teal',
+  TOOL_OUTPUT_BUDGET_EXCEEDED: 'orange',
+  TODO_CREATED: 'blue',
+  TODO_UPDATED: 'blue',
+  TODO_INCOMPLETE: 'orange',
+  TODO_GATE_BLOCKED: 'orange',
+};
+
+interface EventCardProps {
+  event: DeerFlowEvent;
+}
+
+export default function EventCard({ event }: EventCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [idCopied, setIdCopied] = useState(false);
+
+  const title = eventTitles[event.type] || event.type;
+  const icon = eventIcons[event.type] || <Flag size={16} />;
+  const colorClass = eventIconColors[event.type] || 'gray';
+  const hasContent = event.content && event.content.length > 0;
+
+  const handleCopyId = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(event.eventId);
+      setIdCopied(true);
+      setTimeout(() => setIdCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy ID', err);
+    }
+  };
+
+  return (
+    <div className="event-card">
+      <div className="event-card-header">
+        <span className={`event-card-icon ${colorClass}`}>{icon}</span>
+        <span className="event-card-title" title={title}>
+          {title}
+        </span>
+        <button
+          type="button"
+          className="event-card-id-btn"
+          onClick={handleCopyId}
+          title={`Copy Event ID: ${event.eventId}`}
+        >
+          {idCopied ? <Check size={12} /> : <Copy size={12} />}
+        </button>
+      </div>
+      {hasContent && (
+        <div className={`event-card-content ${expanded ? 'expanded' : ''}`}>
+          {event.content}
+        </div>
+      )}
+      <div className="event-card-actions">
+        {hasContent && event.content.length > 120 && (
+          <button
+            type="button"
+            className="event-card-btn"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            {expanded ? 'Collapse' : 'Expand'}
+          </button>
+        )}
+        <button
+          type="button"
+          className="event-card-btn"
+          onClick={() => setInspectorOpen((v) => !v)}
+        >
+          <Code2 size={12} />
+          {inspectorOpen ? 'Hide JSON' : 'View JSON'}
+        </button>
+      </div>
+      {inspectorOpen && (
+        <div className="inline-inspector">
+          <RawJsonInspector event={event} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RawJsonInspector({ event }: { event: DeerFlowEvent }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(event, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: '#adb5bd',
+            fontFamily: 'var(--font-mono)',
+          }}
+        >
+          Raw Event
+        </span>
+        <button
+          type="button"
+          className="event-card-btn"
+          onClick={handleCopy}
+          style={{ color: '#adb5bd' }}
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <pre className="json-block">
+        {JSON.stringify(event, null, 2)}
+      </pre>
+    </div>
+  );
+}
+
+export { RawJsonInspector };

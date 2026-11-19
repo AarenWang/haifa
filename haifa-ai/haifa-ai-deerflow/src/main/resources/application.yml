@@ -2,16 +2,366 @@ server:
   port: 8095
 
 spring:
+  main:
+    web-application-type: reactive
   application:
     name: haifa-ai-deerflow
+  datasource:
+    url: jdbc:sqlite:${deerflow.persistence.sqlite.path}?journal_mode=WAL&busy_timeout=5000
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+      minimum-idle: 1
+      connection-timeout: 30000    
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.community.dialect.SQLiteDialect
+  ai:
+    mcp:
+      client:
+        enabled: true
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      # OPENAI_BASE_URL is the complete chat-completions endpoint. Spring AI 1.1.x
+      # rejects an empty completions-path, so the same absolute URL is used here
+      # to prevent Spring AI from appending its /v1/chat/completions default.
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1/chat/completions}
+      chat:
+        completions-path: ${OPENAI_BASE_URL:https://api.openai.com/v1/chat/completions}
+        options:
+          model: gpt-4o-mini
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY:${OPENAI_API_KEY:}}
+        chat:
+          options:
+            model: ${HAIFA_DEERFLOW_MODEL:gemini-2.5-flash}
+            include-thoughts: true
+
+logging:
+  file:
+    path: ${HAIFA_DEERFLOW_LOG_PATH:${user.dir}/logs}
+  level:
+    org.wrj.haifa.ai.deerflow: DEBUG
+    org.springframework.ai: DEBUG
+    org.springframework.retry: DEBUG
+    reactor.netty.http.client: DEBUG
+
+deerflow:
+  persistence:
+    sqlite:
+      path: ${user.dir}/data/deerflow.sqlite
 
 haifa:
   ai:
     deerflow:
+      run-concurrency-mode: ${HAIFA_DEERFLOW_RUN_CONCURRENCY_MODE:ALLOW_PARALLEL_RUNS}
+      voice:
+        enabled: ${HAIFA_DEERFLOW_VOICE_ENABLED:true}
+        websocket:
+          path: /api/deerflow/voice/ws
+          max-sessions-per-user: 2
+          max-frame-bytes: 8192
+          idle-timeout: 90s
+        audio:
+          input-sample-rate-hz: 16000
+          input-channels: 1
+          max-turn-duration: 90s
+          max-turn-bytes: 2880000
+        asr:
+          default-provider: ${VOICE_ASR_PROVIDER:fake}
+          providers:
+            volcengine:
+              enabled: ${VOLCENGINE_ASR_ENABLED:false}
+              api-key: ${VOLCENGINE_VOICE_API_KEY:}
+              endpoint: ${VOLCENGINE_ASR_ENDPOINT:wss://ai-gateway.vei.volces.com/v1/realtime}
+              model: ${VOLCENGINE_ASR_MODEL:bigmodel}
+              resource-id: ${VOLCENGINE_ASR_RESOURCE_ID:}
+            dashscope:
+              enabled: ${DASHSCOPE_ASR_ENABLED:true}
+              api-key: ${DASHSCOPE_API_KEY:}
+              workspace-id: ${DASHSCOPE_WORKSPACE_ID:}
+              region: ${DASHSCOPE_REGION:cn-beijing}
+              endpoint: ${DASHSCOPE_ASR_ENDPOINT:}
+              model: ${DASHSCOPE_ASR_MODEL:paraformer-realtime-v2}
+        tts:
+          default-provider: ${VOICE_TTS_PROVIDER:fake}
+          providers:
+            volcengine:
+              enabled: ${VOLCENGINE_TTS_ENABLED:false}
+              app-id: ${VOLCENGINE_TTS_APP_ID:}
+              access-token: ${VOLCENGINE_TTS_ACCESS_TOKEN:}
+              endpoint: ${VOLCENGINE_TTS_ENDPOINT:wss://openspeech.bytedance.com/api/v1/tts/ws_binary}
+              cluster: ${VOLCENGINE_TTS_CLUSTER:volcano_tts}
+              voice: ${VOLCENGINE_TTS_VOICE:}
+              sample-rate-hz: ${VOLCENGINE_TTS_SAMPLE_RATE:24000}
+            dashscope:
+              enabled: ${DASHSCOPE_TTS_ENABLED:true}
+              api-key: ${DASHSCOPE_API_KEY:}
+              workspace-id: ${DASHSCOPE_WORKSPACE_ID:}
+              region: ${DASHSCOPE_REGION:cn-beijing}
+              endpoint: ${DASHSCOPE_TTS_ENDPOINT:}
+              model: ${DASHSCOPE_TTS_MODEL:cosyvoice-v3-flash}
+              voice: ${DASHSCOPE_TTS_VOICE:longanyang}
+              sample-rate-hz: ${DASHSCOPE_TTS_SAMPLE_RATE:24000}
       model: ${HAIFA_DEERFLOW_MODEL:}
-      max-iterations: 4
-      workspace-root: ${HAIFA_DEERFLOW_WORKSPACE:${user.dir}}
+      network-proxy-url: ${LLM_NETWORK_PROXY_URL:}
+      network-proxy-username: ${LLM_NETWORK_PROXY_USERNAME:}
+      network-proxy-password: ${LLM_NETWORK_PROXY_PASSWORD:}
+      model-timeout: ${HAIFA_DEERFLOW_MODEL_TIMEOUT:300000}
+      max-iterations: 20
+      max-tool-calls: ${HAIFA_DEERFLOW_MAX_TOOL_CALLS:80}
+      user-data-root: ${HAIFA_DEERFLOW_USER_DATA:${user.dir}/data/user-data}
+      workspace-root: ${HAIFA_DEERFLOW_WORKSPACE:${user.dir}/data/user-data/workspace}
+      skills-root: ${HAIFA_DEERFLOW_SKILLS:${user.dir}/skills}
+      skills-container-path: /mnt/skills
+      skills-enabled: true
+      mcp-enabled: true
+      mcp:
+        enabled: ${HAIFA_DEERFLOW_MCP_ENABLED:true}
+        direct-exposure-threshold: 20
+        capability-owners:
+          WEATHER: utility
+          TIME: utility
+          CURRENCY: utility
+          HOLIDAY_WORKDAY: utility
+          CALCULATION: utility
+          UNIT_CONVERSION: utility
+          ENCYCLOPEDIA_SEARCH: utility
+          ENCYCLOPEDIA_FETCH: utility
+          WEB_FETCH: builtin-web-fetch
+        servers:
+          utility:
+            enabled: true
+            required: true
+            transport: STREAMABLE_HTTP
+            url: ${UTILITY_MCP_URL:http://127.0.0.1:8091}
+            endpoint: /mcp
+            origin: ${UTILITY_MCP_ORIGIN:}
+            bearer-token-environment: ${UTILITY_MCP_TOKEN_ENV:}
+            default-risk: READ_ONLY
+            stale-policy: DENY_NEW_CALLS
+            allowed-tools:
+              - location_search
+              - weather_current
+              - weather_forecast
+              - air_quality
+              - time_now
+              - time_convert
+              - currency_rate
+              - currency_convert
+              - holiday_list
+              - holiday_next
+              - workday_is_workday
+              - workday_add
+              - calculate
+              - unit_convert
+              - wikipedia_search
+              - wikipedia_summary
+              - microsoft_docs_search
+              - microsoft_docs_fetch
+              - microsoft_code_sample_search
+            semantic-mappings:
+              location_search: EXTERNAL_READ
+              weather_current: EXTERNAL_READ
+              weather_forecast: EXTERNAL_READ
+              air_quality: EXTERNAL_READ
+              time_now: EXTERNAL_READ
+              time_convert: EXTERNAL_READ
+              currency_rate: EXTERNAL_READ
+              currency_convert: EXTERNAL_READ
+              holiday_list: EXTERNAL_READ
+              holiday_next: EXTERNAL_READ
+              workday_is_workday: EXTERNAL_READ
+              workday_add: EXTERNAL_READ
+              calculate: GENERIC
+              unit_convert: GENERIC
+              wikipedia_search: KNOWLEDGE_SEARCH
+              wikipedia_summary: KNOWLEDGE_FETCH
+              microsoft_docs_search: KNOWLEDGE_SEARCH
+              microsoft_docs_fetch: KNOWLEDGE_FETCH
+              microsoft_code_sample_search: KNOWLEDGE_SEARCH
+            capability-mappings:
+              location_search: WEATHER
+              weather_current: WEATHER
+              weather_forecast: WEATHER
+              air_quality: WEATHER
+              time_now: TIME
+              time_convert: TIME
+              currency_rate: CURRENCY
+              currency_convert: CURRENCY
+              holiday_list: HOLIDAY_WORKDAY
+              holiday_next: HOLIDAY_WORKDAY
+              workday_is_workday: HOLIDAY_WORKDAY
+              workday_add: HOLIDAY_WORKDAY
+              calculate: CALCULATION
+              unit_convert: UNIT_CONVERSION
+              wikipedia_search: ENCYCLOPEDIA_SEARCH
+              wikipedia_summary: ENCYCLOPEDIA_FETCH
+          open-meteo:
+            enabled: false
+            required: false
+            transport: STREAMABLE_HTTP
+            url: ${OPEN_METEO_MCP_URL:https://example.invalid}
+            endpoint: /mcp
+            default-risk: READ_ONLY
+            allowed-tools: []
+          time-reference:
+            enabled: false
+            required: false
+            transport: STDIO
+            command: uvx
+            args: [mcp-server-time]
+            default-risk: READ_ONLY
+            allowed-tools: []
+          frankfurter-remote:
+            enabled: false
+            required: false
+            transport: STREAMABLE_HTTP
+            url: ${FRANKFURTER_MCP_URL:https://mcp.frankfurter.dev}
+            endpoint: /
+            default-risk: READ_ONLY
+            allowed-tools: []
+          wikipedia-reference:
+            enabled: false
+            required: false
+            transport: STDIO
+            command: uvx
+            args: [wikipedia-mcp]
+            default-risk: READ_ONLY
+            allowed-tools: []
+          fetch:
+            enabled: false
+            required: false
+            transport: STDIO
+            command: uvx
+            args: [mcp-server-fetch]
+            default-risk: UNKNOWN
+            allowed-tools: []
+      write-file-enabled: true
+      str-replace-enabled: true
+      bash-enabled: true
+      tool-search-enabled: true
+      run-script-enabled: true
+      sandbox:
+        enabled: true
+        # local is retained as a compatibility alias for local-restricted.
+        # local-trusted executes host processes and requires both explicit gates below.
+        backend: local-trusted
+        allow-host-execution: true
+        allowed-script-languages: python,python3,powershell,node,bash
+        run-script-local-unsafe-allowed: false
+        network-enabled: true
+        # Long-running image providers get this limit only through run_script.
+        image-generation-timeout-ms: 120000
+        allowed-commands: mvn,npm,node,python,python3,java,javac,ls,pwd,cat,rg,grep,powercfg,shutdown
+        denied-patterns: rm -rf,format,format-volume,reboot,del /s,Remove-Item -Recurse
+        script-workdir-subdir: scripts
+        executables:
+          node: ${HAIFA_DEERFLOW_NODE_EXECUTABLE:}
+          python: ${HAIFA_DEERFLOW_PYTHON_EXECUTABLE:}
+          python3: ${HAIFA_DEERFLOW_PYTHON3_EXECUTABLE:}
+          bash: ${HAIFA_DEERFLOW_BASH_EXECUTABLE:}
+          powershell: ${HAIFA_DEERFLOW_POWERSHELL_EXECUTABLE:}
+        local-trusted:
+          enabled: true
+          inherit-environment: true
+          inherit-path: true
+          load-user-profile: false
+          isolate-home: false
+          shell-executable: ${HAIFA_DEERFLOW_TRUSTED_SHELL:}
+          shell-init-files: []
+          passthrough-environment-names: []
+          denied-environment-names: []
+          denied-environment-patterns: []
+        # Explicit sandbox environment allowlist. Values are injected into the
+        # generic bash/run_script runtime and are never included in tool metadata.
+        environment:
+          DEERFLOW_CJK_FONT: ${DEERFLOW_CJK_FONT:}
+          IMAGE_GENERATION_PROVIDER: ${IMAGE_GENERATION_PROVIDER:}
+          GEMINI_API_KEY: ${GEMINI_API_KEY:}
+          GEMINI_API_HOST: ${GEMINI_API_HOST:https://generativelanguage.googleapis.com}
+          GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:gemini-3-pro-image-preview}
+          MINIMAX_API_KEY: ${MINIMAX_API_KEY:}
+          MINIMAX_API_HOST: ${MINIMAX_API_HOST:https://api.minimaxi.com}
+          MINIMAX_IMAGE_MODEL: ${MINIMAX_IMAGE_MODEL:image-01}
+      uploads-root: ${HAIFA_DEERFLOW_UPLOADS:${user.dir}/data/user-data/uploads}
+      outputs-root: ${HAIFA_DEERFLOW_OUTPUTS:${user.dir}/data/user-data/outputs}
+      max-upload-bytes: 10485760
+      max-converted-chars: 60000
+      allowed-upload-extensions: txt,md,json,csv,log,xml,yml,yaml,properties,docx
       system-prompt: >
         You are the Java DeerFlow lead agent prototype. Use the provided
         local tool observations when they are relevant, be concise, and name
-        any files you used.
+        any files you used. Always respond to the user in the same language as their input.
+      # Tool provider configuration (defaults are aliyun / aliyun)
+      #
+      # IMPORTANT: Only providers with a registered Spring bean can be used.
+      # Currently registered: aliyun, duckduckgo (web-search); aliyun, jina (web-fetch).
+      # Configuring an unregistered provider will cause the application to fail at startup.
+      #
+      # For providers that require an API key, set the corresponding api-key property.
+      # Missing api-key for a requiresApiKey=true provider will also fail at startup.
+      #
+      tools:
+        web-search:
+          provider: aliyun
+          api-key: ${ALIYUN_API_KEY:${DASHSCOPE_API_KEY:}}
+        web-fetch:
+          provider: aliyun
+          api-key: ${ALIYUN_API_KEY:${DASHSCOPE_API_KEY:}}
+      max-research-steps: 100
+      max-research-sources: 100
+      max-fetches-per-run: 200
+      research-timeout: 3000000
+      default-research-depth: STANDARD
+      research-enabled: true
+      graph:
+        enabled: ${HAIFA_DEERFLOW_GRAPH_ENABLED:true}
+        mode: ${HAIFA_DEERFLOW_GRAPH_MODE:GRAPH_FIRST}
+        checkpoint:
+          enabled: ${HAIFA_DEERFLOW_GRAPH_CHECKPOINT_ENABLED:true}
+      # Research loop system prompt (when in research mode)
+      research-system-prompt: >
+        You are a research assistant. You can use tools to search and fetch information.
+        When external information or actions are needed, call the available tools through the model provider's structured tool-call interface.
+        Do not write tool calls manually in XML, JSON code blocks, markdown, or prose.
+        When no further tool call is needed, respond with the final answer directly in normal assistant text. Always respond to the user in the same language as their input.
+      approval:
+        enabled: false
+        require-for-local-script: false
+        require-for-network: false
+        require-for-file-write: false
+        hardline-patterns-enabled: false
+      prompt-cache:
+        enabled: true
+        canonicalization-version: v1
+        routing-shards: 1
+        observability-enabled: true
+        openai:
+          enabled: true
+          prompt-cache-key-enabled: true
+          retention: PROVIDER_DEFAULT
+          explicit-breakpoints-enabled: false
+        google:
+          enabled: true
+          include-extended-usage-metadata: true
+          auto-cache-enabled: false
+          auto-cache-threshold: 8192
+          auto-cache-ttl: PT30M
+          explicit-content:
+            enabled: false
+            min-estimated-tokens: 8192
+            ttl: PT30M
+            create-wait-timeout: PT1S
+        compression:
+          enabled: true
+          schema-version: v1
+          prompt-version: evidence-compressor-v1
+          ttl: P7D
+          max-entries: 10000
+          cleanup-interval: PT6H
