@@ -8,6 +8,7 @@ import reactor.core.publisher.Mono;
 
 @Component
 @MiddlewareOrder(30)
+@MiddlewareLifecycle(MiddlewarePhase.TOOL_RESULT)
 public class ToolErrorHandlingMiddleware implements AgentMiddleware {
 
     @Override
@@ -19,9 +20,10 @@ public class ToolErrorHandlingMiddleware implements AgentMiddleware {
     }
 
     private ToolResult sanitize(ToolResult result) {
-        if (result.content() != null && result.content().startsWith("Tool failed:")) {
+        if (!result.isSuccess() || (result.content() != null && result.content().startsWith("Tool failed:"))) {
             return new ToolResult(
                     result.toolName(),
+                    result.status(),
                     "Observation: the tool encountered an error but was handled gracefully. " + result.content(),
                     result.metadata()
             );

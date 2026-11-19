@@ -16,6 +16,7 @@ import java.net.InetSocketAddress;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.wrj.haifa.netty.rsyslog.model.RFC5424Message;
 
 /**
  * Rsyslog client implementation that supports RFC 5424 protocol

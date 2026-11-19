@@ -2,7 +2,6 @@ package org.wrj.haifa.ai.deerflow.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,14 +9,14 @@ import org.springframework.stereotype.Component;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
 
 @Component
-public class ReadFileTool implements AgentTool {
+public class ReadFileTool implements ParallelSafeAgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int MAX_CHARS = 15_000;
-    private final DeerFlowProperties properties;
+    private final UserDataPathResolver pathResolver;
 
     public ReadFileTool(DeerFlowProperties properties) {
-        this.properties = properties;
+        this.pathResolver = new UserDataPathResolver(properties);
     }
 
     @Override
@@ -27,7 +26,24 @@ public class ReadFileTool implements AgentTool {
 
     @Override
     public String description() {
-        return "Read the content of a file. Arguments: {\"path\": \"relative/path/to/file\"}";
+        return "Read the content of a file. Provide a path argument. Supports relative workspace paths and /mnt/user-data uploads, workspace, or outputs virtual paths.";
+    }
+
+    @Override
+    public String inputSchema() {
+        return """
+                {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Relative workspace path, or a /mnt/user-data/uploads, /mnt/user-data/workspace, or /mnt/user-data/outputs virtual path."
+                    }
+                  },
+                  "required": ["path"],
+                  "additionalProperties": false
+                }
+                """;
     }
 
     @Override
@@ -63,19 +79,7 @@ public class ReadFileTool implements AgentTool {
                 return ToolResult.of(name(), "Error: path is required");
             }
 
-            Path workspacePath = request.workspaceRoot().toAbsolutePath().normalize();
-            Path resolved = workspacePath.resolve(requestedPath).normalize();
-            Path uploadsPath = Path.of(properties.getUploadsRoot()).toAbsolutePath().normalize();
-            Path outputsPath = Path.of(properties.getOutputsRoot()).toAbsolutePath().normalize();
-            Path skillsPath = Path.of(properties.getSkillsRoot()).toAbsolutePath().normalize();
-
-            Path absResolved = resolved.toAbsolutePath().normalize();
-            if (!absResolved.startsWith(workspacePath)
-                    && !absResolved.startsWith(uploadsPath)
-                    && !absResolved.startsWith(outputsPath)
-                    && !absResolved.startsWith(skillsPath)) {
-                return ToolResult.of(name(), "Security Exception: path is outside allowed directories.");
-            }
+            Path resolved = pathResolver.resolveReadable(requestedPath, request.workspaceRoot());
 
             if (!Files.exists(resolved)) {
                 return ToolResult.of(name(), "Error: file does not exist: " + requestedPath);
@@ -90,6 +94,8 @@ public class ReadFileTool implements AgentTool {
                 content = content.substring(0, MAX_CHARS) + "\n...[truncated]";
             }
             return ToolResult.of(name(), content);
+        } catch (IllegalArgumentException e) {
+            return ToolResult.of(name(), "Security Exception: " + e.getMessage());
         } catch (Exception e) {
             return ToolResult.of(name(), "Error: " + e.getMessage());
         }

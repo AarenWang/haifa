@@ -1,20 +1,37 @@
 package org.wrj.haifa.ai.deerflow.agent.loop;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.sandbox.CommandPolicy;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxRequest;
+import org.wrj.haifa.ai.deerflow.sandbox.SandboxResult;
+import org.wrj.haifa.ai.deerflow.tool.RunScriptTool;
 import org.wrj.haifa.ai.deerflow.agent.AgentEvent;
 import org.wrj.haifa.ai.deerflow.agent.AgentEventType;
 import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
+import org.wrj.haifa.ai.deerflow.model.ModelMessage;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
+import org.wrj.haifa.ai.deerflow.model.ModelProtocolState;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
 import org.wrj.haifa.ai.deerflow.tool.MockFetchTool;
 import org.wrj.haifa.ai.deerflow.tool.MockSearchTool;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
+import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
+import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -32,7 +49,7 @@ class AgentLoopTest {
         AgentLoop loop = new AgentLoop(mockModel, registry);
 
         AgentRunConfig config = new AgentRunConfig("thread-1", "run-1", "test-model", false, false,
-                4, Path.of("."), null, null, Map.of());
+                4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH, null, Map.of());
 
         List<AgentEvent> events = loop.run(
                 LoopConfig.fromDefaults(),
@@ -61,10 +78,42 @@ class AgentLoopTest {
     }
 
     @Test
+    void passesAllowedToolsAsStructuredDefinitionsToModelPrompt() {
+        List<ModelPrompt> prompts = new ArrayList<>();
+        AgentModelClient model = prompt -> {
+            prompts.add(prompt);
+            return Mono.just(new ModelResponse("Done"));
+        };
+
+        ToolRegistry registry = new ToolRegistry(List.of(new MockSearchTool(), new MockFetchTool()));
+        AgentLoop loop = new AgentLoop(model, registry);
+        AgentRunConfig config = new AgentRunConfig("thread-tools", "run-tools", "test-model", false, false,
+                4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH, null, Map.of());
+
+        loop.run(
+                LoopConfig.fromDefaults(),
+                config,
+                "You are a research assistant.",
+                "Answer directly",
+                new java.util.concurrent.atomic.AtomicInteger(),
+                null, null, null
+        ).collectList().block();
+
+        assertThat(prompts).hasSize(1);
+        assertThat(prompts.getFirst().toolDefinitions())
+                .extracting(definition -> definition.name())
+                .contains("web_search", "web_fetch");
+        assertThat(prompts.getFirst().systemPrompt())
+                .contains("structured tools")
+                .doesNotContain("emit: " + "<" + "tool_call");
+
+    }
+
+    @Test
     void stepLimitPreventsInfiniteLoop() {
         // Mock model that always requests a tool call (never gives final answer)
         AgentModelClient infiniteModel = prompt -> Mono.just(
-                new ModelResponse("<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>"));
+                new ModelResponse("", List.of(new ModelToolCall("call-search-test", "mock_search", "{\"query\":\"test\"}"))));
 
         List<AgentTool> tools = List.of(new MockSearchTool());
         ToolRegistry registry = new ToolRegistry(tools);
@@ -111,9 +160,9 @@ class AgentLoopTest {
 
         AgentModelClient model = prompt -> {
             if (prompt.userPrompt().contains("exploding_tool")) {
-                return Mono.just(new ModelResponse("<final_answer>Recovered from tool failure</final_answer>"));
+                return Mono.just(new ModelResponse("Recovered from tool failure"));
             }
-            return Mono.just(new ModelResponse("<tool_call name=\"exploding_tool\">{}</tool_call>"));
+            return Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-exploding", "exploding_tool", "{}"))));
         };
 
         ToolRegistry registry = new ToolRegistry(List.of(explodingTool));
@@ -142,7 +191,7 @@ class AgentLoopTest {
     @Test
     void maxToolCallsLimitIsEnforced() {
         AgentModelClient model = prompt -> Mono.just(
-                new ModelResponse("<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>"));
+                new ModelResponse("", List.of(new ModelToolCall("call-search-test", "mock_search", "{\"query\":\"test\"}"))));
 
         List<AgentTool> tools = List.of(new MockSearchTool());
         ToolRegistry registry = new ToolRegistry(tools);
@@ -169,6 +218,282 @@ class AgentLoopTest {
         });
     }
 
+    @Test
+    void executesToolCallsFromSameModelResponseConcurrently() throws Exception {
+        SlowTool slowTool = new SlowTool();
+        AtomicInteger modelCalls = new AtomicInteger();
+        AgentModelClient model = prompt -> {
+            if (modelCalls.incrementAndGet() == 1) {
+                return Mono.just(new ModelResponse("", List.of(
+                        new ModelToolCall("call-1", "slow_tool", "{\"value\":\"a\"}"),
+                        new ModelToolCall("call-2", "slow_tool", "{\"value\":\"b\"}")
+                )));
+            }
+            return Mono.just(new ModelResponse("Both slow tools finished"));
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(slowTool)));
+        org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties executorProperties =
+                new org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties();
+        executorProperties.setToolCorePoolSize(2);
+        executorProperties.setToolMaxPoolSize(2);
+        executorProperties.setToolQueueCapacity(4);
+        org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager executionManager =
+                new org.wrj.haifa.ai.deerflow.graph.GraphExecutionManager(executorProperties);
+        executionManager.afterPropertiesSet();
+        loop.configureToolExecution(new org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchExecutor(
+                executionManager, executorProperties), null, 2);
+        AgentRunConfig config = new AgentRunConfig("thread-parallel", "run-parallel", "test-model",
+                false, false, 4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH,
+                null, Map.of());
+
+        try {
+            List<AgentEvent> events = loop.run(
+                    new LoopConfig(4, 4, 300_000, ResearchOptions.defaults()),
+                    config,
+                    "You are a research assistant.",
+                    "Run both tools",
+                    new java.util.concurrent.atomic.AtomicInteger(),
+                    null, List.of(), List.of()
+            ).collectList().block();
+
+            assertThat(slowTool.maxActive.get()).isGreaterThanOrEqualTo(2);
+            assertThat(events.stream().filter(e -> e.type() == AgentEventType.TOOL_COMPLETED).count()).isEqualTo(2);
+        }
+        finally {
+            executionManager.destroy();
+        }
+    }
+
+    @Test
+    void textToolCallProtocolDoesNotExecuteTools() {
+        AtomicInteger modelCalls = new AtomicInteger();
+        AgentModelClient model = prompt -> {
+            modelCalls.incrementAndGet();
+            return Mono.just(new ModelResponse("Tool call - mock_search({\"query\":\"lishui\"})"));
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(new MockSearchTool())));
+        AgentRunConfig config = new AgentRunConfig("thread-text-tool", "run-text-tool", "test-model",
+                false, false, 5, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT,
+                null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                new LoopConfig(5, 5, 300_000, ResearchOptions.defaults()),
+                config,
+                "You are a helpful assistant.",
+                "Search for Lishui",
+                new java.util.concurrent.atomic.AtomicInteger(),
+                null, List.of(), List.of()
+        ).collectList().block();
+
+        assertThat(modelCalls.get()).isEqualTo(1);
+        assertThat(events).extracting(AgentEvent::type)
+                .doesNotContain(AgentEventType.TOOL_CALL_REQUESTED, AgentEventType.TOOL_COMPLETED);
+        assertThat(events).anySatisfy(e -> {
+            if (e.type() == AgentEventType.MODEL_COMPLETED) {
+                assertThat(e.content()).contains("Tool call - mock_search");
+            }
+        });
+    }
+
+    @Test
+    void emitsEventsBeforeModelCallCompletes() throws Exception {
+        CountDownLatch modelStarted = new CountDownLatch(1);
+        CountDownLatch releaseModel = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        AgentModelClient slowModel = prompt -> Mono.fromCallable(() -> {
+            releaseModel.await(3, TimeUnit.SECONDS);
+            return new ModelResponse("Delayed answer");
+        });
+
+        AgentLoop loop = new AgentLoop(slowModel, new ToolRegistry(List.of()));
+        AgentRunConfig config = new AgentRunConfig("thread-stream", "run-stream", "test-model",
+                false, false, 2, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT,
+                null, Map.of());
+
+        loop.run(
+                new LoopConfig(2, 2, 300_000, ResearchOptions.defaults()),
+                config,
+                "You are a helpful assistant.",
+                "Return later",
+                new java.util.concurrent.atomic.AtomicInteger(),
+                null, List.of(), List.of()
+        ).subscribe(
+                event -> {
+                    if (event.type() == AgentEventType.MODEL_STARTED) {
+                        modelStarted.countDown();
+                    }
+                },
+                ex -> {
+                    error.set(ex);
+                    done.countDown();
+                },
+                done::countDown
+        );
+
+        assertThat(modelStarted.await(500, TimeUnit.MILLISECONDS)).isTrue();
+        assertThat(releaseModel.getCount()).isEqualTo(1);
+
+        releaseModel.countDown();
+        assertThat(done.await(3, TimeUnit.SECONDS)).isTrue();
+        assertThat(error.get()).isNull();
+    }
+
+    @Test
+    void assemblesTypedMessagesBeforeEachModelStep() {
+        List<ModelPrompt> prompts = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelClient model = prompt -> {
+            prompts.add(prompt);
+            if (calls.incrementAndGet() == 1) {
+                return Mono.just(new ModelResponse("", List.of(
+                        new ModelToolCall("call-typed-1", "mock_search", "{\"query\":\"typed\"}")
+                )));
+            }
+            return Mono.just(new ModelResponse("Typed context observed."));
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(new MockSearchTool())));
+        AgentRunConfig config = new AgentRunConfig("thread-typed", "run-typed", "test-model",
+                false, false, 4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT,
+                null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                new LoopConfig(4, 4, 300_000, ResearchOptions.defaults()),
+                config,
+                "You are a helpful assistant.",
+                "Search using typed context",
+                new AtomicInteger(),
+                null, List.of(), List.of()
+        ).collectList().block();
+
+        assertThat(prompts).hasSizeGreaterThanOrEqualTo(2);
+        assertThat(prompts.get(0).hasMessages()).isTrue();
+        assertThat(prompts.get(0).messages()).extracting(ModelMessage::role)
+                .containsExactly(ModelMessage.Role.USER);
+
+        ModelPrompt secondPrompt = prompts.get(1);
+        assertThat(secondPrompt.hasMessages()).isTrue();
+        assertThat(secondPrompt.messages()).anySatisfy(message -> {
+            assertThat(message.role()).isEqualTo(ModelMessage.Role.ASSISTANT);
+            assertThat(message.toolCalls()).hasSize(1);
+            assertThat(message.toolCalls().getFirst().id()).isEqualTo("call-typed-1");
+        });
+        assertThat(secondPrompt.messages()).anySatisfy(message -> {
+            assertThat(message.role()).isEqualTo(ModelMessage.Role.TOOL);
+            assertThat(message.toolCallId()).isEqualTo("call-typed-1");
+            assertThat(message.name()).isEqualTo("mock_search");
+        });
+        assertThat(secondPrompt.userPrompt()).contains("Structured tool call requested").contains("mock_search");
+        assertThat(secondPrompt.userPrompt()).contains("Tool result (mock_search) [call-typed-1]");
+
+        assertThat(events).anySatisfy(event -> {
+            if (event.type() == AgentEventType.MODEL_DELTA
+                    && Boolean.TRUE.equals(event.metadata().get("persistAssistantToolCalls"))) {
+                assertThat((List<?>) event.metadata().get("tool_calls")).hasSize(1);
+            }
+        });
+    }
+
+    @Test
+    void observerObservationIsIncludedInNextTypedPrompt() {
+        List<ModelPrompt> prompts = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelClient model = prompt -> {
+            prompts.add(prompt);
+            if (calls.incrementAndGet() == 1) {
+                return Mono.just(new ModelResponse("", List.of(
+                        new ModelToolCall("call-observe-1", "mock_search", "{\"query\":\"observe\"}")
+                )));
+            }
+            return Mono.just(new ModelResponse("Observation used."));
+        };
+        AgentLoopObserver observer = new NoopAgentLoopObserver() {
+            @Override
+            public String onToolCompleted(AgentRunConfig runConfig, ToolCall toolCall, ToolCallResult toolResult,
+                    List<AgentEvent> events, AtomicInteger seq, List<String> history) {
+                return "SOURCE_OBSERVATION: sourceId=src-1 evidenceId=ev-1";
+            }
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(new MockSearchTool())),
+                null, null, null, observer);
+        AgentRunConfig config = new AgentRunConfig("thread-observe", "run-observe", "test-model",
+                false, false, 4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH,
+                null, Map.of());
+
+        loop.run(
+                new LoopConfig(4, 4, 300_000, ResearchOptions.defaults()),
+                config,
+                "You are a research assistant.",
+                "Search and use source observation",
+                new AtomicInteger(),
+                null, List.of(), List.of()
+        ).collectList().block();
+
+        assertThat(prompts).hasSizeGreaterThanOrEqualTo(2);
+        ModelPrompt secondPrompt = prompts.get(1);
+        assertThat(secondPrompt.userPrompt()).contains("SOURCE_OBSERVATION: sourceId=src-1 evidenceId=ev-1");
+        assertThat(secondPrompt.messages()).anySatisfy(message -> {
+            assertThat(message.role()).isEqualTo(ModelMessage.Role.SYSTEM);
+            assertThat(message.content()).contains("SOURCE_OBSERVATION");
+            assertThat(message.metadata()).containsEntry("observer", "onToolCompleted");
+        });
+    }
+
+    @Test
+    void observerContinuationInstructionIsIncludedInNextTypedPrompt() {
+        List<ModelPrompt> prompts = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        AgentModelClient model = prompt -> {
+            prompts.add(prompt);
+            if (calls.incrementAndGet() == 1) {
+                return Mono.just(new ModelResponse("Preliminary answer without enough coverage."));
+            }
+            return Mono.just(new ModelResponse("Continued after gate."));
+        };
+        AgentLoopObserver observer = new NoopAgentLoopObserver() {
+            private boolean continued;
+
+            @Override
+            public boolean shouldContinue(AgentRunConfig runConfig, String responseContent, List<AgentEvent> events,
+                    AtomicInteger seq, int step, int totalToolCalls, List<String> history) {
+                if (continued) {
+                    return false;
+                }
+                continued = true;
+                history.add("System: QUALITY_GATE: fetch more authoritative evidence before answering.");
+                return true;
+            }
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of()),
+                null, null, null, observer);
+        AgentRunConfig config = new AgentRunConfig("thread-gate", "run-gate", "test-model",
+                false, false, 4, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.RESEARCH,
+                null, Map.of());
+
+        loop.run(
+                new LoopConfig(4, 4, 300_000, ResearchOptions.defaults()),
+                config,
+                "You are a research assistant.",
+                "Draft only when coverage is enough",
+                new AtomicInteger(),
+                null, List.of(), List.of()
+        ).collectList().block();
+
+        assertThat(prompts).hasSizeGreaterThanOrEqualTo(2);
+        ModelPrompt secondPrompt = prompts.get(1);
+        assertThat(secondPrompt.userPrompt()).contains("QUALITY_GATE: fetch more authoritative evidence");
+        assertThat(secondPrompt.messages()).anySatisfy(message -> {
+            assertThat(message.role()).isEqualTo(ModelMessage.Role.SYSTEM);
+            assertThat(message.content()).contains("QUALITY_GATE");
+            assertThat(message.metadata()).containsEntry("observer", "shouldContinue");
+        });
+    }
+
     /**
      * Mock model that simulates a multi-turn conversation:
      * Turn 1: requests search
@@ -182,11 +507,337 @@ class AgentLoopTest {
         public Mono<ModelResponse> generate(ModelPrompt prompt) {
             callCount++;
             return switch (callCount) {
-                case 1 -> Mono.just(new ModelResponse("<tool_call name=\"mock_search\">{\"query\":\"test\"}</tool_call>"));
-                case 2 -> Mono.just(new ModelResponse("<tool_call name=\"mock_fetch\">{\"url\":\"https://example.com/article-1\"}</tool_call>"));
-                case 3 -> Mono.just(new ModelResponse("<final_answer>Based on the search and fetch results, here is the answer.</final_answer>"));
-                default -> Mono.just(new ModelResponse("<final_answer>Default answer.</final_answer>"));
+                case 1 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-search-test", "mock_search", "{\"query\":\"test\"}"))));
+                case 2 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-fetch-1", "mock_fetch", "{\"url\":\"https://example.com/article-1\"}"))));
+                case 3 -> Mono.just(new ModelResponse("Based on the search and fetch results, here is the answer."));
+                default -> Mono.just(new ModelResponse("Default answer."));
             };
         }
     }
+
+    private static class SlowTool implements AgentTool {
+        private final AtomicInteger active = new AtomicInteger();
+        private final AtomicInteger maxActive = new AtomicInteger();
+
+        @Override
+        public String name() {
+            return "slow_tool";
+        }
+
+        @Override
+        public org.wrj.haifa.ai.deerflow.tool.execution.ToolConcurrencyMode concurrencyMode() {
+            return org.wrj.haifa.ai.deerflow.tool.execution.ToolConcurrencyMode.PARALLEL_SAFE;
+        }
+
+        @Override
+        public String description() {
+            return "Sleeps briefly so tests can observe concurrent execution";
+        }
+
+        @Override
+        public boolean supports(String userMessage) {
+            return true;
+        }
+
+        @Override
+        public org.wrj.haifa.ai.deerflow.tool.ToolResult execute(org.wrj.haifa.ai.deerflow.tool.ToolRequest request) {
+            int now = active.incrementAndGet();
+            maxActive.accumulateAndGet(now, Math::max);
+            try {
+                Thread.sleep(150);
+                return org.wrj.haifa.ai.deerflow.tool.ToolResult.of(name(), "done " + request.userMessage());
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                return org.wrj.haifa.ai.deerflow.tool.ToolResult.of(name(), "interrupted");
+            } finally {
+                active.decrementAndGet();
+            }
+        }
+    }
+
+    @Test
+    void runScriptToolExecutionFlow(@TempDir Path tmp) {
+        AgentModelClient mockModel = new AgentModelClient() {
+            private int turns = 0;
+            @Override
+            public Mono<ModelResponse> generate(ModelPrompt prompt) {
+                turns++;
+                if (turns == 1) {
+                    return Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-run-script", "run_script", "{\"language\":\"python\",\"code\":\"import os\\nprint('CPU Usage: 10%')\"}"))));
+                } else {
+                    return Mono.just(new ModelResponse("The CPU usage is 10%."));
+                }
+            }
+        };
+
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
+        properties.setOutputsRoot(tmp.resolve("outputs").toString());
+
+        org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner fakeRunner = new org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner() {
+            @Override
+            public SandboxResult run(SandboxRequest request) {
+                return new SandboxResult("sandbox-test-123", 0, "CPU Usage: 10%\n", "", 50, false, false, Map.of());
+            }
+        };
+
+        RunScriptTool tool = new RunScriptTool(properties, fakeRunner, new CommandPolicy(properties));
+        ToolRegistry registry = new ToolRegistry(List.of(tool));
+        AgentLoop loop = new AgentLoop(mockModel, registry);
+
+        AgentRunConfig config = new AgentRunConfig("thread-3", "run-3", "test-model", false, false,
+                4, tmp.resolve("workspace"), null, null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                LoopConfig.fromDefaults(),
+                config,
+                "You are an assistant.",
+                "Check CPU usage",
+                new java.util.concurrent.atomic.AtomicInteger(),
+                null, List.of(), null
+        ).collectList().block();
+
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.TOOL_CALL_REQUESTED,
+                        AgentEventType.TOOL_STARTED,
+                        AgentEventType.TOOL_COMPLETED,
+                        AgentEventType.MODEL_COMPLETED,
+                        AgentEventType.RUN_COMPLETED);
+
+        assertThat(events).anySatisfy(e -> {
+            if (e.type() == AgentEventType.TOOL_COMPLETED) {
+                assertThat(e.content()).contains("CPU Usage: 10%");
+            }
+        });
+
+        assertThat(events).anySatisfy(e -> {
+            if (e.type() == AgentEventType.MODEL_COMPLETED) {
+                assertThat(e.content()).contains("The CPU usage is 10%.");
+            }
+        });
+    }
+
+    @Test
+    void policyDeniesRunScriptWhenConfigurationDisablesIt(@TempDir Path tmp) {
+        AgentModelClient mockModel = prompt -> Mono.just(new ModelResponse("", List.of(
+                new ModelToolCall("call-run-denied", "run_script", "{\"language\":\"python\",\"code\":\"print('nope')\"}"))));
+
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setRunScriptEnabled(true);
+        properties.getSandbox().setEnabled(true);
+        properties.getSandbox().setRunScriptLocalUnsafeAllowed(true);
+        properties.setWorkspaceRoot(tmp.resolve("workspace").toString());
+        properties.setOutputsRoot(tmp.resolve("outputs").toString());
+
+        class CountingRunner implements org.wrj.haifa.ai.deerflow.sandbox.SandboxRunner {
+            int calls;
+
+            @Override
+            public SandboxResult run(SandboxRequest request) {
+                calls++;
+                return new SandboxResult("sandbox-test", 0, "unexpected", "", 1, false, false, Map.of());
+            }
+        }
+        CountingRunner runner = new CountingRunner();
+
+        RunScriptTool tool = new RunScriptTool(properties, runner, new CommandPolicy(properties));
+        ToolRegistry registry = new ToolRegistry(List.of(tool));
+        AgentLoop loop = new AgentLoop(mockModel, registry);
+        DeerFlowProperties policyProperties = new DeerFlowProperties();
+        policyProperties.setRunScriptEnabled(false);
+        ToolPolicyService policy = new ToolPolicyService(List.of(tool), policyProperties);
+
+        AgentRunConfig config = new AgentRunConfig("thread-policy", "run-policy", "test-model", false, false,
+                2, tmp.resolve("workspace"), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT, null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                LoopConfig.fromDefaults(),
+                config,
+                "You are an assistant.",
+                "Run a script",
+                new java.util.concurrent.atomic.AtomicInteger(),
+                policy, null, List.of()
+        ).collectList().block();
+
+        assertThat(runner.calls).isEqualTo(0);
+        assertThat(events)
+                .filteredOn(e -> e.type() == AgentEventType.TOOL_DENIED)
+                .isNotEmpty()
+                .first()
+                .satisfies(e -> {
+                    assertThat(e.metadata()).containsEntry("denied", true);
+                    assertThat(e.content()).contains("Tool denied by policy");
+                });
+    }
+
+    @Test
+    void stopsParentRunImmediatelyAfterSubagentProviderFailure() {
+        AtomicInteger modelCalls = new AtomicInteger();
+        AgentModelClient model = prompt -> {
+            if (modelCalls.getAndIncrement() == 0) {
+                return Mono.just(new ModelResponse("", List.of(
+                        new ModelToolCall("call-task", "task", "{\"prompt\":\"run subtask\"}"))));
+            }
+            return Mono.just(new ModelResponse("The parent retried after a provider failure."));
+        };
+        AgentTool taskTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "task";
+            }
+
+            @Override
+            public String description() {
+                return "Delegates work";
+            }
+
+            @Override
+            public boolean supports(String userMessage) {
+                return true;
+            }
+
+            @Override
+            public ToolResult execute(ToolRequest request) {
+                return ToolResult.failed("task", "Subagent result [FAILED]\\nError: Model call failed: 400 Bad Request",
+                        Map.of("subagent", true, "subagentStatus", "FAILED",
+                                "errorCode", "PROVIDER_HTTP_400"));
+            }
+        };
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(taskTool)));
+        AgentRunConfig config = new AgentRunConfig(
+                "thread-provider-failure", "run-provider-failure", "test-model", false, false,
+                5, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT, null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                LoopConfig.fromDefaults(), config, "You are an assistant.", "Delegate this task.",
+                new AtomicInteger(), null, List.of(), List.of()).collectList().block();
+
+        assertThat(modelCalls).hasValue(1);
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.SUBAGENT_FAILED, AgentEventType.TOOL_FAILED, AgentEventType.RUN_FAILED)
+                .doesNotContain(AgentEventType.RUN_COMPLETED);
+        assertThat(events).filteredOn(event -> event.type() == AgentEventType.RUN_FAILED)
+                .singleElement()
+                .satisfies(event -> assertThat(event.metadata())
+                        .containsEntry("errorCode", "SUBAGENT_PROVIDER_REQUEST_FAILED"));
+    }
+
+    @Test
+    void clarificationToolSuspendsRunWithoutEmittingToolCompletion() {
+        AgentModelClient model = prompt -> Mono.just(new ModelResponse("", List.of(
+                new ModelToolCall("call-clarify", "ask_clarification", "{}"))));
+        AgentTool clarificationTool = new AgentTool() {
+            @Override
+            public String name() {
+                return "ask_clarification";
+            }
+
+            @Override
+            public String description() {
+                return "Ask the user for missing information";
+            }
+
+            @Override
+            public boolean supports(String userMessage) {
+                return true;
+            }
+
+            @Override
+            public ToolResult execute(ToolRequest request) {
+                return ToolResult.of(name(), "Question: Which environment?", Map.of(
+                        "clarificationRequired", true,
+                        "question", "Which environment?",
+                        "clarificationId", "clarification-1",
+                        "clarificationType", "missing_info",
+                        "options", List.of("test", "production"),
+                        "questions", List.of()));
+            }
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(clarificationTool)));
+        AgentRunConfig config = new AgentRunConfig(
+                "thread-clarify", "run-clarify", "test-model", false, false,
+                2, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT, null, Map.of());
+
+        List<AgentEvent> events = loop.run(
+                LoopConfig.fromDefaults(), config, "You are an assistant.", "Deploy it",
+                new AtomicInteger(), null, List.of(), List.of()).collectList().block();
+
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.TOOL_CALL_REQUESTED,
+                        AgentEventType.TOOL_STARTED,
+                        AgentEventType.CLARIFICATION_REQUIRED,
+                        AgentEventType.RUN_SUSPENDED)
+                .doesNotContain(AgentEventType.TOOL_COMPLETED, AgentEventType.RUN_COMPLETED);
+        assertThat(events).filteredOn(event -> event.type() == AgentEventType.RUN_SUSPENDED)
+                .singleElement()
+                .satisfies(event -> assertThat(event.metadata())
+                        .containsEntry("clarificationId", "clarification-1")
+                        .containsEntry("resumeRunId", "run-clarify"));
+    }
+
+    @Test
+    void keepsProtocolStateOutOfSerializedAgentEventsWhileReplayingItToTheModel() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        ModelProtocolState state = new ModelProtocolState(
+                1, "google-genai", Map.of("thoughtSignatures", List.of(Map.of(
+                        "encoding", "base64", "value", "c2ln"))), List.of());
+        AgentModelClient model = prompt -> {
+            if (calls.getAndIncrement() == 0) {
+                return Mono.just(new ModelResponse("", List.of(
+                        new ModelToolCall("call-echo", "echo", "{}")),
+                        List.of(), "tool_calls", Map.of(), state));
+            }
+            assertThat(prompt.messages())
+                    .filteredOn(message -> message.role() == ModelMessage.Role.ASSISTANT)
+                    .singleElement()
+                    .satisfies(message -> assertThat(message.protocolState()).isEqualTo(state));
+            return Mono.just(new ModelResponse("done"));
+        };
+        AgentTool echo = new AgentTool() {
+            @Override
+            public String name() {
+                return "echo";
+            }
+
+            @Override
+            public String description() {
+                return "Echo test tool";
+            }
+
+            @Override
+            public boolean supports(String userMessage) {
+                return true;
+            }
+
+            @Override
+            public ToolResult execute(ToolRequest request) {
+                return ToolResult.of(name(), "ok", Map.of());
+            }
+        };
+
+        AgentLoop loop = new AgentLoop(model, new ToolRegistry(List.of(echo)));
+        AgentRunConfig config = new AgentRunConfig(
+                "thread-protocol", "run-protocol", "test-model", false, false,
+                3, Path.of("."), org.wrj.haifa.ai.deerflow.agent.RunMode.CHAT, null, Map.of());
+        List<AgentEvent> events = loop.run(
+                LoopConfig.fromDefaults(), config, "system", "echo",
+                new AtomicInteger(), null, List.of(), List.of()).collectList().block();
+
+        assertThat(events).allSatisfy(event -> assertThat(event.metadata())
+                .doesNotContainKey("protocolState"));
+        assertThat(events)
+                .filteredOn(event -> event.type() == AgentEventType.MODEL_DELTA)
+                .anySatisfy(event -> assertThat(event.metadata())
+                        .containsEntry("providerStatePresent", true));
+        String serializedEvents = new com.fasterxml.jackson.databind.ObjectMapper()
+                .findAndRegisterModules()
+                .writeValueAsString(events);
+        assertThat(serializedEvents)
+                .doesNotContain("protocolState", "thoughtSignatures", "c2ln");
+    }
 }
+

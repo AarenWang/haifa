@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileSearch, CheckCircle2, Circle, AlertCircle, BarChart3, LayoutList } from 'lucide-react';
+import { FileSearch, CheckCircle2, Circle, AlertCircle, BarChart3, ChevronDown, ChevronUp, LayoutList } from 'lucide-react';
 import type { ResearchPlan, ResearchProgress, QualityGateResult } from '../types';
 
 interface ResearchPlanViewProps {
@@ -10,16 +10,19 @@ interface ResearchPlanViewProps {
 
 export default function ResearchPlanView({ plan, progress, qualityGate }: ResearchPlanViewProps) {
   const [activeTab, setActiveTab] = useState<'plan' | 'progress' | 'quality'>('plan');
+  const [expanded, setExpanded] = useState(true);
 
   if (!plan && !progress && !qualityGate) {
     return null;
   }
 
+  const dimensionStatusClass = (status: string) => status.toLowerCase().replace(/_/g, '-');
+
   const statusIcon = (status: string) => {
-    switch (status) {
-      case 'COMPLETED':
+    switch (dimensionStatusClass(status)) {
+      case 'completed':
         return <CheckCircle2 size={14} className="dim-status-icon completed" />;
-      case 'IN_PROGRESS':
+      case 'in-progress':
         return <Circle size={14} className="dim-status-icon in-progress" />;
       default:
         return <Circle size={14} className="dim-status-icon pending" />;
@@ -55,8 +58,18 @@ export default function ResearchPlanView({ plan, progress, qualityGate }: Resear
             Quality Gate
           </button>
         </div>
+        <button
+          type="button"
+          className="panel-collapse-button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-label={expanded ? 'Collapse research plan panel' : 'Expand research plan panel'}
+          title={expanded ? 'Collapse' : 'Expand'}
+        >
+          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
       </div>
 
+      {expanded && (
       <div className="research-plan-body">
         {activeTab === 'plan' && plan && (
           <div className="plan-content">
@@ -74,7 +87,7 @@ export default function ResearchPlanView({ plan, progress, qualityGate }: Resear
             <div className="plan-dimensions">
               <div className="plan-section-title">Dimensions</div>
               {plan.dimensions.map((dim) => (
-                <div key={dim.id} className={`plan-dimension-card ${dim.status.toLowerCase()}`}>
+                <div key={dim.id} className={`plan-dimension-card ${dimensionStatusClass(dim.status)}`}>
                   <div className="plan-dimension-top">
                     {statusIcon(dim.status)}
                     <span className="plan-dimension-title">{dim.title}</span>
@@ -138,7 +151,7 @@ export default function ResearchPlanView({ plan, progress, qualityGate }: Resear
                 {plan.dimensions.map((dim) => (
                   <div key={dim.id} className="progress-dimension-row">
                     <span className="progress-dim-name">{dim.title}</span>
-                    <span className={`progress-dim-status ${dim.status.toLowerCase()}`}>
+                    <span className={`progress-dim-status ${dimensionStatusClass(dim.status)}`}>
                       {dim.status}
                     </span>
                     <span className="progress-dim-count">
@@ -238,6 +251,7 @@ export default function ResearchPlanView({ plan, progress, qualityGate }: Resear
           </div>
         )}
       </div>
+      )}
     </section>
   );
 }

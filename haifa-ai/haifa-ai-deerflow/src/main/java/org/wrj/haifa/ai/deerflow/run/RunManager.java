@@ -5,24 +5,33 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.wrj.haifa.ai.deerflow.persistence.entity.RunEntity;
 import org.wrj.haifa.ai.deerflow.persistence.mapper.JsonMapper;
 import org.wrj.haifa.ai.deerflow.persistence.mapper.RunMapper;
 import org.wrj.haifa.ai.deerflow.persistence.repository.RunRepository;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 
 @Component
 public class RunManager {
 
+    private static final Logger log = LoggerFactory.getLogger(RunManager.class);
+
     private final RunRepository runRepository;
     private final RunMapper runMapper;
     private final JsonMapper jsonMapper;
+    private final AgentLoopRunStore agentLoopRunStore;
 
-    public RunManager(RunRepository runRepository, RunMapper runMapper, JsonMapper jsonMapper) {
+    public RunManager(RunRepository runRepository, RunMapper runMapper, JsonMapper jsonMapper,
+            AgentLoopRunStore agentLoopRunStore) {
         this.runRepository = runRepository;
         this.runMapper = runMapper;
         this.jsonMapper = jsonMapper;
+        this.agentLoopRunStore = agentLoopRunStore;
     }
 
     @Transactional
@@ -35,6 +44,9 @@ public class RunManager {
         entity.setModelName(modelName);
         entity.setStatus(RunStatus.PENDING);
         entity.setMetadataJson(metadataToJson(metadata));
+        if (metadata != null && metadata.get("mode") instanceof String mode) {
+            entity.setMode(mode);
+        }
         entity.setCreatedAt(now);
         entity.setUpdatedAt(now);
         runRepository.save(entity);
@@ -46,46 +58,99 @@ public class RunManager {
         return runRepository.findByRunId(runId).map(runMapper::toRecord);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public List<RunRecord> listByThread(String threadId) {
-        return runRepository.findByThreadIdOrderByCreatedAtDesc(threadId).stream()
+        List<RunEntity> runs = runRepository.findByThreadIdOrderByCreatedAtDesc(threadId);
+        return runs.stream()
                 .map(runMapper::toRecord)
                 .toList();
     }
 
     @Transactional
+    public List<String> supersedeActiveRuns(String threadId) {
+        List<RunEntity> runs = runRepository.findByThreadIdOrderByCreatedAtDesc(threadId);
+        List<String> superseded = new java.util.ArrayList<>();
+        for (RunEntity entity : runs) {
+            if (entity.getStatus() != RunStatus.PENDING && entity.getStatus() != RunStatus.RUNNING
+                    && entity.getStatus() != RunStatus.SUSPENDED) {
+                continue;
+            }
+            boolean cancelled = transition(entity.getRunId(),
+                    Set.of(RunStatus.PENDING, RunStatus.RUNNING, RunStatus.SUSPENDED), RunStatus.CANCELLED,
+                    "SUPERSEDED_BY_NEWER_RUN");
+            if (cancelled) {
+                superseded.add(entity.getRunId());
+                if (agentLoopRunStore != null) {
+                    agentLoopRunStore.markCancelled(entity.getRunId(), "SUPERSEDED_BY_NEWER_RUN");
+                }
+            }
+        }
+        return List.copyOf(superseded);
+    }
+
+    @Transactional
     public RunRecord markRunning(String runId) {
-        return updateStatus(runId, RunStatus.RUNNING);
+        transition(runId, Set.of(RunStatus.PENDING, RunStatus.SUSPENDED), RunStatus.RUNNING, null);
+        return findCurrent(runId);
     }
 
     @Transactional
     public RunRecord markCompleted(String runId) {
-        return updateStatus(runId, RunStatus.COMPLETED);
+        transition(runId, Set.of(RunStatus.RUNNING), RunStatus.COMPLETED, null);
+        return findCurrent(runId);
+    }
+
+    @Transactional
+    public RunRecord markSuspended(String runId) {
+        transition(runId, Set.of(RunStatus.RUNNING), RunStatus.SUSPENDED, null);
+        return findCurrent(runId);
     }
 
     @Transactional
     public RunRecord markCancelled(String runId) {
-        return updateStatus(runId, RunStatus.CANCELLED);
+        transition(runId, Set.of(RunStatus.PENDING, RunStatus.RUNNING, RunStatus.SUSPENDED),
+                RunStatus.CANCELLED, null);
+        return findCurrent(runId);
     }
 
     @Transactional
     public RunRecord markFailed(String runId, String error) {
-        return runRepository.findByRunId(runId).map(entity -> {
-            entity.setStatus(RunStatus.FAILED);
-            entity.setError(error);
-            entity.setUpdatedAt(Instant.now());
-            runRepository.save(entity);
-            return runMapper.toRecord(entity);
-        }).orElse(null);
+        transition(runId, Set.of(RunStatus.PENDING, RunStatus.RUNNING), RunStatus.FAILED, error);
+        return findCurrent(runId);
     }
 
-    private RunRecord updateStatus(String runId, RunStatus status) {
-        return runRepository.findByRunId(runId).map(entity -> {
-            entity.setStatus(status);
-            entity.setUpdatedAt(Instant.now());
-            runRepository.save(entity);
-            return runMapper.toRecord(entity);
-        }).orElse(null);
+    @Transactional
+    public boolean tryMarkCompleted(String runId) {
+        return transition(runId, Set.of(RunStatus.RUNNING), RunStatus.COMPLETED, null);
+    }
+
+    @Transactional
+    public boolean tryMarkCancelled(String runId) {
+        return transition(runId, Set.of(RunStatus.PENDING, RunStatus.RUNNING, RunStatus.SUSPENDED),
+                RunStatus.CANCELLED, null);
+    }
+
+    @Transactional
+    public boolean tryMarkFailed(String runId, String error) {
+        return transition(runId, Set.of(RunStatus.PENDING, RunStatus.RUNNING), RunStatus.FAILED, error);
+    }
+
+    private boolean transition(String runId, Set<RunStatus> allowed, RunStatus target, String error) {
+        int updated = runRepository.transitionStatus(runId, allowed, target, error, Instant.now());
+        if (updated == 1) {
+            return true;
+        }
+        RunStatus current = runRepository.findByRunId(runId).map(RunEntity::getStatus).orElse(null);
+        if (current == target) {
+            return true;
+        }
+        log.warn("Run state transition rejected. runId={}, current={}, attempted={}, allowed={}",
+                runId, current, target, allowed);
+        return false;
+    }
+
+    private RunRecord findCurrent(String runId) {
+        return runRepository.findByRunId(runId).map(runMapper::toRecord).orElse(null);
     }
 
     @Transactional(readOnly = true)

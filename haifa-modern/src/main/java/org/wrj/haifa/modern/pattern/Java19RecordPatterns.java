@@ -124,7 +124,7 @@ public class Java19RecordPatterns {
             case Box(String s) -> "String box: " + s;
             case Box(Integer i) -> "Integer box: " + i;
             case Box(Point(int x, int y)) -> "Point box: (" + x + ", " + y + ")";
-            case Box(null) -> "Empty box";
+            case Box(var item) when item == null -> "Empty box";
             case Box(var item) -> "Box with: " + item.getClass().getSimpleName();
             default -> "Not a box";
         };
@@ -163,7 +163,7 @@ public class Java19RecordPatterns {
                 return "User: " + user.name() + " (age: " + user.age() + ", email: " + user.email() + ")";
             }
             if (data instanceof Product product) {
-                return "Product: " + product.pname() + " (id: " + product.id() + ", price: $" + product.price() + ")";
+                return "Product: " + product.name() + " (id: " + product.id() + ", price: $" + product.price() + ")";
             }
             if (data instanceof List list) {
                 return "Got " + list.size() + " items";
@@ -277,7 +277,7 @@ public class Java19RecordPatterns {
         
         for (Point p : points) {
             String description = switch (p) {
-                case Point(0, 0) -> "Origin";
+                case Point(var x, var y) when x == 0 && y == 0 -> "Origin";
                 case Point(var x, var y) when x == y -> "Diagonal point (" + x + ", " + y + ")";
                 case Point(var x, var y) -> "Point (" + x + ", " + y + ")";
             };

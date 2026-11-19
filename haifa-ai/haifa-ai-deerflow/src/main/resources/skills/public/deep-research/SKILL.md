@@ -1,7 +1,7 @@
 ---
 name: deep-research
 description: Use this skill instead of WebSearch for ANY question requiring web research. Trigger on queries like "what is X", "explain X", "compare X and Y", "research X", or before content generation tasks. Provides systematic multi-angle research methodology instead of single superficial searches. Use this proactively when the user's question needs online information.
-allowed-tools: [web_search, web_fetch, image_search]
+allowed-tools: [web_search, web_fetch, image_search, write_todos, task]
 ---
 
 # Deep Research Skill
@@ -32,6 +32,10 @@ This skill provides a systematic methodology for conducting thorough web researc
 **Never generate content based solely on general knowledge.** The quality of your output directly depends on the quality and quantity of research conducted beforehand. A single search query is NEVER enough.
 
 ## Research Methodology
+
+### Phase 0: Task Planning and Tracking
+
+Before starting any searches, you MUST construct a checklist using the `write_todos` tool to manage your research path. Define the research phases and dimensions as subtasks. As you finish each dimension, update the status of that todo item immediately.
 
 ### Phase 1: Broad Exploration
 
@@ -197,3 +201,12 @@ After completing research, you should have:
 5. Current trends and relevant context
 
 **Only then proceed to content generation**, using the gathered information to create high-quality, well-informed content.
+
+## Context Reuse in Follow-up Research
+
+When continuing or supplementing research in an existing thread:
+- **Examine `<thread_research_memory>`**: Check the active plan, previously registered sources, evidence summary, and artifacts.
+- **Do NOT duplicate work**: Avoid refetching URLs or repeating searches that are already listed in the thread memory.
+- **Focus on Gaps / Specific Requests**: Focus only on new dimensions, gaps highlighted by the quality gate, or the specific sections/chapters requested in the follow-up request.
+- **Cite Existing Evidence**: You can directly cite previous sources using their source IDs (e.g. `[source-xxxx]`) and evidence items without performing new tool calls.
+

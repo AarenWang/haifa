@@ -39,8 +39,10 @@ public final class SkillPromptRenderer {
         sb.append("Skills are located at: ").append(containerPath).append("\n\n");
 
         if (availableSkills != null && !availableSkills.isEmpty()) {
+            List<Skill> sortedAvailable = new java.util.ArrayList<>(availableSkills);
+            sortedAvailable.sort(java.util.Comparator.comparing((Skill s) -> (s.source() == null ? "" : s.source()) + ":" + (s.name() == null ? "" : s.name())));
             sb.append("<available_skills>\n");
-            for (Skill skill : availableSkills) {
+            for (Skill skill : sortedAvailable) {
                 String sourceLabel = "custom".equalsIgnoreCase(skill.source()) ? "[custom, editable]" : "[built-in]";
                 String location = containerPath + "/" + skill.source() + "/" + skill.name() + "/SKILL.md";
                 sb.append("    <skill>\n");
@@ -54,8 +56,10 @@ public final class SkillPromptRenderer {
         }
 
         if (activeSkills != null && !activeSkills.isEmpty()) {
+            List<Skill> sortedActive = new java.util.ArrayList<>(activeSkills);
+            sortedActive.sort(java.util.Comparator.comparing((Skill s) -> (s.source() == null ? "" : s.source()) + ":" + (s.name() == null ? "" : s.name())));
             sb.append("<active_skills>\n");
-            for (Skill skill : activeSkills) {
+            for (Skill skill : sortedActive) {
                 sb.append("    <activated_skill name=\"").append(skill.name()).append("\">\n");
                 sb.append("====== SKILL CONTENT START: ").append(skill.name()).append(" ======\n");
                 sb.append(skill.skillMdContent()).append("\n");

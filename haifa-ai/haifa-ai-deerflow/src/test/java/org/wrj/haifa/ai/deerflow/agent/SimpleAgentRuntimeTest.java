@@ -8,9 +8,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.config.GraphRuntimeMode;
+import org.wrj.haifa.ai.deerflow.graph.AgentGraphShadowResult;
+import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntime;
+import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntimeRequest;
+import org.wrj.haifa.ai.deerflow.graph.GraphResearchRuntime;
+import org.wrj.haifa.ai.deerflow.graph.GraphResearchRuntimeRequest;
+import org.wrj.haifa.ai.deerflow.graph.GraphShadowRuntime;
 import org.wrj.haifa.ai.deerflow.middleware.DynamicContextMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.TokenBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.ToolErrorHandlingMiddleware;
+import org.wrj.haifa.ai.deerflow.middleware.ClarificationMiddleware;
+import java.util.Map;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
@@ -20,11 +29,8 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
-import org.wrj.haifa.ai.deerflow.research.plan.ClarificationGate;
-import org.wrj.haifa.ai.deerflow.research.plan.InMemoryResearchPlanStore;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchClarificationStore;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanner;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker;
+import org.wrj.haifa.ai.deerflow.persistence.store.AgentClarificationStore;
+import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationAnswer;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunStatus;
 import org.wrj.haifa.ai.deerflow.thread.MessageRecord;
@@ -38,6 +44,8 @@ import org.wrj.haifa.ai.deerflow.tool.ReadWorkspaceFileTool;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolResult;
+import org.wrj.haifa.ai.deerflow.tool.AskClarificationTool;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -74,6 +82,12 @@ class SimpleAgentRuntimeTest {
     @Autowired
     private org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage;
 
+    @Autowired
+    private AgentClarificationStore clarificationStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.todo.TodoStore todoStore;
+
     @Test
     void streamsToolAndModelEvents() throws Exception {
         Path workspace = Files.createTempDirectory("deerflow-runtime-test");
@@ -97,7 +111,7 @@ class SimpleAgentRuntimeTest {
                 } else if (callCount == 2) {
                     return Mono.just(new ModelResponse("", List.of(tc2)));
                 } else {
-                    return Mono.just(new ModelResponse("<final_answer>I read note.md: hello deerflow</final_answer>"));
+                    return Mono.just(new ModelResponse("I read note.md: hello deerflow"));
                 }
             }
         };
@@ -183,7 +197,7 @@ class SimpleAgentRuntimeTest {
                 if (callCount == 1) {
                     return Mono.just(new ModelResponse("", List.of(tc)));
                 } else {
-                    return Mono.just(new ModelResponse("<final_answer>handled gracefully</final_answer>"));
+                    return Mono.just(new ModelResponse("handled gracefully"));
                 }
             }
         };
@@ -198,7 +212,7 @@ class SimpleAgentRuntimeTest {
                 .block();
 
         assertThat(events).extracting(AgentEvent::type)
-                .contains(AgentEventType.TOOL_COMPLETED,
+                .contains(AgentEventType.TOOL_FAILED,
                         AgentEventType.MODEL_COMPLETED,
                         AgentEventType.RUN_COMPLETED);
         assertThat(events).anySatisfy(event -> assertThat(event.content()).contains("Tool failed: boom"));
@@ -245,6 +259,105 @@ class SimpleAgentRuntimeTest {
     }
 
     @Test
+    void shadowGraphModeStillUsesLegacyChatRuntimeForVisibleEvents() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("test system");
+        properties.getGraph().setEnabled(true);
+        properties.getGraph().setMode(GraphRuntimeMode.SHADOW);
+
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("legacy answer"));
+        ToolRegistry tools = new ToolRegistry(List.of());
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore, toolExecutionStore,
+                modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
+        RecordingGraphShadowRuntime shadowRuntime = new RecordingGraphShadowRuntime();
+        runtime.setGraphShadowRuntime(shadowRuntime);
+
+        List<AgentEvent> events = runtime.stream(new AgentRequest("thread-shadow-runtime", "hello", null))
+                .collectList()
+                .block();
+
+        assertThat(shadowRuntime.callCount()).isEqualTo(1);
+        assertThat(events).extracting(AgentEvent::type)
+                .containsExactly(
+                        AgentEventType.RUN_STARTED,
+                        AgentEventType.MODEL_STARTED,
+                        AgentEventType.MODEL_DELTA,
+                        AgentEventType.MODEL_DELTA,
+                        AgentEventType.MODEL_COMPLETED,
+                        AgentEventType.RUN_COMPLETED
+                );
+        assertThat(events).anySatisfy(event -> assertThat(event.content()).contains("legacy answer"));
+    }
+
+    @Test
+    void activeChatGraphModeRunsThroughGraphAdapterAndCompletesLegacyLoop() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("test system");
+        properties.getGraph().setEnabled(true);
+        properties.getGraph().setMode(GraphRuntimeMode.ACTIVE_CHAT);
+
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("active graph answer"));
+        ToolRegistry tools = new ToolRegistry(List.of());
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore, toolExecutionStore,
+                modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
+        RecordingGraphChatRuntime graphRuntime = new RecordingGraphChatRuntime();
+        runtime.setGraphChatRuntime(graphRuntime);
+
+        List<AgentEvent> events = runtime.stream(new AgentRequest("thread-active-graph", "hello", null))
+                .collectList()
+                .block();
+
+        assertThat(graphRuntime.callCount()).isEqualTo(1);
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.RUN_STARTED,
+                        AgentEventType.MODEL_STARTED,
+                        AgentEventType.MODEL_COMPLETED,
+                        AgentEventType.RUN_COMPLETED);
+        assertThat(events).anySatisfy(event -> assertThat(event.content()).contains("active graph answer"));
+    }
+
+    @Test
+    void activeResearchModeRoutesResearchThroughUnifiedChatGraph() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("test system");
+        properties.setResearchSystemPrompt("research system");
+        properties.setMaxResearchSteps(2);
+        properties.getGraph().setEnabled(true);
+        properties.getGraph().setMode(GraphRuntimeMode.ACTIVE_RESEARCH);
+
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("active research answer"));
+        ToolRegistry tools = new ToolRegistry(List.of());
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(properties, tools, modelClient, runManager, threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore, toolExecutionStore,
+                modelStepStore, toolCallStore, agentLoopRunStore, skillStorage);
+        RecordingGraphChatRuntime graphRuntime = new RecordingGraphChatRuntime();
+        runtime.setGraphChatRuntime(graphRuntime);
+
+        List<AgentEvent> events = runtime.stream(new AgentRequest("thread-active-research-graph", "research topic", null,
+                        List.of(), RunMode.RESEARCH, ResearchOptions.defaults()))
+                .collectList()
+                .block();
+
+        assertThat(graphRuntime.callCount()).isEqualTo(1);
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.RUN_STARTED,
+                        AgentEventType.MODEL_STARTED,
+                        AgentEventType.MODEL_COMPLETED,
+                        AgentEventType.RUN_COMPLETED);
+    }
+
+    @Test
     void resumesResearchOnSameThreadAfterClarification() {
         DeerFlowProperties properties = new DeerFlowProperties();
         properties.setWorkspaceRoot(".");
@@ -252,14 +365,134 @@ class SimpleAgentRuntimeTest {
         properties.setMaxIterations(2);
         properties.setMaxResearchSteps(2);
 
-        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("<final_answer>stub</final_answer>"));
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("stub"));
         ToolRegistry tools = new ToolRegistry(List.of());
-        InMemoryResearchPlanStore planStore = new InMemoryResearchPlanStore();
-        ResearchClarificationStore clarificationStore = new ResearchClarificationStore();
-        ResearchProgressTracker progressTracker = new ResearchProgressTracker(planStore);
+        clarificationStore.clearAll();
         SimpleAgentRuntime runtime = new SimpleAgentRuntime(
                 properties,
                 tools,
+                modelClient,
+                runManager,
+                threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new ClarificationMiddleware(clarificationStore), new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore,
+                toolExecutionStore,
+                modelStepStore,
+                toolCallStore,
+                agentLoopRunStore,
+                skillStorage,
+                null,
+                null,
+                null,
+                clarificationStore,
+                null,
+                null
+        );
+
+        // Simulate a previous run that saved a pending clarification
+        var record = clarificationStore.create("thread-clarify", "run-prev", "What time period?", "missing_info", "");
+        clarificationStore.answer(record.clarificationId(), "Focus on 2025");
+
+        List<AgentEvent> resumedEvents = runtime.stream(new AgentRequest(
+                        "thread-clarify",
+                        "Original research request",
+                        null,
+                        List.of(),
+                        RunMode.RESEARCH,
+                        ResearchOptions.standard(),
+                        "default-user",
+                        Map.of("clarificationId", record.clarificationId())))
+                .collectList()
+                .block();
+
+        assertThat(clarificationStore.findPending("thread-clarify")).isEmpty();
+        assertThat(resumedEvents).extracting(AgentEvent::type).contains(AgentEventType.RUN_STARTED);
+    }
+
+    @Test
+    void resumedRunInheritsParentTodosAndKeepsOriginalUserMessage() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("research system");
+        properties.setMaxIterations(1);
+        properties.setMaxResearchSteps(1);
+
+        String threadId = "thread-resume-inherit-todos";
+        threadManager.upsert(threadId, "Original research request", Map.of("source", "test"));
+        var parentRun = runManager.create(threadId, "test-model", Map.of("mode", "research"));
+        runManager.markSuspended(parentRun.runId());
+        todoStore.saveTodos(threadId, parentRun.runId(), List.of(
+                new org.wrj.haifa.ai.deerflow.todo.TodoItem("t1", "Collect evidence", "completed"),
+                new org.wrj.haifa.ai.deerflow.todo.TodoItem("t2", "Write final deck", "in_progress")
+        ));
+        clarificationStore.clearAll();
+        var record = clarificationStore.create(threadId, parentRun.runId(), "Choose style?", "missing_info", "");
+        clarificationStore.answer(record.clarificationId(), "Use concise professional style");
+
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("done"));
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(
+                properties,
+                new ToolRegistry(List.of()),
+                modelClient,
+                runManager,
+                threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new ClarificationMiddleware(clarificationStore),
+                        new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore,
+                toolExecutionStore,
+                modelStepStore,
+                toolCallStore,
+                agentLoopRunStore,
+                skillStorage,
+                todoStore,
+                null,
+                null,
+                clarificationStore,
+                null,
+                null
+        );
+
+        runtime.stream(new AgentRequest(
+                        threadId,
+                        "Original research request",
+                        "test-model",
+                        List.of(),
+                        RunMode.RESEARCH,
+                        ResearchOptions.standard(),
+                        "default-user",
+                        Map.of("clarificationId", record.clarificationId(), "resumedFromRunId", parentRun.runId())))
+                .collectList()
+                .block();
+
+        var resumedRun = runManager.listByThread(threadId).stream()
+                .filter(run -> !run.runId().equals(parentRun.runId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(todoStore.listTodos(threadId, resumedRun.runId()))
+                .extracting(org.wrj.haifa.ai.deerflow.todo.TodoItem::getContent)
+                .containsExactly("Collect evidence", "Write final deck");
+        assertThat(messageStore.listByRun(resumedRun.runId()))
+                .filteredOn(message -> message.role() == MessageRole.USER)
+                .extracting(MessageRecord::content)
+                .containsExactly("Original research request");
+    }
+
+    @Test
+    void interceptsAskClarificationToolAndSuspendsRun() {
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("test system");
+        properties.setMaxIterations(2);
+        properties.setMaxResearchSteps(2);
+
+        org.wrj.haifa.ai.deerflow.model.ModelToolCall tc = new org.wrj.haifa.ai.deerflow.model.ModelToolCall("tc-clarify", "ask_clarification", "{\"question\":\"What time period?\"}");
+        AgentModelClient modelClient = prompt -> Mono.just(new ModelResponse("", List.of(tc)));
+        clarificationStore.clearAll();
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(
+                properties,
+                new ToolRegistry(List.of(new AskClarificationTool(clarificationStore))),
                 modelClient,
                 runManager,
                 threadManager,
@@ -272,16 +505,15 @@ class SimpleAgentRuntimeTest {
                 agentLoopRunStore,
                 skillStorage,
                 null,
-                new ResearchPlanner(null, null, null),
-                planStore,
-                new ClarificationGate(),
+                null,
+                null,
                 clarificationStore,
-                progressTracker,
+                null,
                 null
         );
 
-        List<AgentEvent> clarificationEvents = runtime.stream(new AgentRequest(
-                        "thread-clarify",
+        List<AgentEvent> events = runtime.stream(new AgentRequest(
+                        "thread-ask-clarify",
                         "Compare the best stocks",
                         null,
                         List.of(),
@@ -290,24 +522,146 @@ class SimpleAgentRuntimeTest {
                 .collectList()
                 .block();
 
-        assertThat(clarificationEvents).extracting(AgentEvent::type).contains(AgentEventType.TOOL_CALL_REQUESTED);
-        assertThat(clarificationStore.find("thread-clarify")).isPresent();
+        assertThat(events).extracting(AgentEvent::type)
+                .contains(AgentEventType.CLARIFICATION_REQUIRED);
+        assertThat(clarificationStore.findPending("thread-ask-clarify")).isPresent();
+    }
 
-        List<AgentEvent> resumedEvents = runtime.stream(new AgentRequest(
-                        "thread-clarify",
-                        "Focus on US AI infrastructure companies in 2025 and answer as a report.",
+    @Test
+    void persistsClarificationSuspensionAndCompletesAfterResume() {
+        clarificationStore.clearAll();
+
+        DeerFlowProperties properties = new DeerFlowProperties();
+        properties.setWorkspaceRoot(".");
+        properties.setSystemPrompt("test system");
+        properties.setMaxIterations(4);
+
+        ModelToolCall clarificationCall = new ModelToolCall("tc-clarify", "ask_clarification", """
+                {
+                  "title": "Confirm output details",
+                  "clarification_type": "approach_choice",
+                  "context": "Need output and refresh preferences before creating the skill.",
+                  "questions": [
+                    {
+                      "id": "output_format",
+                      "title": "Output format",
+                      "prompt": "Which output should the skill produce?",
+                      "answer_type": "SINGLE_CHOICE_WITH_CUSTOM",
+                      "choices": ["Markdown report", "JSON", "HTML dashboard"]
+                    }
+                  ]
+                }
+                """);
+        AgentModelClient clarificationModel = prompt -> Mono.just(new ModelResponse("", List.of(clarificationCall)));
+        AskClarificationTool askTool = new AskClarificationTool(clarificationStore);
+        SimpleAgentRuntime runtime = new SimpleAgentRuntime(
+                properties,
+                new ToolRegistry(List.of(askTool)),
+                clarificationModel,
+                runManager,
+                threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new ClarificationMiddleware(clarificationStore),
+                        new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore,
+                toolExecutionStore,
+                modelStepStore,
+                toolCallStore,
+                agentLoopRunStore,
+                skillStorage,
+                null,
+                null,
+                null,
+                clarificationStore,
+                null,
+                null
+        );
+
+        List<AgentEvent> suspendedEvents = runtime.stream(new AgentRequest(
+                        "thread-e2e-clarification",
+                        "Create a Windows power metrics skill",
                         null,
                         List.of(),
-                        RunMode.RESEARCH,
-                        ResearchOptions.standard()))
+                        RunMode.CHAT,
+                        ResearchOptions.defaults()))
                 .collectList()
                 .block();
 
-        assertThat(resumedEvents).extracting(AgentEvent::type).contains(AgentEventType.RESEARCH_PLAN_CREATED);
-        assertThat(clarificationStore.find("thread-clarify")).isEmpty();
-        assertThat(planStore.findByThreadId("thread-clarify")).isNotEmpty();
-        assertThat(messageStore.listByThread("thread-clarify")).anySatisfy(message ->
-                assertThat(message.content()).contains("Clarification needed"));
+        assertThat(suspendedEvents).extracting(AgentEvent::type)
+                .containsSequence(
+                        AgentEventType.RUN_STARTED,
+                        AgentEventType.MODEL_STARTED,
+                        AgentEventType.MODEL_DELTA,
+                        AgentEventType.TOOL_CALL_REQUESTED,
+                        AgentEventType.TOOL_STARTED,
+                        AgentEventType.CLARIFICATION_REQUIRED,
+                        AgentEventType.RUN_SUSPENDED);
+        String suspendedRunId = suspendedEvents.get(0).runId();
+        assertThat(runManager.find(suspendedRunId)).hasValueSatisfying(run ->
+                assertThat(run.status()).isEqualTo(RunStatus.SUSPENDED));
+        assertThat(agentEventStore.findByRunId(suspendedRunId)).extracting(AgentEvent::type)
+                .contains(AgentEventType.CLARIFICATION_REQUIRED, AgentEventType.RUN_SUSPENDED);
+
+        var pending = clarificationStore.findPending("thread-e2e-clarification").orElseThrow();
+        clarificationStore.answer(pending.clarificationId(), "Markdown report with on-demand refresh",
+                List.of(new ClarificationAnswer(
+                        "output_format",
+                        "Markdown report",
+                        List.of("a"),
+                        null
+                )));
+
+        AgentModelClient resumedModel = prompt -> {
+            assertThat(prompt.effectiveUserPrompt())
+                    .contains("<clarification_answer>")
+                    .contains("Output format")
+                    .contains("Markdown report");
+            return Mono.just(new ModelResponse("Skill generated after clarification."));
+        };
+        SimpleAgentRuntime resumedRuntime = new SimpleAgentRuntime(
+                properties,
+                new ToolRegistry(List.of(askTool)),
+                resumedModel,
+                runManager,
+                threadManager,
+                messageStore,
+                List.of(new DynamicContextMiddleware(), new ClarificationMiddleware(clarificationStore),
+                        new TokenBudgetMiddleware(), new ToolErrorHandlingMiddleware()),
+                agentEventStore,
+                toolExecutionStore,
+                modelStepStore,
+                toolCallStore,
+                agentLoopRunStore,
+                skillStorage,
+                null,
+                null,
+                null,
+                clarificationStore,
+                null,
+                null
+        );
+
+        List<AgentEvent> resumedEvents = resumedRuntime.stream(new AgentRequest(
+                        "thread-e2e-clarification",
+                        "Create a Windows power metrics skill",
+                        null,
+                        List.of(),
+                        RunMode.CHAT,
+                        ResearchOptions.defaults(),
+                        "default-user",
+                        Map.of("clarificationId", pending.clarificationId(),
+                                "resumedFromRunId", suspendedRunId)))
+                .collectList()
+                .block();
+
+        assertThat(clarificationStore.findPending("thread-e2e-clarification")).isEmpty();
+        assertThat(resumedEvents).extracting(AgentEvent::type)
+                .contains(AgentEventType.RUN_STARTED, AgentEventType.MODEL_COMPLETED, AgentEventType.RUN_COMPLETED);
+        String resumedRunId = resumedEvents.get(0).runId();
+        assertThat(runManager.find(resumedRunId)).hasValueSatisfying(run ->
+                assertThat(run.status()).isEqualTo(RunStatus.COMPLETED));
+        assertThat(agentEventStore.findByRunId(resumedRunId)).extracting(AgentEvent::type)
+                .contains(AgentEventType.RUN_COMPLETED);
     }
 
     private static final class ExplodingTool implements AgentTool {
@@ -330,6 +684,75 @@ class SimpleAgentRuntimeTest {
         @Override
         public ToolResult execute(ToolRequest request) {
             throw new IllegalStateException("boom");
+        }
+    }
+
+    private static final class RecordingGraphShadowRuntime extends GraphShadowRuntime {
+
+        private int callCount;
+
+        @Override
+        public Mono<AgentGraphShadowResult> run(AgentRunConfig config, AgentRequest request,
+                List<MessageRecord> threadHistory, ModelPrompt prompt) {
+            callCount++;
+            return Mono.just(new AgentGraphShadowResult(config.runId(), config.threadId(), List.of("shadow"),
+                    Map.of(), 1));
+        }
+
+        int callCount() {
+            return callCount;
+        }
+    }
+
+    private static final class RecordingGraphChatRuntime extends GraphChatRuntime {
+
+        private int callCount;
+
+        @Override
+        public Flux<AgentEvent> run(GraphChatRuntimeRequest request) {
+            callCount++;
+            return Flux.just(
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.MODEL_STARTED, "Graph model call started", Map.of()),
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.MODEL_COMPLETED, "active graph answer", Map.of()),
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.RUN_COMPLETED, "Run completed", Map.of("status", "COMPLETED"))
+            );
+        }
+
+        int callCount() {
+            return callCount;
+        }
+
+        private String nextEventId(GraphChatRuntimeRequest request) {
+            return String.valueOf(request.eventSequence().incrementAndGet());
+        }
+    }
+
+    private static final class RecordingGraphResearchRuntime extends GraphResearchRuntime {
+
+        private int callCount;
+
+        @Override
+        public Flux<AgentEvent> run(GraphResearchRuntimeRequest request) {
+            callCount++;
+            return Flux.just(
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.MODEL_STARTED, "Graph research model call started", Map.of()),
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.MODEL_COMPLETED, "active research answer", Map.of()),
+                    AgentEvent.of(nextEventId(request), request.runConfig().runId(), request.runConfig().threadId(),
+                            AgentEventType.RUN_COMPLETED, "Research run completed", Map.of("status", "COMPLETED"))
+            );
+        }
+
+        int callCount() {
+            return callCount;
+        }
+
+        private String nextEventId(GraphResearchRuntimeRequest request) {
+            return String.valueOf(request.eventSequence().incrementAndGet());
         }
     }
 }

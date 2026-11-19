@@ -1,24 +1,44 @@
 package org.wrj.haifa.ai.deerflow.agent;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoop;
+import org.wrj.haifa.ai.deerflow.agent.loop.CompositeAgentLoopObserver;
+import org.wrj.haifa.ai.deerflow.agent.loop.DefaultAgentLoopObserver;
 import org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig;
+import org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserverAdapter;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.AgentExecutionHook;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.ExecutionLimits;
+import org.wrj.haifa.ai.deerflow.agent.lifecycle.RunExecutionContext;
+import org.wrj.haifa.ai.deerflow.artifact.ReportWriteResult;
+import org.wrj.haifa.ai.deerflow.artifact.ReportWriterService;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.config.GraphRuntimeMode;
+import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntime;
+import org.wrj.haifa.ai.deerflow.graph.GraphChatRuntimeRequest;
+import org.wrj.haifa.ai.deerflow.graph.GraphResearchRuntime;
+import org.wrj.haifa.ai.deerflow.graph.GraphResearchRuntimeRequest;
+import org.wrj.haifa.ai.deerflow.graph.GraphShadowRuntime;
 import org.wrj.haifa.ai.deerflow.middleware.AgentMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.AgentRuntimeContext;
 import org.wrj.haifa.ai.deerflow.middleware.MiddlewareChain;
 import org.wrj.haifa.ai.deerflow.middleware.MiddlewareOrder;
+import org.wrj.haifa.ai.deerflow.middleware.SubagentLimitMiddleware;
+import org.wrj.haifa.ai.deerflow.middleware.ToolOutputBudgetMiddleware;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.persistence.store.AgentEventStore;
@@ -26,25 +46,29 @@ import org.wrj.haifa.ai.deerflow.persistence.store.AgentLoopRunStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ModelStepStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolCallStore;
 import org.wrj.haifa.ai.deerflow.persistence.store.ToolExecutionStore;
-import org.wrj.haifa.ai.deerflow.research.plan.ClarificationGate;
-import org.wrj.haifa.ai.deerflow.research.plan.PlanGenerationResult;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchClarificationStore;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanStore;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanner;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker;
-import org.wrj.haifa.ai.deerflow.research.plan.ResearchQualityGate;
+import org.wrj.haifa.ai.deerflow.persistence.store.ClarificationStore;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalStore;
+import org.wrj.haifa.ai.deerflow.approval.ApprovalPolicyService;
 import org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchDimension;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan;
+import org.wrj.haifa.ai.deerflow.research.plan.ResearchTaskStatus;
 import org.wrj.haifa.ai.deerflow.research.ResearchRuntimeSupport;
+import org.wrj.haifa.ai.deerflow.research.ResearchSource;
+import org.wrj.haifa.ai.deerflow.research.EvidenceItem;
 import org.wrj.haifa.ai.deerflow.run.RunManager;
 import org.wrj.haifa.ai.deerflow.run.RunRecord;
+import org.wrj.haifa.ai.deerflow.run.RunCancellationService;
 import org.wrj.haifa.ai.deerflow.skill.Skill;
 import org.wrj.haifa.ai.deerflow.skill.SlashSkillResolver;
 import org.wrj.haifa.ai.deerflow.thread.MessageRole;
 import org.wrj.haifa.ai.deerflow.thread.MessageStore;
 import org.wrj.haifa.ai.deerflow.thread.ThreadManager;
 import org.wrj.haifa.ai.deerflow.thread.ThreadRecord;
+import org.wrj.haifa.ai.deerflow.todo.TodoItem;
+import org.wrj.haifa.ai.deerflow.todo.TodoStore;
 import org.wrj.haifa.ai.deerflow.tool.AgentTool;
+import org.wrj.haifa.ai.deerflow.tool.ToolPolicyDecision;
 import org.wrj.haifa.ai.deerflow.tool.ToolPolicyService;
 import org.wrj.haifa.ai.deerflow.tool.ToolRegistry;
 import org.wrj.haifa.ai.deerflow.tool.ToolRequest;
@@ -66,6 +90,7 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final MessageStore messageStore;
     private final List<AgentMiddleware> middlewares;
     private final AgentLoop agentLoop;
+    private final AgentExecutionHook graphExecutionHook;
     private final AgentEventStore agentEventStore;
     private final ToolExecutionStore toolExecutionStore;
     private final ModelStepStore modelStepStore;
@@ -73,18 +98,84 @@ public class SimpleAgentRuntime implements AgentRuntime {
     private final AgentLoopRunStore agentLoopRunStore;
     private final org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage;
     private final ResearchRuntimeSupport researchRuntimeSupport;
-    private final ResearchPlanner researchPlanner;
-    private final ResearchPlanStore researchPlanStore;
-    private final ClarificationGate clarificationGate;
-    private final ResearchClarificationStore researchClarificationStore;
-    private final ResearchProgressTracker researchProgressTracker;
-    private final ResearchQualityGate researchQualityGate;
+    private final ClarificationStore clarificationStore;
+    private final ReportWriterService reportWriterService;
+    private final TodoStore todoStore;
+    private final ApprovalPolicyService approvalPolicyService;
+    private final ApprovalStore approvalStore;
 
     @Autowired(required = false)
     private ToolPolicyService toolPolicyService;
 
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.runstate.SkillActivationStore skillActivationStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.budget.BudgetLedgerStore budgetLedgerStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.quality.QualityAssessmentStore qualityAssessmentStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.threadfile.ThreadFileStore threadFileStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.work.WorkItemStore workItemStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.source.SourceStore sourceStore;
+
+    @Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("EvidenceItemStoreV2")
+    private org.wrj.haifa.ai.deerflow.evidence.EvidenceItemStore newEvidenceItemStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.claim.ClaimStore claimStore;
+
+    @Autowired
+    private org.wrj.haifa.ai.deerflow.claim.CitationStore citationStore;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanner researchPlanner;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanStore researchPlanStore;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker researchProgressTracker;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.research.plan.ResearchQualityGate researchQualityGate;
+
     @Autowired(required = false)
     private SlashSkillResolver slashSkillResolver;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.memory.MemoryReflectionService memoryReflectionService;
+
+    @Autowired(required = false)
+    private GraphShadowRuntime graphShadowRuntime;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.artifact.ArtifactService artifactService;
+
+    @Autowired(required = false)
+    private GraphChatRuntime graphChatRuntime;
+
+    @Autowired(required = false)
+    private GraphResearchRuntime graphResearchRuntime;
+
+    @Autowired(required = false)
+    private RunCancellationService runCancellationService;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.tool.execution.ToolBatchExecutor toolBatchExecutor;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.config.GraphExecutorProperties graphExecutorProperties;
+
+    @Autowired(required = false)
+    private org.wrj.haifa.ai.deerflow.run.RunConcurrencyCoordinator runConcurrencyCoordinator;
 
     public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
             RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
@@ -93,7 +184,26 @@ public class SimpleAgentRuntime implements AgentRuntime {
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage) {
         this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
                 agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    public SimpleAgentRuntime(DeerFlowProperties properties, ToolRegistry toolRegistry, AgentModelClient modelClient,
+            RunManager runManager, ThreadManager threadManager, MessageStore messageStore, List<AgentMiddleware> middlewares,
+            AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
+            ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
+            org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage,
+            TodoStore todoStore,
+            ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
+            ResearchRuntimeSupport researchRuntimeSupport,
+            ClarificationStore clarificationStore,
+            ReportWriterService reportWriterService,
+            SubagentLimitMiddleware subagentLimitMiddleware) {
+        this(properties, toolRegistry, modelClient, runManager, threadManager, messageStore, middlewares,
+                agentEventStore, toolExecutionStore, modelStepStore, toolCallStore, agentLoopRunStore, skillStorage,
+                todoStore, toolOutputBudgetMiddleware, researchRuntimeSupport, clarificationStore, reportWriterService,
+                subagentLimitMiddleware, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Autowired
@@ -102,13 +212,28 @@ public class SimpleAgentRuntime implements AgentRuntime {
             AgentEventStore agentEventStore, ToolExecutionStore toolExecutionStore,
             ModelStepStore modelStepStore, ToolCallStore toolCallStore, AgentLoopRunStore agentLoopRunStore,
             org.wrj.haifa.ai.deerflow.skill.SkillStorage skillStorage,
+            @Autowired(required = false) TodoStore todoStore,
+            @Autowired(required = false) ToolOutputBudgetMiddleware toolOutputBudgetMiddleware,
             @Autowired(required = false) ResearchRuntimeSupport researchRuntimeSupport,
-            @Autowired(required = false) ResearchPlanner researchPlanner,
-            @Autowired(required = false) ResearchPlanStore researchPlanStore,
-            @Autowired(required = false) ClarificationGate clarificationGate,
-            @Autowired(required = false) ResearchClarificationStore researchClarificationStore,
-            @Autowired(required = false) ResearchProgressTracker researchProgressTracker,
-            @Autowired(required = false) ResearchQualityGate researchQualityGate) {
+            @Autowired(required = false) ClarificationStore clarificationStore,
+            @Autowired(required = false) ReportWriterService reportWriterService,
+            @Autowired(required = false) SubagentLimitMiddleware subagentLimitMiddleware,
+            @Autowired(required = false) ApprovalPolicyService approvalPolicyService,
+            @Autowired(required = false) ApprovalStore approvalStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.artifact.ArtifactService artifactService,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanner researchPlanner,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.research.plan.ResearchPlanStore researchPlanStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.research.plan.ResearchProgressTracker researchProgressTracker,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.research.plan.ResearchQualityGate researchQualityGate,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.runstate.SkillActivationStore skillActivationStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.work.WorkItemStore workItemStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.source.SourceStore sourceStore,
+            @Autowired(required = false) @org.springframework.beans.factory.annotation.Qualifier("EvidenceItemStoreV2") org.wrj.haifa.ai.deerflow.evidence.EvidenceItemStore newEvidenceItemStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.claim.ClaimStore claimStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.claim.CitationStore citationStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.budget.BudgetLedgerStore budgetLedgerStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.quality.QualityAssessmentStore qualityAssessmentStore,
+            @Autowired(required = false) org.wrj.haifa.ai.deerflow.threadfile.ThreadFileStore threadFileStore) {
         this.properties = properties;
         this.toolRegistry = toolRegistry;
         this.modelClient = modelClient;
@@ -121,8 +246,6 @@ public class SimpleAgentRuntime implements AgentRuntime {
                     return order == null ? Integer.MAX_VALUE : order.value();
                 }))
                 .toList();
-        this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
-                researchRuntimeSupport, researchPlanner, researchPlanStore, researchProgressTracker, researchQualityGate);
         this.agentEventStore = agentEventStore;
         this.toolExecutionStore = toolExecutionStore;
         this.modelStepStore = modelStepStore;
@@ -130,438 +253,766 @@ public class SimpleAgentRuntime implements AgentRuntime {
         this.agentLoopRunStore = agentLoopRunStore;
         this.skillStorage = skillStorage;
         this.researchRuntimeSupport = researchRuntimeSupport;
+        this.clarificationStore = clarificationStore;
+        this.reportWriterService = reportWriterService;
+        this.todoStore = todoStore;
+        this.approvalPolicyService = approvalPolicyService;
+        this.approvalStore = approvalStore;
+        this.artifactService = artifactService;
         this.researchPlanner = researchPlanner;
         this.researchPlanStore = researchPlanStore;
-        this.clarificationGate = clarificationGate;
-        this.researchClarificationStore = researchClarificationStore;
         this.researchProgressTracker = researchProgressTracker;
         this.researchQualityGate = researchQualityGate;
+        this.skillActivationStore = skillActivationStore;
+        this.workItemStore = workItemStore;
+        this.sourceStore = sourceStore;
+        this.newEvidenceItemStore = newEvidenceItemStore;
+        this.claimStore = claimStore;
+        this.citationStore = citationStore;
+        this.budgetLedgerStore = budgetLedgerStore;
+        this.qualityAssessmentStore = qualityAssessmentStore;
+        this.threadFileStore = threadFileStore;
+
+        List<org.wrj.haifa.ai.deerflow.agent.loop.AgentLoopObserver> observers = new ArrayList<>();
+        observers.add(new DefaultAgentLoopObserver(todoStore, artifactService));
+        if (subagentLimitMiddleware != null) {
+            observers.add(subagentLimitMiddleware);
+        }
+        observers.add(new org.wrj.haifa.ai.deerflow.research.ResearchLoopObserver(
+                todoStore,
+                researchRuntimeSupport,
+                researchPlanner,
+                researchPlanStore,
+                researchProgressTracker,
+                researchQualityGate,
+                skillActivationStore,
+                workItemStore,
+                sourceStore,
+                newEvidenceItemStore,
+                claimStore,
+                citationStore,
+                budgetLedgerStore,
+                qualityAssessmentStore,
+                threadFileStore
+        ));
+
+        CompositeAgentLoopObserver legacyObserver = new CompositeAgentLoopObserver(observers);
+        this.graphExecutionHook = new AgentLoopObserverAdapter(legacyObserver);
+        this.agentLoop = new AgentLoop(modelClient, toolRegistry, modelStepStore, toolCallStore, agentLoopRunStore,
+                legacyObserver,
+                toolOutputBudgetMiddleware,
+                clarificationStore,
+                approvalPolicyService,
+                approvalStore,
+                properties);
     }
 
     @Override
     public Flux<AgentEvent> stream(AgentRequest request) {
-        if (request.isResearchMode()) {
-            return streamResearch(request);
-        }
-        return streamChat(request);
-    }
-
-    private Flux<AgentEvent> streamChat(AgentRequest request) {
         return Flux.defer(() -> {
+            if (toolBatchExecutor != null) {
+                int maxConcurrency = graphExecutorProperties == null ? 1
+                        : graphExecutorProperties.getToolCorePoolSize();
+                this.agentLoop.configureToolExecution(toolBatchExecutor, runCancellationService, maxConcurrency);
+            }
             long runStartTime = System.currentTimeMillis();
             String requestedThreadId = StringUtils.hasText(request.threadId()) ? request.threadId() : UUID.randomUUID().toString();
-            ThreadRecord thread = this.threadManager.upsert(requestedThreadId,
-                    ThreadManager.titleFromMessage(request.message()), Map.of("source", "run"));
-            String threadId = thread.threadId();
-            String modelName = StringUtils.hasText(request.model()) ? request.model() : this.properties.getModel();
-            int uploadedFileCount = request.uploadedFileIds() == null ? 0 : request.uploadedFileIds().size();
-            RunRecord run = this.runManager.create(threadId, modelName, Map.of("source", "sse", "uploadedFiles", uploadedFileCount, "mode", "chat"));
-            this.runManager.markRunning(run.runId());
-            this.messageStore.add(threadId, run.runId(), MessageRole.USER, request.message(),
-                    Map.of("uploadedFileCount", uploadedFileCount));
-            log.info("Run started. runId={}, threadId={}, model={}, uploadedFileCount={}, mode=chat", run.runId(), threadId, nullToEmpty(modelName), uploadedFileCount);
-
-            AgentRunConfig config = new AgentRunConfig(threadId, run.runId(), modelName, true, false,
-                    this.properties.getMaxIterations(), Path.of(this.properties.getWorkspaceRoot()), RunMode.CHAT,
-                    ResearchOptions.defaults(), Map.of("runtime", "simple-agent-runtime"));
-            AtomicInteger seq = new AtomicInteger();
-
-            List<AgentEvent> prefixEvents = new ArrayList<>();
-            prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Run started", Map.of("uploadedFileCount", uploadedFileCount, "mode", "chat")));
-
-            List<Skill> activeSkills = resolveActiveSkills(request);
-            List<ToolResult> toolResults = List.of();
-
-            AgentRuntimeContext runtimeContext = AgentRuntimeContext.of(config, request, toolResults, this.properties, activeSkills);
-            Mono<ModelPrompt> promptMono = new MiddlewareChain(this.middlewares).next(runtimeContext);
-
-            long modelStartTime = System.currentTimeMillis();
-            Flux<AgentEvent> modelAndTerminalEvents = promptMono.flatMapMany(prompt -> {
-                if (prompt.userPrompt() != null && prompt.userPrompt().startsWith("BUDGET_EXCEEDED:")) {
-                    this.runManager.markCompleted(run.runId());
-                    this.threadManager.touch(threadId);
-                    this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
-                            "Budget exceeded: request + observations too large.",
-                            Map.of("budgetExceeded", true, "toolCount", toolResults.size()));
-                    long totalDuration = System.currentTimeMillis() - runStartTime;
-                    log.info("Run completed with budget limit. runId={}, totalDurationMs={}, toolCount={}", run.runId(), totalDuration, toolResults.size());
-                    return Flux.fromIterable(List.of(
-                            event(seq, config, AgentEventType.MODEL_COMPLETED,
-                                     "Budget exceeded: request + observations too large.",
-                                     Map.of("budgetExceeded", true, "toolCount", toolResults.size())),
-                            event(seq, config, AgentEventType.RUN_COMPLETED, "Run completed with budget limit",
-                                     Map.of("status", "BUDGET_LIMITED", "totalDurationMs", totalDuration))
-                    ));
-                }
-
-                org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig loopConfig = new org.wrj.haifa.ai.deerflow.agent.loop.LoopConfig(
-                        config.maxIterations(),
-                        15, // max tool calls in chat mode
-                        this.properties.getResearchTimeout(),
-                        ResearchOptions.defaults());
-
-                Flux<AgentEvent> loopEvents = this.agentLoop.run(
-                        loopConfig,
-                        config,
-                        prompt.systemPrompt(),
-                        prompt.userPrompt(),
-                        seq,
-                        this.toolPolicyService,
-                        activeSkills,
-                        request.uploadedFileIds()
-                );
-
-                final java.util.concurrent.atomic.AtomicReference<String> lastEventType = new java.util.concurrent.atomic.AtomicReference<>();
-                final java.util.concurrent.atomic.AtomicReference<String> lastContent = new java.util.concurrent.atomic.AtomicReference<>("");
-                final java.util.concurrent.atomic.AtomicReference<Map<String, Object>> lastMetadata = new java.util.concurrent.atomic.AtomicReference<>(Map.of());
-
-                return loopEvents
-                                .doOnNext(evt -> {
-                                    lastEventType.set(evt.type().name());
-                                    if (evt.type() == AgentEventType.MODEL_COMPLETED || evt.type() == AgentEventType.MODEL_DELTA) {
-                                        if (evt.content() != null) {
-                                            lastContent.set(evt.content());
-                                        }
-                                    }
-                                    if (evt.metadata() != null) {
-                                        lastMetadata.set(evt.metadata());
-                                    }
-                                     if (evt.type() == AgentEventType.RUN_FAILED) {
-                                         this.runManager.markFailed(run.runId(), evt.content());
-                                         this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, evt.content(),
-                                                 Map.of("status", "FAILED", "errorType", "ModelException"));
-                                     }
-                                     if (evt.type() == AgentEventType.TOOL_COMPLETED) {
-                                         String toolName = (String) evt.metadata().get("toolName");
-                                         this.messageStore.add(threadId, run.runId(), MessageRole.TOOL, evt.content(),
-                                                 Map.of("tool", toolName != null ? toolName : "unknown",
-                                                        "tool_call_id", evt.metadata().getOrDefault("toolCallId", "")));
-                                     }
-                                 })
-                                .doOnComplete(() -> {
-                                    String lastType = lastEventType.get();
-                                    long totalDuration = System.currentTimeMillis() - runStartTime;
-                                    if ("RUN_FAILED".equals(lastType)) {
-                                        this.runManager.markFailed(run.runId(), lastContent.get());
-                                        this.threadManager.touch(threadId);
-                                    } else if ("RUN_CANCELLED".equals(lastType)) {
-                                        this.threadManager.touch(threadId);
-                                    } else {
-                                        this.runManager.markCompleted(run.runId());
-                                        this.threadManager.touch(threadId);
-                                        String assistantAnswer = lastContent.get();
-                                        org.wrj.haifa.ai.deerflow.agent.loop.ToolCallParser parser = new org.wrj.haifa.ai.deerflow.agent.loop.ToolCallParser();
-                                        assistantAnswer = parser.cleanResponseText(assistantAnswer);
-                                        int toolCount = toolResults.size() + (int) lastMetadata.get().getOrDefault("totalToolCalls", 0);
-                                        this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, assistantAnswer,
-                                                Map.of("toolCount", toolCount));
-                                    }
-                                    log.info("Chat run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
-                                })
-                                .onErrorResume(ex -> {
-                                    String errorMessage = describeException(ex);
-                                    long totalDuration = System.currentTimeMillis() - runStartTime;
-                                    log.error("DeerFlow run failed during model generation. runId={}, threadId={}, model={}, toolCount={}, totalDurationMs={}",
-                                            run.runId(), threadId, nullToEmpty(modelName), toolResults.size(), totalDuration, ex);
-                                    this.runManager.markFailed(run.runId(), errorMessage);
-                                    this.threadManager.touch(threadId);
-                                    this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
-                                            Map.of("status", "FAILED", "errorType", ex.getClass().getName()));
-                                    return Flux.fromIterable(List.of(
-                                            event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
-                                                    Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))
-                                    ));
-                                });
-            });
-
-            return Flux.concat(Flux.fromIterable(prefixEvents), modelAndTerminalEvents)
-                    .doOnNext(this::saveEvent)
-                    .doOnCancel(() -> {
-                        long totalDuration = System.currentTimeMillis() - runStartTime;
-                        log.info("Run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
-                        this.runManager.markCancelled(run.runId());
-                        this.threadManager.touch(threadId);
-                        this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, "Run cancelled",
-                                Map.of("status", "CANCELLED", "totalDurationMs", totalDuration));
-                    });
-        }).subscribeOn(Schedulers.boundedElastic());
-    }
-
-    private Flux<AgentEvent> streamResearch(AgentRequest request) {
-        return Flux.defer(() -> {
-            long runStartTime = System.currentTimeMillis();
-            String requestedThreadId = StringUtils.hasText(request.threadId()) ? request.threadId() : UUID.randomUUID().toString();
-            ResearchClarificationStore.PendingClarification pendingClarification = this.researchClarificationStore == null
-                    ? null
-                    : this.researchClarificationStore.find(requestedThreadId).orElse(null);
             ThreadRecord thread = this.threadManager.upsert(requestedThreadId,
                     ThreadManager.titleFromMessage(request.message()), Map.of("source", "run"));
             String threadId = thread.threadId();
             String modelName = StringUtils.hasText(request.model()) ? request.model() : this.properties.getModel();
             int uploadedFileCount = request.uploadedFileIds() == null ? 0 : request.uploadedFileIds().size();
             ResearchOptions researchOptions = request.researchOptions() == null
-                    ? (pendingClarification == null ? ResearchOptions.defaults() : pendingClarification.researchOptions())
-                    : request.researchOptions();
-            String effectiveResearchMessage = pendingClarification == null
-                    ? request.message()
-                    : pendingClarification.originalMessage() + System.lineSeparator()
-                            + "Clarification from user: " + request.message();
-            java.util.Map<String, Object> runMetadataMap = new java.util.LinkedHashMap<>();
-            runMetadataMap.put("source", "sse");
-            runMetadataMap.put("uploadedFiles", uploadedFileCount);
-            runMetadataMap.put("mode", "research");
-            runMetadataMap.put("depth", researchOptions.depth().name());
-            runMetadataMap.put("timeWindow", researchOptions.timeWindow().name());
-            runMetadataMap.put("maxSources", researchOptions.maxSources());
-            runMetadataMap.put("requireCitations", researchOptions.requireCitations());
-            runMetadataMap.put("outputFormat", researchOptions.outputFormat().name());
-            if (pendingClarification != null) {
-                runMetadataMap.put("continuationOfRunId", pendingClarification.runId());
-                runMetadataMap.put("clarificationType", pendingClarification.clarificationType());
+                    ? ResearchOptions.defaults() : request.researchOptions();
+            AgentRequest effectiveRequest = request;
+
+            Map<String, Object> runMetadata = new HashMap<>();
+            runMetadata.put("source", "sse");
+            runMetadata.put("uploadedFiles", uploadedFileCount);
+            runMetadata.put("mode", request.isResearchMode() ? "research" : "chat");
+            runMetadata.put("userId", request.userId());
+            if (request.metadata() != null) {
+                runMetadata.putAll(request.metadata());
             }
-            Map<String, Object> runMetadata = Map.copyOf(runMetadataMap);
-            RunRecord run = this.runManager.create(threadId, modelName, runMetadata);
+            if (request.isResearchMode()) {
+                runMetadata.put("depth", researchOptions.depth().name());
+                runMetadata.put("timeWindow", researchOptions.timeWindow().name());
+                runMetadata.put("maxSources", researchOptions.maxSources());
+                runMetadata.put("requireCitations", researchOptions.requireCitations());
+                runMetadata.put("outputFormat", researchOptions.outputFormat().name());
+            }
+            Map<String, Object> runMetadataCopy = Map.copyOf(runMetadata);
+            boolean activeChatGraph = shouldUseActiveChatGraph(this.properties, this.graphChatRuntime, effectiveRequest);
+            boolean resumingGraphRun = activeChatGraph && isResumedRun(request.metadata());
+            RunRecord run;
+            if (resumingGraphRun) {
+                String resumedRunId = String.valueOf(request.metadata().get("resumedFromRunId"));
+                run = this.runManager.find(resumedRunId)
+                        .filter(candidate -> candidate.threadId().equals(threadId))
+                        .filter(candidate -> candidate.status() == org.wrj.haifa.ai.deerflow.run.RunStatus.SUSPENDED)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Graph resume requires a suspended run in the same thread: " + resumedRunId));
+            } else {
+                run = this.runConcurrencyCoordinator == null
+                        ? this.runManager.create(threadId, modelName, runMetadataCopy)
+                        : this.runConcurrencyCoordinator.create(threadId, modelName, runMetadataCopy);
+            }
             this.runManager.markRunning(run.runId());
-            this.messageStore.add(threadId, run.runId(), MessageRole.USER, request.message(),
-                    Map.of("uploadedFileCount", uploadedFileCount, "mode", "research"));
-            if (pendingClarification != null && this.researchClarificationStore != null) {
-                this.researchClarificationStore.clear(threadId);
+            inheritTodosFromResumedRun(threadId, run.runId(), request.metadata());
+
+            String logMessage = request.message();
+            if (!isResumedRun(request.metadata()) && request.metadata() != null
+                    && request.metadata().containsKey("clarificationId") && this.clarificationStore != null) {
+                String clarId = (String) request.metadata().get("clarificationId");
+                logMessage = this.clarificationStore.find(clarId)
+                        .map(org.wrj.haifa.ai.deerflow.persistence.store.ClarificationRecord::answer)
+                        .orElse(request.message());
             }
-            log.info("Research run started. runId={}, threadId={}, model={}, depth={}, timeWindow={}, maxSources={}, outputFormat={}",
-                    run.runId(), threadId, nullToEmpty(modelName), researchOptions.depth(), researchOptions.timeWindow(),
-                    researchOptions.maxSources(), researchOptions.outputFormat());
+            this.messageStore.add(threadId, run.runId(), MessageRole.USER, logMessage,
+                    Map.of("uploadedFileCount", uploadedFileCount, "mode", request.isResearchMode() ? "research" : "chat"));
+            log.info("Run started. runId={}, threadId={}, model={}, uploadedFileCount={}, mode={}",
+                    run.runId(), threadId, nullToEmpty(modelName), uploadedFileCount, runMetadata.get("mode"));
 
-            AgentRunConfig config = new AgentRunConfig(threadId, run.runId(), modelName, true, false,
-                    this.properties.getMaxIterations(), Path.of(this.properties.getWorkspaceRoot()), RunMode.RESEARCH,
-                    researchOptions, Map.of("runtime", "agent-loop"));
-            AtomicInteger seq = new AtomicInteger();
-
-            List<AgentEvent> prefixEvents = new ArrayList<>();
-            prefixEvents.add(event(seq, config, AgentEventType.RUN_STARTED, "Research run started", runMetadata));
-
-            // --- Clarification Gate ---
-            if (this.clarificationGate != null && pendingClarification == null) {
-                var clarificationResult = this.clarificationGate.check(effectiveResearchMessage, researchOptions);
-                if (clarificationResult.needsClarification()) {
-                    if (this.researchClarificationStore != null) {
-                        this.researchClarificationStore.save(
-                                threadId,
-                                run.runId(),
-                                effectiveResearchMessage,
-                                researchOptions,
-                                clarificationResult.clarificationQuestion(),
-                                clarificationResult.clarificationType()
-                        );
-                    }
-                    prefixEvents.add(event(seq, config, AgentEventType.TOOL_CALL_REQUESTED,
-                            "Clarification needed: " + clarificationResult.clarificationQuestion(),
-                            Map.of("clarificationType", clarificationResult.clarificationType(),
-                                    "question", clarificationResult.clarificationQuestion(),
-                                    "resumeThreadId", threadId,
-                                    "resumeRunId", run.runId())));
-                    this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM,
-                            "Clarification needed: " + clarificationResult.clarificationQuestion(),
-                            Map.of("clarificationType", clarificationResult.clarificationType(),
-                                    "question", clarificationResult.clarificationQuestion(),
-                                    "clarificationPending", true,
-                                    "resumeThreadId", threadId,
-                                    "resumeRunId", run.runId()));
-                    return Flux.fromIterable(prefixEvents)
-                            .doOnNext(this::saveEvent)
-                            .doOnComplete(() -> {
-                                this.runManager.markCompleted(run.runId());
-                                this.threadManager.touch(threadId);
-                            });
-                }
+            Map<String, Object> configMetadata = new HashMap<>();
+            configMetadata.put("runtime", "simple-agent-runtime");
+            configMetadata.put("userId", request.userId());
+            if (request.metadata() != null) {
+                configMetadata.putAll(request.metadata());
             }
 
-            // --- Research Plan Generation ---
-            ResearchPlan plan = null;
-            if (this.researchPlanner != null) {
-                PlanGenerationResult planResult = this.researchPlanner.generatePlan(threadId, run.runId(), effectiveResearchMessage, researchOptions);
-                if (planResult.success() && planResult.plan() != null) {
-                    plan = planResult.plan();
-                    if (this.researchPlanStore != null) {
-                        this.researchPlanStore.save(plan);
-                    }
-                    if (this.researchProgressTracker != null && !plan.dimensions().isEmpty()) {
-                        this.researchProgressTracker.markDimensionStarted(run.runId(), plan.dimensions().get(0).id());
-                        plan = this.researchPlanStore == null ? plan : this.researchPlanStore.findByRunId(run.runId()).orElse(plan);
-                    }
-                    prefixEvents.add(event(seq, config, AgentEventType.RESEARCH_PLAN_CREATED,
-                            "Research plan created with " + plan.dimensionCount() + " dimensions",
-                            Map.of("planId", plan.planId(), "dimensionCount", plan.dimensionCount(),
-                                    "topic", plan.topic(), "depth", researchOptions.depth().name(),
-                                    "timeWindow", researchOptions.timeWindow().name(),
-                                    "maxSources", researchOptions.maxSources(),
-                                    "outputFormat", researchOptions.outputFormat().name())));
-                    // Emit dimension started events for the active dimension
-                    for (org.wrj.haifa.ai.deerflow.research.plan.ResearchDimension dim : plan.dimensions()) {
-                        if (dim.status() == org.wrj.haifa.ai.deerflow.research.plan.ResearchTaskStatus.IN_PROGRESS) {
-                            prefixEvents.add(event(seq, config, AgentEventType.RESEARCH_DIMENSION_STARTED,
-                                    "Dimension started: " + dim.title(),
-                                    Map.of("dimensionId", dim.id(), "dimensionTitle", dim.title(),
-                                            "expectedSourceCount", dim.expectedSourceCount())));
-                            break;
-                        }
-                    }
-                } else if (planResult.needsClarification()) {
-                    if (this.researchClarificationStore != null) {
-                        this.researchClarificationStore.save(
-                                threadId,
-                                run.runId(),
-                                effectiveResearchMessage,
-                                researchOptions,
-                                planResult.clarificationQuestion(),
-                                planResult.clarificationType()
-                        );
-                    }
-                    prefixEvents.add(event(seq, config, AgentEventType.TOOL_CALL_REQUESTED,
-                            "Plan generation needs clarification: " + planResult.clarificationQuestion(),
-                            Map.of("clarificationType", planResult.clarificationType(),
-                                    "question", planResult.clarificationQuestion(),
-                                    "resumeThreadId", threadId,
-                                    "resumeRunId", run.runId())));
-                    this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM,
-                            "Plan generation needs clarification: " + planResult.clarificationQuestion(),
-                            Map.of("clarificationType", planResult.clarificationType(),
-                                    "question", planResult.clarificationQuestion(),
-                                    "clarificationPending", true,
-                                    "resumeThreadId", threadId,
-                                    "resumeRunId", run.runId()));
-                    return Flux.fromIterable(prefixEvents)
-                            .doOnNext(this::saveEvent)
-                            .doOnComplete(() -> {
-                                this.runManager.markCompleted(run.runId());
-                                this.threadManager.touch(threadId);
-                            });
-                }
-            }
-            if (plan == null) {
-                prefixEvents.add(event(seq, config, AgentEventType.RESEARCH_PLAN_CREATED,
-                        "Research plan created for: " + effectiveResearchMessage,
-                        Map.of("depth", researchOptions.depth().name(), "timeWindow", researchOptions.timeWindow().name(),
-                                "maxSources", researchOptions.maxSources(), "outputFormat", researchOptions.outputFormat().name())));
-            }
 
-            List<Skill> activeSkills = new java.util.ArrayList<>(resolveActiveSkills(request));
-            boolean hasDeepResearch = activeSkills.stream().anyMatch(s -> "deep-research".equals(s.name()));
-            if (!hasDeepResearch) {
-                this.skillStorage.findAny("deep-research").ifPresent(activeSkills::add);
-            }
-
-            List<Skill> availableSkills = this.skillStorage.listAll();
-            String skillsSection = org.wrj.haifa.ai.deerflow.skill.SkillPromptRenderer.renderSkillSystem(
-                    availableSkills,
-                    activeSkills,
-                    this.properties.getSkillsRoot()
-            );
-
-            String uploadsPath = this.properties.getUploadsRoot();
-            String workspacePath = this.properties.getWorkspaceRoot();
-            String outputsPath = this.properties.getOutputsRoot();
-
-            String customResearchSystemPrompt = this.properties.getResearchSystemPrompt() != null
-                    ? this.properties.getResearchSystemPrompt()
-                    : this.properties.getSystemPrompt();
-
-            String researchSystemPrompt = org.wrj.haifa.ai.deerflow.prompt.ResearchPromptTemplate.build(
-                    modelName,
+            RunMode runMode = request.mode();
+            AgentRunConfig config = new AgentRunConfig(
+                    threadId, run.runId(), modelName, true, false,
+                    this.properties.getMaxIterations(),
+                    Path.of(this.properties.getWorkspaceRoot()),
+                    runMode,
                     researchOptions,
-                    skillsSection,
-                    uploadsPath,
-                    workspacePath,
-                    outputsPath,
-                    customResearchSystemPrompt
+                    configMetadata
             );
 
-            LoopConfig loopConfig = new LoopConfig(
-                    this.properties.getMaxResearchSteps(),
-                    this.properties.getMaxFetchesPerRun(),
-                    this.properties.getResearchTimeout(),
-                    researchOptions);
+            AtomicInteger seq = new AtomicInteger();
+            List<AgentEvent> prefixEvents = new ArrayList<>();
+            prefixEvents.add(event(seq, config, resumingGraphRun ? AgentEventType.RUN_RESUMED : AgentEventType.RUN_STARTED,
+                    resumingGraphRun ? "Run resumed"
+                            : request.isResearchMode() ? "Research run started" : "Run started",
+                    runMetadataCopy));
 
-            // Run the agent loop with full context (policy, skills, uploads)
-            Flux<AgentEvent> loopEvents = this.agentLoop.run(loopConfig, config, researchSystemPrompt, effectiveResearchMessage, seq,
-                    this.toolPolicyService, activeSkills, request.uploadedFileIds());
+            List<Skill> activeSkills = new ArrayList<>(resolveActiveSkills(effectiveRequest));
+            if (request.isResearchMode() && !resumingGraphRun) {
+                boolean hasDeepResearch = activeSkills.stream().anyMatch(s -> "deep-research".equals(s.name()));
+                if (!hasDeepResearch) {
+                    this.skillStorage.findAny("deep-research").ifPresent(activeSkills::add);
+                }
+                try {
+                    if (this.skillActivationStore != null) {
+                        this.skillActivationStore.activate(run.runId(), "deep-research", "Research preset activated", "user_explicit", "{}");
+                    }
+                    if (this.budgetLedgerStore != null) {
+                        this.budgetLedgerStore.init(
+                                run.runId(),
+                                this.properties.getResearchTimeout(),
+                                this.properties.getMaxResearchSteps(),
+                                this.properties.getMaxFetchesPerRun(),
+                                this.properties.getMaxResearchSources(),
+                                this.properties.getMaxResearchSources(),
+                                5,
+                                5
+                        );
+                    }
+                    if (this.qualityAssessmentStore != null) {
+                        this.qualityAssessmentStore.save(
+                                run.runId(),
+                                0.0,
+                                false,
+                                new ArrayList<>(List.of("initial_exploration")),
+                                new ArrayList<>(),
+                                "continue",
+                                "Research initiated. Awaiting initial sources and analysis."
+                        );
+                    }
+                    if (this.workItemStore != null) {
+                        this.workItemStore.create(run.runId(), threadId, null, "research_question",
+                                ThreadManager.titleFromMessage(request.message()), request.message(), "high", "parent_agent");
+                    }
+                } catch (Exception ex) {
+                    log.error("Failed to initialize unified research state: {}", ex.getMessage());
+                }}
 
-            // After loop completes, mark run status based on last event type
-            final java.util.concurrent.atomic.AtomicReference<String> lastEventType = new java.util.concurrent.atomic.AtomicReference<>();
-            final java.util.concurrent.atomic.AtomicReference<org.wrj.haifa.ai.deerflow.research.plan.ResearchPlan> finalPlan = new java.util.concurrent.atomic.AtomicReference<>(plan);
-            Flux<AgentEvent> wrappedLoopEvents = loopEvents
-                    .doOnNext(evt -> {
-                        lastEventType.set(evt.type().name());
-                        if (this.researchPlanStore != null) {
-                            this.researchPlanStore.findByRunId(run.runId()).ifPresent(finalPlan::set);
-                        }
-                        if (evt.type() == AgentEventType.MODEL_COMPLETED) {
-                            this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, evt.content(),
-                                    Map.of("mode", "research", "toolCount", evt.metadata().getOrDefault("totalToolCalls", 0)));
-                        }
-                    })
-                    .doOnComplete(() -> {
-                        String lastType = lastEventType.get();
-                        long totalDuration = System.currentTimeMillis() - runStartTime;
-                        if ("RUN_FAILED".equals(lastType)) {
-                            this.threadManager.touch(threadId);
-                            log.info("Research run failed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
-                        } else if ("RUN_CANCELLED".equals(lastType)) {
-                            this.threadManager.touch(threadId);
-                            log.info("Research run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
-                        } else {
-                            // --- Quality Gate Check ---
-                            List<AgentEvent> qualityEvents = new ArrayList<>();
-                            if (this.researchQualityGate != null && this.researchRuntimeSupport != null) {
-                                List<org.wrj.haifa.ai.deerflow.research.ResearchSource> sources = this.researchRuntimeSupport.listSourcesByRun(run.runId());
-                                List<org.wrj.haifa.ai.deerflow.research.EvidenceItem> evidenceItems = this.researchRuntimeSupport.listEvidenceByRun(run.runId());
-                                org.wrj.haifa.ai.deerflow.research.plan.QualityGateResult qgResult = this.researchQualityGate.evaluate(finalPlan.get(), sources, evidenceItems,
-                                        researchOptions.requireCitations());
-                                qualityEvents.add(event(seq, config, AgentEventType.QUALITY_GATE_STARTED,
-                                        "Quality gate evaluation started", Map.of()));
-                                if (qgResult.passed()) {
-                                    qualityEvents.add(event(seq, config, AgentEventType.QUALITY_GATE_PASSED,
-                                            "Quality gate passed. Score: " + String.format("%.1f", qgResult.score()),
-                                            Map.of("score", qgResult.score(), "dimensionCount", qgResult.dimensionCount(),
-                                                    "fetchedSourceCount", qgResult.fetchedSourceCount())));
-                                } else {
-                                    qualityEvents.add(event(seq, config, AgentEventType.QUALITY_GATE_FAILED,
-                                            "Quality gate failed. Score: " + String.format("%.1f", qgResult.score()) + 
-                                                    ". Gaps: " + String.join("; ", qgResult.gaps()),
-                                            Map.of("score", qgResult.score(), "gaps", qgResult.gaps(),
-                                                    "recommendation", qgResult.recommendation(),
-                                                    "dimensionCount", qgResult.dimensionCount(),
-                                                    "fetchedSourceCount", qgResult.fetchedSourceCount())));
-                                }
-                                for (AgentEvent qe : qualityEvents) {
-                                    try { this.saveEvent(qe); } catch (Exception ignored) {}
+            List<ToolResult> toolResults = List.of();
+            boolean activeResearchGraph = false;
+            AgentRuntimeContext runtimeContext = AgentRuntimeContext.of(
+                    config, effectiveRequest, toolResults, this.properties, activeSkills);
+            Mono<Optional<ModelPrompt>> preparedPrompt = activeChatGraph
+                    ? Mono.just(Optional.empty())
+                    : new MiddlewareChain(this.middlewares).next(runtimeContext).map(Optional::of);
+
+            long modelStartTime = System.currentTimeMillis();
+            Flux<AgentEvent> modelAndTerminalEvents = preparedPrompt.flatMapMany(promptSelection -> {
+                ModelPrompt prompt = promptSelection.orElse(null);
+                if (prompt != null && prompt.userPrompt() != null
+                        && prompt.userPrompt().startsWith("BUDGET_EXCEEDED:")) {
+                    this.runManager.markCompleted(run.runId());
+                    this.threadManager.touch(threadId);
+                    this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
+                            "Budget exceeded: request + observations too large.",
+                            Map.of("budgetExceeded", true, "toolCount", toolResults.size()));
+                    long totalDuration = System.currentTimeMillis() - runStartTime;
+                    return Flux.fromIterable(List.of(
+                            event(seq, config, AgentEventType.MODEL_COMPLETED,
+                                    "Budget exceeded: request + observations too large.",
+                                    Map.of("budgetExceeded", true, "toolCount", toolResults.size())),
+                            event(seq, config, AgentEventType.RUN_COMPLETED, "Run completed with budget limit",
+                                    Map.of("status", "BUDGET_LIMITED", "totalDurationMs", totalDuration))
+                    ));
+                }
+
+                int maxSteps = request.isResearchMode() ? this.properties.getMaxResearchSteps() : config.maxIterations();
+                int maxToolCalls = request.isResearchMode() ? this.properties.getMaxFetchesPerRun() : this.properties.getMaxToolCalls();
+                LoopConfig loopConfig = new LoopConfig(
+                        maxSteps, maxToolCalls, this.properties.getResearchTimeout(), researchOptions);
+
+                if (!activeChatGraph && !activeResearchGraph) {
+                    triggerGraphShadow(config, effectiveRequest, prompt);
+                }
+
+                Flux<AgentEvent> loopEvents = activeChatGraph
+                        ? this.graphChatRuntime.run(new GraphChatRuntimeRequest(
+                                new RunExecutionContext(
+                                        config,
+                                        effectiveRequest,
+                                        new ExecutionLimits(loopConfig.maxSteps(), loopConfig.maxToolCalls(),
+                                                loopConfig.timeoutMs(), loopConfig.researchOptions()),
+                                        this.graphExecutionHook,
+                                        seq,
+                                        this.toolPolicyService,
+                                        activeSkills,
+                                        request.uploadedFileIds(),
+                                        java.util.Set.of(),
+                                        "",
+                                        "",
+                                        0),
+                                this.messageStore.listByThread(config.threadId())
+                        ))
+                        : activeResearchGraph
+                                ? this.graphResearchRuntime.run(new GraphResearchRuntimeRequest(
+                                        this.agentLoop,
+                                        loopConfig,
+                                        config,
+                                        effectiveRequest,
+                                        prompt.systemPrompt(),
+                                        prompt.userPrompt(),
+                                        seq,
+                                        this.toolPolicyService,
+                                        activeSkills,
+                                        request.uploadedFileIds(),
+                                        this.messageStore.listByThread(config.threadId())
+                                ))
+                                : this.agentLoop.run(
+                                        loopConfig, config,
+                                        prompt.systemPrompt(), prompt.userPrompt(),
+                                        seq, this.toolPolicyService, activeSkills, request.uploadedFileIds());
+
+                final AtomicReference<String> lastEventType = new AtomicReference<>();
+                final AtomicReference<String> lastContent = new AtomicReference<>("");
+                final AtomicReference<Map<String, Object>> lastCompletedModelMetadata = new AtomicReference<>(Map.of());
+                final AtomicReference<org.wrj.haifa.ai.deerflow.model.ModelProtocolState>
+                        lastCompletedModelProtocolState = new AtomicReference<>(
+                                org.wrj.haifa.ai.deerflow.model.ModelProtocolState.empty());
+
+                Flux<AgentEvent> wrappedLoopEvents = loopEvents
+                        .doOnNext(evt -> {
+                            lastEventType.set(evt.type().name());
+                            if (evt.type() == AgentEventType.MODEL_COMPLETED || evt.type() == AgentEventType.MODEL_DELTA) {
+                                if (evt.content() != null) {
+                                    lastContent.set(evt.content());
                                 }
                             }
-                            this.runManager.markCompleted(run.runId());
-                            this.threadManager.touch(threadId);
-                            log.info("Research run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+                            if (evt.type() == AgentEventType.MODEL_COMPLETED) {
+                                lastCompletedModelMetadata.set(evt.metadata() == null ? Map.of() : evt.metadata());
+                                lastCompletedModelProtocolState.set(evt.protocolState());
+                            }
+                            if (evt.type() == AgentEventType.RUN_FAILED) {
+                                this.runManager.markFailed(run.runId(), evt.content());
+                                this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, evt.content(),
+                                        Map.of("status", "FAILED", "errorType", "ModelException"));
+                            }
+                            if (evt.type() == AgentEventType.MODEL_DELTA
+                                    && Boolean.TRUE.equals(evt.metadata().get("persistAssistantToolCalls"))) {
+                                Object toolCalls = evt.metadata().get("tool_calls");
+                                java.util.Map<String, Object> assistantMetadata = new java.util.HashMap<>();
+                                assistantMetadata.put("tool_calls", toolCalls == null ? List.of() : toolCalls);
+                                assistantMetadata.put("step", evt.metadata().getOrDefault("step", 0));
+                                assistantMetadata.put("modelDurationMs", evt.metadata().getOrDefault("modelDurationMs", 0));
+                                assistantMetadata.put("intermediate", true);
+                                if (!evt.protocolState().isEmpty()) {
+                                    assistantMetadata.put("protocolState",
+                                            org.wrj.haifa.ai.deerflow.model.ModelProtocolState
+                                                    .serializeProtocolState(evt.protocolState()));
+                                }
+                                this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
+                                        evt.content() == null ? "" : evt.content(),
+                                        assistantMetadata);
+                            }
+                            if (evt.type() == AgentEventType.TOOL_COMPLETED
+                                    || evt.type() == AgentEventType.TOOL_FAILED
+                                    || evt.type() == AgentEventType.TOOL_DENIED) {
+                                String toolName = (String) evt.metadata().get("toolName");
+                                if (toolName == null) toolName = (String) evt.metadata().get("tool");
+                                this.messageStore.add(threadId, run.runId(), MessageRole.TOOL, evt.content(),
+                                        Map.of("tool", toolName != null ? toolName : "unknown",
+                                                "tool_call_id", evt.metadata().getOrDefault("toolCallId", "")));
+                            }
+                            if (evt.type() == AgentEventType.CLARIFICATION_REQUIRED) {
+                                String question = (String) evt.metadata().get("question");
+                                String clarificationId = (String) evt.metadata().get("clarificationId");
+                                Object options = evt.metadata().get("options");
+                                Object questions = evt.metadata().get("questions");
+                                java.util.Map<String, Object> meta = new java.util.HashMap<>();
+                                meta.put("clarificationPending", true);
+                                meta.put("question", question);
+                                meta.put("clarificationId", clarificationId != null ? clarificationId : "");
+                                meta.put("resumeThreadId", threadId);
+                                meta.put("resumeRunId", run.runId());
+                                if (options != null) {
+                                    meta.put("options", options);
+                                }
+                                if (questions != null) {
+                                    meta.put("questions", questions);
+                                }
+                                this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM,
+                                        "Clarification needed: " + question,
+                                        meta);
+                                this.runManager.markSuspended(run.runId());
+                                this.threadManager.touch(threadId);
+                            }
+                            if (evt.type() == AgentEventType.APPROVAL_REQUIRED) {
+                                String reason = (String) evt.metadata().get("reason");
+                                String approvalId = (String) evt.metadata().get("approvalId");
+                                this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM,
+                                        "Approval needed: " + reason,
+                                        Map.of("approvalPending", true, "approvalId", approvalId,
+                                                "resumeThreadId", threadId, "resumeRunId", run.runId()));
+                                this.runManager.markSuspended(run.runId());
+                                this.threadManager.touch(threadId);
+                            }
+                        });
+
+                if (request.isResearchMode()) {
+                    if (activeResearchGraph) {
+                        return wrappedLoopEvents
+                                .onErrorResume(ex -> {
+                                    String errorMessage = describeException(ex);
+                                    long totalDuration = System.currentTimeMillis() - runStartTime;
+                                    log.error("Research graph run failed. runId={}, totalDurationMs={}", run.runId(), totalDuration, ex);
+                                    this.runManager.markFailed(run.runId(), errorMessage);
+                                    this.threadManager.touch(threadId);
+                                    this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
+                                            Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "mode", "research"));
+                                    return Flux.fromIterable(List.of(
+                                            event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
+                                                    Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))
+                                    ));
+                                });
+                    }
+
+                    final AtomicReference<String> lastModelContent = new AtomicReference<>("");
+                    final AtomicReference<Map<String, Object>> lastModelMetadata = new AtomicReference<>(Map.of());
+                    Flux<AgentEvent> mappedLoopEvents = wrappedLoopEvents.map(evt -> {
+                        if (evt.type() == AgentEventType.MODEL_COMPLETED) {
+                            lastModelContent.set(evt.content() == null ? "" : evt.content());
+                            lastModelMetadata.set(evt.metadata() == null ? Map.of() : evt.metadata());
+                            return event(seq, config, AgentEventType.MODEL_COMPLETED,
+                                    "Research synthesis captured. Preparing report artifact.",
+                                    Map.of("mode", "research", "reportPending", true,
+                                            "stopReason", evt.metadata().getOrDefault("stopReason", "")));
                         }
-                    })
-                    .doOnError(ex -> {
+                        return evt;
+                    });
+
+                    Flux<AgentEvent> deliveryEvents = Flux.defer(() -> Flux.fromIterable(finishResearchDelivery(
+                            lastEventType.get(),
+                            run,
+                            threadId,
+                            config,
+                            seq,
+                            runStartTime,
+                            lastModelContent.get(),
+                            lastModelMetadata.get()
+                    )));
+
+                    return Flux.concat(mappedLoopEvents, deliveryEvents)
+                            .doOnComplete(() -> {
+                                String lastType = lastEventType.get();
+                                long totalDuration = System.currentTimeMillis() - runStartTime;
+                                if ("RUN_FAILED".equals(lastType)) {
+                                    this.runManager.markFailed(run.runId(), lastContent.get());
+                                    this.threadManager.touch(threadId);
+                                } else if ("RUN_CANCELLED".equals(lastType)) {
+                                    this.threadManager.touch(threadId);
+                                } else if ("CLARIFICATION_REQUIRED".equals(lastType) || "APPROVAL_REQUIRED".equals(lastType) || "RUN_SUSPENDED".equals(lastType)) {
+                                    // already handled in doOnNext
+                                } else {
+                                    this.runManager.markCompleted(run.runId());
+                                    this.threadManager.touch(threadId);
+                                    if (this.memoryReflectionService != null) {
+                                        this.memoryReflectionService.reflectAsync(threadId, run.runId());
+                                    }
+                                }
+                                log.info("Research run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+                            })
+                            .onErrorResume(ex -> {
+                                String errorMessage = describeException(ex);
+                                long totalDuration = System.currentTimeMillis() - runStartTime;
+                                log.error("Research run failed. runId={}, totalDurationMs={}", run.runId(), totalDuration, ex);
+                                this.runManager.markFailed(run.runId(), errorMessage);
+                                this.threadManager.touch(threadId);
+                                this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
+                                        Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "mode", "research"));
+                                return Flux.fromIterable(List.of(
+                                        event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
+                                                Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))
+                                ));
+                            });
+                }
+
+                if (activeChatGraph) {
+                    return wrappedLoopEvents
+                            .onErrorResume(ex -> {
+                                String errorMessage = describeException(ex);
+                                long totalDuration = System.currentTimeMillis() - runStartTime;
+                                log.error("Chat graph run failed during model generation. runId={}, threadId={}, model={}, totalDurationMs={}",
+                                        run.runId(), threadId, nullToEmpty(modelName), totalDuration, ex);
+                                this.runManager.markFailed(run.runId(), errorMessage);
+                                this.threadManager.touch(threadId);
+                                this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
+                                        Map.of("status", "FAILED", "errorType", ex.getClass().getName()));
+                                return Flux.fromIterable(List.of(
+                                        event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
+                                                Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))
+                                ));
+                            });
+                }
+
+                return wrappedLoopEvents
+                        .doOnComplete(() -> {
+                            String lastType = lastEventType.get();
+                            long totalDuration = System.currentTimeMillis() - runStartTime;
+                            if ("RUN_FAILED".equals(lastType)) {
+                                this.runManager.markFailed(run.runId(), lastContent.get());
+                                this.threadManager.touch(threadId);
+                            } else if ("RUN_CANCELLED".equals(lastType)) {
+                                this.threadManager.touch(threadId);
+                            } else if ("CLARIFICATION_REQUIRED".equals(lastType) || "APPROVAL_REQUIRED".equals(lastType) || "RUN_SUSPENDED".equals(lastType)) {
+                                // already handled in doOnNext
+                            } else {
+                                this.runManager.markCompleted(run.runId());
+                                this.threadManager.touch(threadId);
+                                String assistantAnswer = lastContent.get();
+                                Map<String, Object> completedMetadata = lastCompletedModelMetadata.get();
+                                int toolCount = ((Number) completedMetadata.getOrDefault("totalToolCalls", 0)).intValue();
+                                java.util.Map<String, Object> assistantMetadata = new java.util.HashMap<>();
+                                assistantMetadata.put("toolCount", toolCount);
+                                assistantMetadata.put("mode", "chat");
+                                if (!lastCompletedModelProtocolState.get().isEmpty()) {
+                                    assistantMetadata.put("protocolState",
+                                            org.wrj.haifa.ai.deerflow.model.ModelProtocolState
+                                                    .serializeProtocolState(lastCompletedModelProtocolState.get()));
+                                }
+                                this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT, assistantAnswer,
+                                        assistantMetadata);
+                                if (this.memoryReflectionService != null) {
+                                    this.memoryReflectionService.reflectAsync(threadId, run.runId());
+                                }
+                            }
+                            log.info("Chat run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+                        })
+                        .onErrorResume(ex -> {
+                            String errorMessage = describeException(ex);
+                            long totalDuration = System.currentTimeMillis() - runStartTime;
+                            log.error("DeerFlow run failed during model generation. runId={}, threadId={}, model={}, totalDurationMs={}",
+                                    run.runId(), threadId, nullToEmpty(modelName), totalDuration, ex);
+                            this.runManager.markFailed(run.runId(), errorMessage);
+                            this.threadManager.touch(threadId);
+                            this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
+                                    Map.of("status", "FAILED", "errorType", ex.getClass().getName()));
+                            return Flux.fromIterable(List.of(
+                                    event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
+                                            Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "totalDurationMs", totalDuration))
+                            ));
+                        });
+            });
+
+            return Flux.concat(Flux.fromIterable(prefixEvents), modelAndTerminalEvents)
+                    .onErrorResume(ex -> {
                         String errorMessage = describeException(ex);
+                        long totalDuration = System.currentTimeMillis() - runStartTime;
+                        log.error("DeerFlow run failed before terminal event. runId={}, threadId={}, model={}, totalDurationMs={}",
+                                run.runId(), threadId, nullToEmpty(modelName), totalDuration, ex);
                         this.runManager.markFailed(run.runId(), errorMessage);
                         this.threadManager.touch(threadId);
                         this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, errorMessage,
-                                Map.of("status", "FAILED", "errorType", ex.getClass().getName(), "mode", "research"));
-                        long totalDuration = System.currentTimeMillis() - runStartTime;
-                        log.error("Research run failed. runId={}, totalDurationMs={}", run.runId(), totalDuration, ex);
+                                Map.of("status", "FAILED", "errorType", ex.getClass().getName()));
+                        return Flux.just(event(seq, config, AgentEventType.RUN_FAILED, errorMessage,
+                                Map.of("status", "FAILED", "errorType", ex.getClass().getName(),
+                                        "totalDurationMs", totalDuration)));
                     })
+                    .doOnNext(this::saveEvent)
                     .doOnCancel(() -> {
                         long totalDuration = System.currentTimeMillis() - runStartTime;
-                        log.info("Research run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
-                        this.runManager.markCancelled(run.runId());
-                        this.threadManager.touch(threadId);
-                        this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, "Research run cancelled",
-                                Map.of("status", "CANCELLED", "totalDurationMs", totalDuration, "mode", "research"));
+                        log.info("Run cancelled. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+                        if (this.runCancellationService != null) {
+                            this.runCancellationService.recordCancelled(run.runId(), threadId, "SSE_CANCELLED", totalDuration);
+                        } else {
+                            this.runManager.markCancelled(run.runId());
+                            this.threadManager.touch(threadId);
+                            this.messageStore.add(threadId, run.runId(), MessageRole.SYSTEM, "Run cancelled",
+                                    Map.of("status", "CANCELLED", "totalDurationMs", totalDuration));
+                        }
                     });
-
-            return Flux.concat(Flux.fromIterable(prefixEvents), wrappedLoopEvents)
-                    .doOnNext(this::saveEvent);
         }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    void setGraphShadowRuntime(GraphShadowRuntime graphShadowRuntime) {
+        this.graphShadowRuntime = graphShadowRuntime;
+    }
+
+    void setGraphChatRuntime(GraphChatRuntime graphChatRuntime) {
+        this.graphChatRuntime = graphChatRuntime;
+    }
+
+    void setGraphResearchRuntime(GraphResearchRuntime graphResearchRuntime) {
+        this.graphResearchRuntime = graphResearchRuntime;
+    }
+
+    public static boolean shouldUseActiveChatGraph(DeerFlowProperties properties, GraphChatRuntime graphChatRuntime, AgentRequest request) {
+        return graphChatRuntime != null
+                && properties.getGraph() != null
+                && properties.getGraph().isEnabled()
+                && request != null
+                && (properties.getGraph().getMode() == GraphRuntimeMode.GRAPH_FIRST
+                    || properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_CHAT
+                    || (properties.getGraph().getMode() == GraphRuntimeMode.ACTIVE_RESEARCH && request.isResearchMode()))
+                && (request.isChatMode() || request.isResearchMode());
+    }
+
+    public static boolean shouldUseActiveResearchGraph(DeerFlowProperties properties, GraphResearchRuntime graphResearchRuntime, AgentRequest request) {
+        return false;
+    }
+
+    private void triggerGraphShadow(AgentRunConfig config, AgentRequest request, ModelPrompt prompt) {
+        if (this.graphShadowRuntime == null
+                || this.properties.getGraph() == null
+                || !this.properties.getGraph().isEnabled()
+                || this.properties.getGraph().getMode() != GraphRuntimeMode.SHADOW
+                || request == null
+                || !request.isChatMode()) {
+            return;
+        }
+        this.graphShadowRuntime.run(config, request, this.messageStore.listByThread(config.threadId()), prompt)
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnSuccess(result -> log.debug("Graph shadow completed. runId={}, threadId={}, nodes={}, durationMs={}",
+                        result.runId(), result.threadId(), result.visitedNodes(), result.durationMs()))
+                .doOnError(ex -> log.warn("Graph shadow failed without affecting legacy runtime. runId={}",
+                        config.runId(), ex))
+                .subscribe();
+    }
+
+    private List<AgentEvent> finishResearchDelivery(String lastType, RunRecord run, String threadId,
+            AgentRunConfig config, AtomicInteger seq, long runStartTime, String synthesisResult,
+            Map<String, Object> modelMetadata) {
+        if ("RUN_FAILED".equals(lastType) || "RUN_CANCELLED".equals(lastType)
+                || "CLARIFICATION_REQUIRED".equals(lastType) || "RUN_SUSPENDED".equals(lastType)) {
+            return List.of();
+        }
+        long totalDuration = System.currentTimeMillis() - runStartTime;
+
+        List<AgentEvent> events = new ArrayList<>();
+        List<ResearchSource> sources = this.researchRuntimeSupport == null
+                ? List.of()
+                : this.researchRuntimeSupport.listSourcesByRun(run.runId());
+        List<EvidenceItem> evidenceItems = this.researchRuntimeSupport == null
+                ? List.of()
+                : this.researchRuntimeSupport.listEvidenceByRun(run.runId());
+
+        ResearchPlan todoPlan = buildTodoBackedResearchPlan(threadId, run.runId());
+
+        if (this.reportWriterService != null) {
+            events.add(event(seq, config, AgentEventType.REPORT_STARTED,
+                    "Research report generation started", Map.of()));
+            ReportWriteResult result = this.reportWriterService.writeReport(
+                    threadId, run.runId(), todoPlan, sources, evidenceItems, null,
+                    synthesisResult, config.researchOptions());
+            events.add(event(seq, config, AgentEventType.ARTIFACT_CREATED,
+                    "Research report artifact created: " + result.artifact().filename(),
+                    Map.of("artifactId", result.artifact().artifactId(),
+                            "filename", result.artifact().filename(),
+                            "mimeType", result.artifact().mimeType(),
+                            "size", result.artifact().size(),
+                            "downloadUrl", "/api/deerflow/artifacts/" + result.artifact().artifactId() + "/download")));
+            events.add(event(seq, config, AgentEventType.REPORT_COMPLETED,
+                    "Research report completed: " + result.artifact().filename(),
+                    Map.of("artifactId", result.artifact().artifactId(),
+                            "filename", result.artifact().filename(),
+                            "previewUrl", "/api/deerflow/artifacts/" + result.artifact().artifactId(),
+                            "downloadUrl", "/api/deerflow/artifacts/" + result.artifact().artifactId() + "/download")));
+            this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
+                    buildArtifactSummary(result, null),
+                    Map.of("mode", "research", "artifactId", result.artifact().artifactId(),
+                            "filename", result.artifact().filename(),
+                            "toolCount", modelMetadata == null ? 0 : modelMetadata.getOrDefault("totalToolCalls", 0)));
+            if (this.threadFileStore != null) {
+                try {
+                    this.threadFileStore.register(
+                            threadId,
+                            run.runId(),
+                            result.artifact().artifactId(),
+                            result.artifact().path(),
+                            result.artifact().path(),
+                            "report",
+                            "presented",
+                            1,
+                            new ArrayList<>(),
+                            new ArrayList<>()
+                    );
+                } catch (Exception ex) {
+                    log.error("Failed to register report ThreadFile: {}", ex.getMessage());
+                }
+            }} else {
+            this.messageStore.add(threadId, run.runId(), MessageRole.ASSISTANT,
+                    compactResearchAnswer(synthesisResult, null),
+                    Map.of("mode", "research", "artifactUnavailable", true));
+        }
+
+        this.runManager.markCompleted(run.runId());
+        this.threadManager.touch(threadId);
+        if (this.memoryReflectionService != null) {
+            this.memoryReflectionService.reflectAsync(threadId, run.runId());
+        }
+        log.info("Research run completed. runId={}, totalDurationMs={}", run.runId(), totalDuration);
+        return events;
+    }
+
+    private ResearchPlan buildTodoBackedResearchPlan(String threadId, String runId) {
+        if (this.todoStore == null) {
+            return null;
+        }
+        List<TodoItem> todos = this.todoStore.listTodos(threadId, runId);
+        if (todos.isEmpty()) {
+            return null;
+        }
+        List<ResearchDimension> dimensions = todos.stream()
+                .map(todo -> new ResearchDimension(
+                        StringUtils.hasText(todo.getId()) ? todo.getId() : UUID.randomUUID().toString(),
+                        StringUtils.hasText(todo.getContent()) ? todo.getContent() : "Research task",
+                        "Research dimension derived from TodoList item.",
+                        toResearchTaskStatus(todo.getStatus()),
+                        List.of(),
+                        0,
+                        0,
+                        0,
+                        List.of()))
+                .toList();
+        String topic = todos.stream()
+                .map(TodoItem::getContent)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElse("research");
+        Instant now = Instant.now();
+        return new ResearchPlan(
+                "todo-plan-" + runId,
+                threadId,
+                runId,
+                topic,
+                List.of(topic),
+                dimensions,
+                List.of(),
+                "Auto-generated from write_todos results.",
+                "Research report",
+                "TODO_DRIVEN",
+                now,
+                now
+        );
+    }
+
+    private static ResearchTaskStatus toResearchTaskStatus(String status) {
+        if ("completed".equalsIgnoreCase(status)) {
+            return ResearchTaskStatus.COMPLETED;
+        }
+        if ("in_progress".equalsIgnoreCase(status)) {
+            return ResearchTaskStatus.IN_PROGRESS;
+        }
+        return ResearchTaskStatus.PENDING;
+    }
+
+
+
+    private static String buildArtifactSummary(ReportWriteResult result, QualityGateResult qgResult) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Summary\n\n").append(result.summary())
+          .append("\n\nLimitations\n\n").append(result.limitations());
+
+        List<String> suggestions = generateSuggestions(qgResult);
+        sb.append("\n\nFollow-up Suggestions\n\n");
+        for (String sug : suggestions) {
+            sb.append("- ").append(sug).append("\n");
+        }
+
+        sb.append("\n\nArtifact\n\n- [").append(result.artifact().filename())
+          .append("](/api/deerflow/artifacts/").append(result.artifact().artifactId()).append("/download)");
+        return sb.toString();
+    }
+
+    private static String compactResearchAnswer(String synthesisResult, QualityGateResult qualityGateResult) {
+        String answer = synthesisResult == null ? "" : synthesisResult.trim();
+        if (answer.length() > 900) {
+            answer = answer.substring(0, 900).trim() + "...";
+        }
+        String limitations = qualityGateResult == null || qualityGateResult.passed()
+                ? "No blocking quality gate gaps were recorded."
+                : String.join("; ", qualityGateResult.gaps());
+        StringBuilder sb = new StringBuilder();
+        sb.append("Summary\n\n").append(answer.isBlank() ? "Research completed." : answer)
+          .append("\n\nLimitations\n\n").append(limitations);
+
+        List<String> suggestions = generateSuggestions(qualityGateResult);
+        sb.append("\n\nFollow-up Suggestions\n\n");
+        for (String sug : suggestions) {
+            sb.append("- ").append(sug).append("\n");
+        }
+        return sb.toString();
+    }
+
+    private static List<String> generateSuggestions(QualityGateResult qgResult) {
+        List<String> suggestions = new ArrayList<>();
+        if (qgResult == null || qgResult.passed()) {
+            suggestions.add("Expand the research to other related technologies or industries.");
+            suggestions.add("Compare these findings with a historical or geographical case study.");
+            return suggestions;
+        }
+        for (String gap : qgResult.gaps()) {
+            String lower = gap.toLowerCase();
+            if (lower.contains("source") || lower.contains("read")) {
+                suggestions.add("Fetch and read more authoritative articles on the topic.");
+            } else if (lower.contains("data") || lower.contains("fact") || lower.contains("number")) {
+                suggestions.add("Search specifically for quantitative data, statistics, and industry reports.");
+            } else if (lower.contains("case") || lower.contains("example")) {
+                suggestions.add("Search for real-world case studies or implementation examples.");
+            } else if (lower.contains("opinion") || lower.contains("view")) {
+                suggestions.add("Seek out expert analyses, interviews, or professional commentaries.");
+            } else if (lower.contains("limitation") || lower.contains("gap")) {
+                suggestions.add("Investigate the challenges, failures, and limitations of this area.");
+            } else if (lower.contains("counter") || lower.contains("oppose") || lower.contains("bias")) {
+                suggestions.add("Look into alternative perspectives, critiques, or counterarguments.");
+            } else if (lower.contains("citation") || lower.contains("cite")) {
+                suggestions.add("Validate the sources and check if all claims have proper inline citations.");
+            }
+        }
+        if (suggestions.isEmpty()) {
+            suggestions.add("Expand the research to other related technologies or industries.");
+            suggestions.add("Compare these findings with a historical or geographical case study.");
+        }
+        return suggestions;
     }
 
     private List<Skill> resolveActiveSkills(AgentRequest request) {
@@ -571,15 +1022,58 @@ public class SimpleAgentRuntime implements AgentRuntime {
         return this.slashSkillResolver.resolve(request.message());
     }
 
+    private void inheritTodosFromResumedRun(String threadId, String runId, Map<String, Object> metadata) {
+        if (this.todoStore == null || !isResumedRun(metadata)) {
+            return;
+        }
+        String parentRunId = String.valueOf(metadata.get("resumedFromRunId"));
+        if (!StringUtils.hasText(parentRunId) || parentRunId.equals(runId)) {
+            return;
+        }
+        try {
+            if (!this.todoStore.listTodos(threadId, runId).isEmpty()) {
+                return;
+            }
+            List<TodoItem> parentTodos = this.todoStore.listTodos(threadId, parentRunId);
+            if (parentTodos.isEmpty()) {
+                return;
+            }
+            List<TodoItem> copiedTodos = parentTodos.stream()
+                    .map(SimpleAgentRuntime::copyTodo)
+                    .toList();
+            this.todoStore.saveTodos(threadId, runId, copiedTodos);
+            log.info("Inherited {} todo(s) from resumed run. threadId={}, parentRunId={}, runId={}",
+                    copiedTodos.size(), threadId, parentRunId, runId);
+        }
+        catch (RuntimeException ex) {
+            log.warn("Failed to inherit todos from resumed run. threadId={}, parentRunId={}, runId={}, error={}",
+                    threadId, parentRunId, runId, ex.getMessage());
+        }
+    }
+
+    private static boolean isResumedRun(Map<String, Object> metadata) {
+        return metadata != null && metadata.get("resumedFromRunId") instanceof String parentRunId
+                && StringUtils.hasText(parentRunId);
+    }
+
+    private static TodoItem copyTodo(TodoItem source) {
+        TodoItem item = new TodoItem(source.getId(), source.getContent(), source.getStatus());
+        item.setPriority(source.getPriority());
+        item.setEvidence(source.getEvidence());
+        item.setOrderIndex(source.getOrderIndex());
+        item.setCreatedAt(source.getCreatedAt());
+        item.setUpdatedAt(source.getUpdatedAt());
+        return item;
+    }
+
     private List<ToolResult> executePlannedTools(AgentRequest request, AgentRunConfig config, AtomicInteger seq,
             List<AgentEvent> events, List<Skill> activeSkills) {
         ToolRequest toolRequest = new ToolRequest(request.message(), config.workspaceRoot(), request.uploadedFileIds(),
-                config.threadId());
+                config.threadId(), config.runId(), config.mode(), activeSkills, config.modelName());
         List<ToolResult> results = new ArrayList<>();
 
         List<AgentTool> plannedTools = new ArrayList<>(this.toolRegistry.plan(request.message(), config.maxIterations()));
 
-        // If user has uploaded files, automatically include upload-related tools
         if (request.uploadedFileIds() != null && !request.uploadedFileIds().isEmpty()) {
             for (AgentTool tool : this.toolRegistry.tools()) {
                 String name = tool.name();
@@ -592,15 +1086,17 @@ public class SimpleAgentRuntime implements AgentRuntime {
         }
 
         for (AgentTool tool : plannedTools) {
-            if (this.toolPolicyService != null && !this.toolPolicyService.isToolAllowed(tool.name(), activeSkills)) {
+            ToolPolicyDecision decision = this.toolPolicyService == null
+                    ? ToolPolicyDecision.allow()
+                    : this.toolPolicyService.evaluateTool(tool.name(), activeSkills, config.mode());
+            if (!decision.allowed()) {
                 events.add(event(seq, config, AgentEventType.TOOL_STARTED, "Policy denied " + tool.name(),
                         Map.of("tool", tool.name(), "denied", true)));
-                results.add(ToolResult.of(tool.name(), "Tool denied by policy: not in allowed-tools for active skills."));
-                events.add(event(seq, config, AgentEventType.TOOL_COMPLETED, "Tool denied by policy",
-                        Map.of("tool", tool.name(), "denied", true)));
-                this.toolExecutionStore.saveDenied(config.runId(), config.threadId(), tool.name(),
-                        "Policy denied: not in allowed-tools for active skills",
-                        Map.of("tool", tool.name(), "denied", true));
+                String deniedMessage = "Tool denied by policy: " + decision.reason();
+                results.add(ToolResult.denied(tool.name(), deniedMessage,
+                        Map.of("denied", true, "reason", decision.reason())));
+                events.add(event(seq, config, AgentEventType.TOOL_DENIED, deniedMessage,
+                        Map.of("tool", tool.name(), "denied", true, "reason", decision.reason())));
                 continue;
             }
             long toolStartTime = System.currentTimeMillis();
@@ -612,9 +1108,11 @@ public class SimpleAgentRuntime implements AgentRuntime {
             long toolDuration = System.currentTimeMillis() - toolStartTime;
             log.info("Tool executed. tool={}, runId={}, durationMs={}, resultLength={}", tool.name(), config.runId(), toolDuration, result.content().length());
             results.add(result);
-            events.add(event(seq, config, AgentEventType.TOOL_COMPLETED, result.content(),
-                    Map.of("tool", result.toolName(), "durationMs", toolDuration)));
-            if (result.content() != null && result.content().startsWith("Tool failed:")) {
+            events.add(event(seq, config,
+                    result.isSuccess() ? AgentEventType.TOOL_COMPLETED : AgentEventType.TOOL_FAILED,
+                    result.content(), Map.of("tool", result.toolName(), "durationMs", toolDuration,
+                            "status", result.status().name())));
+            if (!result.isSuccess()) {
                 this.toolExecutionStore.saveFailed(config.runId(), config.threadId(), tool.name(), result.content(),
                         toolDuration, Map.of("tool", tool.name()));
             } else {
@@ -631,7 +1129,8 @@ public class SimpleAgentRuntime implements AgentRuntime {
         }
         catch (RuntimeException ex) {
             log.warn("Tool {} failed: {}", tool.name(), ex.getMessage());
-            return ToolResult.of(tool.name(), "Tool failed: " + ex.getMessage());
+            return ToolResult.failed(tool.name(), "Tool failed: " + ex.getMessage(),
+                    Map.of("errorType", ex.getClass().getSimpleName()));
         }
     }
 
@@ -643,26 +1142,39 @@ public class SimpleAgentRuntime implements AgentRuntime {
 
     private void saveEvent(AgentEvent event) {
         try {
+            // Do not save intermediate MODEL_DELTA streaming chunks to the database to prevent database bloat and write lock issues
+            if (event.type() == AgentEventType.MODEL_DELTA) {
+                Map<String, Object> meta = event.metadata();
+                boolean isFinal = meta != null && (meta.containsKey("modelDurationMs") || meta.containsKey("persistAssistantToolCalls"));
+                if (!isFinal) {
+                    return;
+                }
+            }
             this.agentEventStore.save(event);
             if (event.type() == AgentEventType.TOOL_STARTED) {
                 String toolName = (String) event.metadata().get("toolName");
                 if (toolName == null) toolName = (String) event.metadata().get("tool");
                 String desc = (String) event.metadata().getOrDefault("description", "");
                 Boolean denied = (Boolean) event.metadata().getOrDefault("denied", false);
-                if (Boolean.TRUE.equals(denied)) {
-                    this.toolExecutionStore.saveDenied(event.runId(), event.threadId(), toolName, "Policy denied", event.metadata());
-                } else {
+                if (!Boolean.TRUE.equals(denied)) {
                     String reqStr = (String) event.metadata().getOrDefault("arguments", "");
                     this.toolExecutionStore.saveStarted(event.runId(), event.threadId(), toolName, desc, reqStr, event.metadata());
                 }
-            } else if (event.type() == AgentEventType.TOOL_COMPLETED) {
+            } else if (event.type() == AgentEventType.TOOL_COMPLETED
+                    || event.type() == AgentEventType.TOOL_FAILED
+                    || event.type() == AgentEventType.TOOL_DENIED) {
                 String toolName = (String) event.metadata().get("toolName");
                 if (toolName == null) toolName = (String) event.metadata().get("tool");
                 Boolean denied = (Boolean) event.metadata().getOrDefault("denied", false);
-                if (!Boolean.TRUE.equals(denied)) {
+                if (Boolean.TRUE.equals(denied)) {
+                    this.toolExecutionStore.saveDenied(event.runId(), event.threadId(), toolName,
+                            (String) event.metadata().getOrDefault("reason", "Tool denied"),
+                            event.metadata());
+                } else {
                     long duration = ((Number) event.metadata().getOrDefault("durationMs", 0L)).longValue();
                     String status = (String) event.metadata().getOrDefault("status", "COMPLETED");
-                    if ("FAILED".equals(status) || (event.content() != null && event.content().startsWith("Tool failed:"))) {
+                    if ("FAILED".equals(status) || "NOT_FOUND".equals(status)
+                            || (event.content() != null && event.content().startsWith("Tool failed:"))) {
                         this.toolExecutionStore.saveFailed(event.runId(), event.threadId(), toolName, event.content(), duration, event.metadata());
                     } else {
                         this.toolExecutionStore.saveCompleted(event.runId(), event.threadId(), toolName, event.content(), duration, event.metadata());
@@ -679,6 +1191,16 @@ public class SimpleAgentRuntime implements AgentRuntime {
     }
 
     private static String describeException(Throwable ex) {
+        if (ex instanceof org.springframework.web.reactive.function.client.WebClientResponseException responseException) {
+            String responseBody = responseException.getResponseBodyAsString();
+            if (StringUtils.hasText(responseBody)) {
+                String compactBody = responseBody.replaceAll("\\s+", " ").trim();
+                if (compactBody.length() > 1_500) {
+                    compactBody = compactBody.substring(0, 1_500) + "...";
+                }
+                return ex.getClass().getName() + ": " + ex.getMessage() + "; responseBody=" + compactBody;
+            }
+        }
         String message = ex.getMessage();
         if (StringUtils.hasText(message)) {
             return ex.getClass().getName() + ": " + message;

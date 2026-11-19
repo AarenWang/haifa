@@ -4,6 +4,8 @@ import java.nio.file.Path;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.wrj.haifa.ai.deerflow.config.DeerFlowProperties;
+import org.wrj.haifa.ai.deerflow.provider.AliyunFetchProvider;
+import org.wrj.haifa.ai.deerflow.provider.AliyunSearchProvider;
 import org.wrj.haifa.ai.deerflow.provider.DuckDuckGoSearchProvider;
 import org.wrj.haifa.ai.deerflow.provider.JinaAiFetchProvider;
 import org.wrj.haifa.ai.deerflow.provider.WebFetchProviderRegistry;
@@ -17,9 +19,9 @@ class WebSearchFetchToolTest {
     void webSearchToolUsesDefaultProvider() {
         DeerFlowProperties properties = new DeerFlowProperties();
         WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(
-                java.util.List.of(new DuckDuckGoSearchProvider()));
+                java.util.List.of(new AliyunSearchProvider(), new DuckDuckGoSearchProvider()));
         WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(
-                java.util.List.of(new JinaAiFetchProvider()));
+                java.util.List.of(new AliyunFetchProvider(), new JinaAiFetchProvider()));
 
         WebSearchTool searchTool = new WebSearchTool(searchRegistry, properties);
         WebFetchTool fetchTool = new WebFetchTool(fetchRegistry, properties);
@@ -29,17 +31,17 @@ class WebSearchFetchToolTest {
         assertThat(fetchTool.name()).isEqualTo("web_fetch");
 
         // Default provider reflected in description
-        assertThat(searchTool.description()).contains("DuckDuckGo");
-        assertThat(searchTool.description()).contains("duckduckgo");
-        assertThat(fetchTool.description()).contains("Jina AI Reader");
-        assertThat(fetchTool.description()).contains("jina");
+        assertThat(searchTool.description()).contains("Aliyun IQS Search");
+        assertThat(searchTool.description()).contains("aliyun");
+        assertThat(fetchTool.description()).contains("Aliyun IQS Fetch");
+        assertThat(fetchTool.description()).contains("aliyun");
     }
 
     @Test
     void webSearchToolExecutesWithDefaultProvider() {
         DeerFlowProperties properties = new DeerFlowProperties();
         WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(
-                java.util.List.of(new DuckDuckGoSearchProvider()));
+                java.util.List.of(new AliyunSearchProvider()));
         WebSearchTool searchTool = new WebSearchTool(searchRegistry, properties);
 
         ToolRequest request = new ToolRequest("{\"query\": \"Spring Boot\", \"max_results\": 3}", Path.of("."));
@@ -47,7 +49,7 @@ class WebSearchFetchToolTest {
 
         assertThat(result.toolName()).isEqualTo("web_search");
         assertThat(result.content()).contains("Spring Boot");
-        assertThat(result.metadata()).containsEntry("provider", "duckduckgo");
+        assertThat(result.metadata()).containsEntry("provider", "aliyun");
         assertThat(result.metadata()).containsEntry("maxResults", 3);
     }
 
@@ -55,7 +57,7 @@ class WebSearchFetchToolTest {
     void webFetchToolExecutesWithDefaultProvider() {
         DeerFlowProperties properties = new DeerFlowProperties();
         WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(
-                java.util.List.of(new JinaAiFetchProvider()));
+                java.util.List.of(new AliyunFetchProvider()));
         WebFetchTool fetchTool = new WebFetchTool(fetchRegistry, properties);
 
         ToolRequest request = new ToolRequest("{\"url\": \"https://example.com\"}", Path.of("."));
@@ -63,7 +65,7 @@ class WebSearchFetchToolTest {
 
         assertThat(result.toolName()).isEqualTo("web_fetch");
         assertThat(result.content()).contains("https://example.com");
-        assertThat(result.metadata()).containsEntry("provider", "jina");
+        assertThat(result.metadata()).containsEntry("provider", "aliyun");
     }
 
     @Test
@@ -105,7 +107,7 @@ class WebSearchFetchToolTest {
     void webSearchToolRequiresQueryArgument() {
         DeerFlowProperties properties = new DeerFlowProperties();
         WebSearchProviderRegistry searchRegistry = new WebSearchProviderRegistry(
-                java.util.List.of(new DuckDuckGoSearchProvider()));
+                java.util.List.of(new AliyunSearchProvider()));
         WebSearchTool searchTool = new WebSearchTool(searchRegistry, properties);
 
         ToolRequest request = new ToolRequest("{}", Path.of("."));
@@ -117,7 +119,7 @@ class WebSearchFetchToolTest {
     void webFetchToolRequiresUrlArgument() {
         DeerFlowProperties properties = new DeerFlowProperties();
         WebFetchProviderRegistry fetchRegistry = new WebFetchProviderRegistry(
-                java.util.List.of(new JinaAiFetchProvider()));
+                java.util.List.of(new AliyunFetchProvider()));
         WebFetchTool fetchTool = new WebFetchTool(fetchRegistry, properties);
 
         ToolRequest request = new ToolRequest("{}", Path.of("."));

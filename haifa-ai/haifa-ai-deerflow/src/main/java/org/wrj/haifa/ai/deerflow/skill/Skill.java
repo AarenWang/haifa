@@ -10,8 +10,20 @@ public record Skill(
         String source,
         String skillMdContent,
         Map<String, List<String>> directories,
-        Set<String> allowedTools
+        Set<String> allowedTools,
+        List<String> activationHints
 ) {
+
+    public Skill(String name, String description, String source, String skillMdContent,
+            Map<String, List<String>> directories, Set<String> allowedTools) {
+        this(name, description, source, skillMdContent, directories, allowedTools, List.of());
+    }
+
+    public Skill {
+        directories = directories == null ? Map.of() : Map.copyOf(directories);
+        allowedTools = allowedTools == null ? Set.of() : Set.copyOf(allowedTools);
+        activationHints = activationHints == null ? List.of() : List.copyOf(activationHints);
+    }
 
     public boolean hasReferences() {
         return hasDir("references");

@@ -1,6 +1,6 @@
 ---
 name: image-generation
-description: Use this skill when the user requests to generate, create, imagine, or visualize images including characters, scenes, products, or any visual content. Supports structured prompts and reference images for guided generation.
+description: Generate creative raster images such as characters, scenes, products, illustrations, and decorative visual assets through Gemini or MiniMax, with optional reference images. Do not use for charts, tables, diagrams, or text-heavy infographics that require exact labels, values, or Chinese text; route those to chart-visualization.
 ---
 
 # Image Generation Skill
@@ -8,6 +8,13 @@ description: Use this skill when the user requests to generate, create, imagine,
 ## Overview
 
 This skill generates high-quality images using structured prompts and a Python script. The workflow includes creating JSON-formatted prompts and executing image generation with optional reference images.
+
+## Routing boundary
+
+- Use `chart-visualization` for exact data, labels, legends, axis text, tables, and Chinese/CJK typography.
+- Do not ask an image provider to render authoritative chart text. Generative image models do not guarantee exact wording or glyphs.
+- For a creative background plus exact text, generate the background without text, then overlay text with a deterministic renderer using a verified CJK font.
+- Never replace this Skill with an `image_generation` Tool call. Execute the bundled script through `run_script(language=python)` so virtual paths are rewritten safely on the host.
 
 ## Core Capabilities
 
@@ -34,13 +41,13 @@ Generate a structured JSON file in `/mnt/user-data/workspace/` with naming patte
 
 ### Step 3: Execute Generation
 
-Call the Python script:
-```bash
-python /mnt/skills/public/image-generation/scripts/generate.py \
-  --prompt-file /mnt/user-data/workspace/prompt-file.json \
-  --reference-images /path/to/ref1.jpg /path/to/ref2.png \
-  --output-file /mnt/user-data/outputs/generated-image.jpg
-  --aspect-ratio 16:9
+Call `run_script` with this Python wrapper (substitute the paths and aspect ratio):
+```json
+{
+  "language": "python",
+  "purpose": "Generate the requested image through the image-generation skill",
+  "code": "import runpy, sys\nsys.argv = ['generate.py', '--prompt-file', '/mnt/user-data/workspace/prompt-file.json', '--reference-images', '/mnt/user-data/uploads/ref1.jpg', '/mnt/user-data/uploads/ref2.png', '--output-file', '/mnt/user-data/outputs/generated-image.jpg', '--aspect-ratio', '16:9']\nrunpy.run_path('/mnt/skills/public/image-generation/scripts/generate.py', run_name='__main__')"
+}
 ```
 
 Parameters:
@@ -51,7 +58,7 @@ Parameters:
 - `--aspect-ratio`: Aspect ratio of the generated image (optional, default: 16:9)
 
 [!NOTE]
-Do NOT read the python file, just call it with the parameters.
+Do NOT read, copy, or modify the provider script. Do not handwrite MiniMax/Gemini HTTP requests and do not inspect or print provider credentials. The wrapper above invokes the maintained provider adapter with its configured environment.
 
 ## Character Generation Example
 
@@ -78,12 +85,12 @@ Create prompt file: `/mnt/user-data/workspace/asian-woman.json`
 }
 ```
 
-Execute generation:
-```bash
-python /mnt/skills/public/image-generation/scripts/generate.py \
-  --prompt-file /mnt/user-data/workspace/cyberpunk-hacker.json \
-  --output-file /mnt/user-data/outputs/cyberpunk-hacker-01.jpg \
-  --aspect-ratio 2:3
+Execute generation with the Step 3 wrapper using:
+
+```text
+--prompt-file /mnt/user-data/workspace/cyberpunk-hacker.json
+--output-file /mnt/user-data/outputs/cyberpunk-hacker-01.jpg
+--aspect-ratio 2:3
 ```
 
 With reference images:
@@ -112,12 +119,12 @@ With reference images:
   }
 }
 ```
-```bash
-python /mnt/skills/public/image-generation/scripts/generate.py \
-  --prompt-file /mnt/user-data/workspace/star-wars-scene.json \
-  --reference-images /mnt/user-data/uploads/character-ref.jpg /mnt/user-data/uploads/vehicle-ref.jpg \
-  --output-file /mnt/user-data/outputs/star-wars-scene-01.jpg \
-  --aspect-ratio 16:9
+```text
+Use the Step 3 `run_script` wrapper with:
+--prompt-file /mnt/user-data/workspace/star-wars-scene.json
+--reference-images /mnt/user-data/uploads/character-ref.jpg /mnt/user-data/uploads/vehicle-ref.jpg
+--output-file /mnt/user-data/outputs/star-wars-scene-01.jpg
+--aspect-ratio 16:9
 ```
 
 ## Common Scenarios

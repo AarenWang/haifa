@@ -35,9 +35,34 @@ public class WebFetchTool implements AgentTool {
     public String description() {
         String providerId = properties.getWebFetchProvider();
         return "Fetch and read the full markdown content of a URL. "
-                + "Uses the configured fetch provider (default: Jina AI Reader). "
+                + "Uses the configured fetch provider (default: " + org.wrj.haifa.ai.deerflow.provider.WebFetchProviderType.defaultType().displayName() + "). "
                 + "Current provider: " + providerId + ". "
                 + "Arguments: {\"url\": \"https://example.com\"}";
+    }
+
+    @Override
+    public java.util.List<org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract> completionContracts() {
+        return java.util.List.of(new org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract(
+                org.wrj.haifa.ai.deerflow.completion.CompletionRequirementType.WEB_CITATION,
+                org.wrj.haifa.ai.deerflow.completion.EvidenceType.WEB_SOURCE,
+                "fetched web source"));
+    }
+
+    @Override
+    public String inputSchema() {
+        return """
+                {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "Absolute URL to fetch."
+                    }
+                  },
+                  "required": ["url"],
+                  "additionalProperties": false
+                }
+                """;
     }
 
     @Override
@@ -49,19 +74,19 @@ public class WebFetchTool implements AgentTool {
     public ToolResult execute(ToolRequest request) {
         String jsonInput = request.userMessage();
         if (jsonInput == null || jsonInput.isBlank()) {
-            return ToolResult.of(name(), "Error: arguments JSON required");
+            return ToolResult.failed(name(), "Error: arguments JSON required");
         }
 
         JsonNode node;
         try {
             node = MAPPER.readTree(jsonInput);
         } catch (Exception jsonEx) {
-            return ToolResult.of(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
+            return ToolResult.failed(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
         }
 
         String url = node.has("url") ? node.get("url").asText() : null;
         if (url == null || url.isBlank()) {
-            return ToolResult.of(name(), "Error: url is required");
+            return ToolResult.failed(name(), "Error: url is required");
         }
 
         String providerId = properties.getWebFetchProvider();
@@ -69,11 +94,19 @@ public class WebFetchTool implements AgentTool {
         try {
             provider = registry.resolve(providerId);
         } catch (IllegalArgumentException ex) {
-            return ToolResult.of(name(), "Error: " + ex.getMessage());
+            return ToolResult.failed(name(), "Error: " + ex.getMessage());
         }
 
-        String result = provider.fetch(url);
-        return ToolResult.of(name(), result,
-                java.util.Map.of("url", url, "provider", providerId));
+        try {
+            String result = provider.fetch(url);
+            if (result == null || result.isBlank()) {
+                return ToolResult.failed(name(), "Error: web fetch returned no source data");
+            }
+            return ToolResult.success(name(), result,
+                    java.util.Map.of("url", url, "provider", providerId));
+        } catch (Exception ex) {
+            return ToolResult.failed(name(), "Error executing web fetch: " + ex.getMessage(),
+                    java.util.Map.of("provider", providerId, "errorType", ex.getClass().getSimpleName()));
+        }
     }
 }

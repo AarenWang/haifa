@@ -35,9 +35,41 @@ public class WebSearchTool implements AgentTool {
     public String description() {
         String providerId = properties.getWebSearchProvider();
         return "Search the web for queries to find relevant sources and snippets. "
-                + "Uses the configured search provider (default: DuckDuckGo). "
+                + "Uses the configured search provider (default: " + org.wrj.haifa.ai.deerflow.provider.WebSearchProviderType.defaultType().displayName() + "). "
                 + "Current provider: " + providerId + ". "
                 + "Arguments: {\"query\": \"search query\", \"max_results\": 5}";
+    }
+
+    @Override
+    public java.util.List<org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract> completionContracts() {
+        return java.util.List.of(new org.wrj.haifa.ai.deerflow.completion.ToolCompletionContract(
+                org.wrj.haifa.ai.deerflow.completion.CompletionRequirementType.WEB_CITATION,
+                org.wrj.haifa.ai.deerflow.completion.EvidenceType.WEB_SOURCE,
+                "web search sources"));
+    }
+
+    @Override
+    public String inputSchema() {
+        return """
+                {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "description": "Search query."
+                    },
+                    "max_results": {
+                      "type": "integer",
+                      "description": "Maximum number of search results.",
+                      "minimum": 1,
+                      "maximum": 10,
+                      "default": 5
+                    }
+                  },
+                  "required": ["query"],
+                  "additionalProperties": false
+                }
+                """;
     }
 
     @Override
@@ -49,19 +81,19 @@ public class WebSearchTool implements AgentTool {
     public ToolResult execute(ToolRequest request) {
         String jsonInput = request.userMessage();
         if (jsonInput == null || jsonInput.isBlank()) {
-            return ToolResult.of(name(), "Error: arguments JSON required");
+            return ToolResult.failed(name(), "Error: arguments JSON required");
         }
 
         JsonNode node;
         try {
             node = MAPPER.readTree(jsonInput);
         } catch (Exception jsonEx) {
-            return ToolResult.of(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
+            return ToolResult.failed(name(), "Error parsing tool arguments as JSON: " + jsonEx.getMessage());
         }
 
         String query = node.has("query") ? node.get("query").asText() : null;
         if (query == null || query.isBlank()) {
-            return ToolResult.of(name(), "Error: query is required");
+            return ToolResult.failed(name(), "Error: query is required");
         }
 
         int maxResults = node.has("max_results") ? node.get("max_results").asInt(5) : 5;
@@ -71,11 +103,19 @@ public class WebSearchTool implements AgentTool {
         try {
             provider = registry.resolve(providerId);
         } catch (IllegalArgumentException ex) {
-            return ToolResult.of(name(), "Error: " + ex.getMessage());
+            return ToolResult.failed(name(), "Error: " + ex.getMessage());
         }
 
-        String result = provider.search(query, maxResults);
-        return ToolResult.of(name(), result,
-                java.util.Map.of("query", query, "provider", providerId, "maxResults", maxResults));
+        try {
+            String result = provider.search(query, maxResults);
+            if (result == null || result.isBlank()) {
+                return ToolResult.failed(name(), "Error: web search returned no source data");
+            }
+            return ToolResult.success(name(), result,
+                    java.util.Map.of("query", query, "provider", providerId, "maxResults", maxResults));
+        } catch (Exception ex) {
+            return ToolResult.failed(name(), "Error executing web search: " + ex.getMessage(),
+                    java.util.Map.of("provider", providerId, "errorType", ex.getClass().getSimpleName()));
+        }
     }
 }

@@ -9,7 +9,9 @@ import org.wrj.haifa.ai.deerflow.agent.AgentRunConfig;
 import org.wrj.haifa.ai.deerflow.middleware.AgentMiddleware;
 import org.wrj.haifa.ai.deerflow.middleware.AgentRuntimeContext;
 import org.wrj.haifa.ai.deerflow.middleware.MiddlewareChain;
+import org.wrj.haifa.ai.deerflow.middleware.MiddlewareLifecycle;
 import org.wrj.haifa.ai.deerflow.middleware.MiddlewareOrder;
+import org.wrj.haifa.ai.deerflow.middleware.MiddlewarePhase;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import reactor.core.publisher.Mono;
 
@@ -19,6 +21,7 @@ import reactor.core.publisher.Mono;
  */
 @Component
 @MiddlewareOrder(50)
+@MiddlewareLifecycle(MiddlewarePhase.MODEL_INPUT)
 public class ResearchPlanMiddleware implements AgentMiddleware {
 
     private final ResearchPlanStore planStore;

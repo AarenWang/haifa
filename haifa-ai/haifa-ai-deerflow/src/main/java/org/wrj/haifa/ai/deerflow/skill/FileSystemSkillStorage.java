@@ -48,30 +48,26 @@ public class FileSystemSkillStorage implements SkillStorage {
             return;
         }
         try {
-            boolean needsUnpack = true;
-            if (Files.isDirectory(publicRoot)) {
-                try (Stream<Path> s = Files.list(publicRoot)) {
-                    if (s.findAny().isPresent()) {
-                        needsUnpack = false;
-                    }
-                }
-            }
-            if (needsUnpack) {
-                log.info("Provisioning public skills from classpath to {}", publicRoot);
-                Files.createDirectories(publicRoot);
-                org.springframework.core.io.support.PathMatchingResourcePatternResolver resolver =
-                        new org.springframework.core.io.support.PathMatchingResourcePatternResolver();
-                org.springframework.core.io.Resource[] resources = resolver.getResources("classpath*:skills/public/**");
-                for (org.springframework.core.io.Resource resource : resources) {
-                    if (resource.isReadable()) {
-                        String uriStr = resource.getURI().toString();
-                        int idx = uriStr.indexOf("/skills/public/");
-                        if (idx != -1) {
-                            String relPath = java.net.URLDecoder.decode(
-                                    uriStr.substring(idx + "/skills/public/".length()),
-                                    java.nio.charset.StandardCharsets.UTF_8
-                            );
-                            Path target = publicRoot.resolve(relPath).normalize();
+            Files.createDirectories(publicRoot);
+            org.springframework.core.io.support.PathMatchingResourcePatternResolver resolver =
+                    new org.springframework.core.io.support.PathMatchingResourcePatternResolver();
+            org.springframework.core.io.Resource[] resources = resolver.getResources("classpath*:skills/public/**");
+            boolean provisionedAny = false;
+            for (org.springframework.core.io.Resource resource : resources) {
+                if (resource.isReadable()) {
+                    String uriStr = resource.getURI().toString();
+                    int idx = uriStr.indexOf("/skills/public/");
+                    if (idx != -1) {
+                        String relPath = java.net.URLDecoder.decode(
+                                uriStr.substring(idx + "/skills/public/".length()),
+                                java.nio.charset.StandardCharsets.UTF_8
+                        );
+                        Path target = publicRoot.resolve(relPath).normalize();
+                        if (!Files.exists(target)) {
+                            if (!provisionedAny) {
+                                log.info("Provisioning missing public skills from classpath to {}", publicRoot);
+                                provisionedAny = true;
+                            }
                             Files.createDirectories(target.getParent());
                             try (java.io.InputStream is = resource.getInputStream()) {
                                 Files.copy(is, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);

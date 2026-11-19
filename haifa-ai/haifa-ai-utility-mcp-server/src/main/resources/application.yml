@@ -1,0 +1,54 @@
+server:
+  port: ${UTILITY_MCP_PORT:8091}
+
+spring:
+  application:
+    name: haifa-ai-utility-mcp-server
+  ai:
+    mcp:
+      server:
+        enabled: true
+        name: haifa-utility
+        version: 1.0.0-SNAPSHOT
+        type: SYNC
+        protocol: STATELESS
+        request-timeout: 15s
+        capabilities:
+          tool: true
+          resource: false
+          prompt: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: /mcp
+          disallow-delete: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+haifa:
+  ai:
+    utility-mcp:
+      target-result-bytes: 65536
+      max-result-bytes: 262144
+      proxy:
+        url: ${UTILITY_MCP_PROXY_URL:${LLM_NETWORK_PROXY_URL:}}
+        username: ${UTILITY_MCP_PROXY_USERNAME:${LLM_NETWORK_PROXY_USERNAME:}}
+        password: ${UTILITY_MCP_PROXY_PASSWORD:${LLM_NETWORK_PROXY_PASSWORD:}}
+        providers: ${UTILITY_MCP_PROXY_PROVIDERS:}
+      microsoft-learn:
+        enabled: ${UTILITY_MCP_MICROSOFT_LEARN_ENABLED:true}
+        endpoint: ${UTILITY_MCP_MICROSOFT_LEARN_ENDPOINT:https://learn.microsoft.com/api/mcp}
+        request-timeout: 15s
+        max-content-chars: 60000
+        allow-http-for-tests: false
+      security:
+        allow-missing-origin: true
+        allowed-origins: []
+        requests-per-minute: 120

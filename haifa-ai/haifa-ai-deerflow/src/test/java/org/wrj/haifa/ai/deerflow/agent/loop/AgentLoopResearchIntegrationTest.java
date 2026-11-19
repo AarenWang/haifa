@@ -13,6 +13,7 @@ import org.wrj.haifa.ai.deerflow.agent.RunMode;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
+import org.wrj.haifa.ai.deerflow.model.ModelToolCall;
 import org.wrj.haifa.ai.deerflow.research.CitationManager;
 import org.wrj.haifa.ai.deerflow.research.EvidenceExtractor;
 import org.wrj.haifa.ai.deerflow.research.InMemoryEvidenceStore;
@@ -58,7 +59,8 @@ class AgentLoopResearchIntegrationTest {
         CountingFetchTool fetchTool = new CountingFetchTool();
         AgentTool searchTool = new FixedSearchTool();
         AgentModelClient modelClient = new ResearchModel();
-        AgentLoop loop = new AgentLoop(modelClient, new ToolRegistry(List.of(searchTool, fetchTool)), null, null, null, support);
+        AgentLoop loop = new AgentLoop(modelClient, new ToolRegistry(List.of(searchTool, fetchTool)), null, null, null,
+                new org.wrj.haifa.ai.deerflow.research.ResearchLoopObserver(support, null, null, null, null));
 
         AgentRunConfig config = new AgentRunConfig(
                 "thread-r",
@@ -139,11 +141,7 @@ class AgentLoopResearchIntegrationTest {
                 null,
                 null,
                 null,
-                support,
-                null,
-                planStore,
-                progressTracker,
-                qualityGate
+                new org.wrj.haifa.ai.deerflow.research.ResearchLoopObserver(support, null, planStore, progressTracker, qualityGate)
         );
 
         AgentRunConfig config = new AgentRunConfig(
@@ -184,9 +182,10 @@ class AgentLoopResearchIntegrationTest {
     }
 
     @Test
-    void researchWithoutPlanDoesNotAcceptImmediateFinalAnswer() {
-        AgentLoop loop = new AgentLoop(prompt -> Mono.just(new ModelResponse("<final_answer>premature report</final_answer>")),
-                new ToolRegistry(List.of()));
+    void researchWithoutLegacyPlanAcceptsSkillFinalAnswer() {
+        AgentLoop loop = new AgentLoop(prompt -> Mono.just(new ModelResponse("premature report")),
+                new ToolRegistry(List.of()), null, null, null,
+                new org.wrj.haifa.ai.deerflow.research.ResearchLoopObserver(null, null, null, null, null));
 
         AgentRunConfig config = new AgentRunConfig(
                 "thread-noplan",
@@ -212,8 +211,8 @@ class AgentLoopResearchIntegrationTest {
                 List.of()
         ).collectList().block();
 
-        assertThat(events).extracting(AgentEvent::type).contains(AgentEventType.RUN_COMPLETED);
-        assertThat(events).extracting(AgentEvent::type).doesNotContain(AgentEventType.MODEL_COMPLETED);
+        assertThat(events).extracting(AgentEvent::type).contains(AgentEventType.MODEL_COMPLETED, AgentEventType.RUN_COMPLETED);
+        assertThat(events).extracting(AgentEvent::content).contains("premature report");
     }
 
     private static final class FixedSearchTool implements AgentTool {
@@ -402,11 +401,11 @@ class AgentLoopResearchIntegrationTest {
         public Mono<ModelResponse> generate(ModelPrompt prompt) {
             this.callCount++;
             return switch (this.callCount) {
-                case 1 -> Mono.just(new ModelResponse("<tool_call name=\"web_search\">{\"query\":\"reuse\"}</tool_call>"));
-                case 2 -> Mono.just(new ModelResponse("<tool_call name=\"web_fetch\">{\"url\":\"https://example.com/article?utm_source=test\"}</tool_call>"));
-                case 3 -> Mono.just(new ModelResponse("<tool_call name=\"web_fetch\">{\"url\":\"https://example.com/article\"}</tool_call>"));
+                case 1 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-reuse-search", "web_search", "{\"query\":\"reuse\"}"))));
+                case 2 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-reuse-fetch-1", "web_fetch", "{\"url\":\"https://example.com/article?utm_source=test\"}"))));
+                case 3 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-reuse-fetch-2", "web_fetch", "{\"url\":\"https://example.com/article\"}"))));
                 default -> Mono.just(new ModelResponse(
-                        "<final_answer>Canonical URLs should only be fetched once [citation:Example Article](https://example.com/article)</final_answer>"
+                        "Canonical URLs should only be fetched once [citation:Example Article](https://example.com/article)"
                 ));
             };
         }
@@ -419,19 +418,20 @@ class AgentLoopResearchIntegrationTest {
         public Mono<ModelResponse> generate(ModelPrompt prompt) {
             this.callCount++;
             return switch (this.callCount) {
-                case 1 -> Mono.just(new ModelResponse("<tool_call name=\"web_search\">{\"query\":\"market-size\"}</tool_call>"));
-                case 2 -> Mono.just(new ModelResponse("<tool_call name=\"web_fetch\">{\"url\":\"https://example.com/market-data\"}</tool_call>"));
-                case 3 -> Mono.just(new ModelResponse("<tool_call name=\"web_fetch\">{\"url\":\"https://example.com/market-forecast\"}</tool_call>"));
-                case 4 -> Mono.just(new ModelResponse("<final_answer>Here is an early summary.</final_answer>"));
-                case 5 -> Mono.just(new ModelResponse("<tool_call name=\"web_search\">{\"query\":\"case-study\"}</tool_call>"));
-                case 6 -> Mono.just(new ModelResponse("<tool_call name=\"web_fetch\">{\"url\":\"https://example.com/case-study\"}</tool_call>"));
-                case 7 -> Mono.just(new ModelResponse("<tool_call name=\"web_fetch\">{\"url\":\"https://example.com/expert-view\"}</tool_call>"));
-                case 8 -> Mono.just(new ModelResponse("<tool_call name=\"web_search\">{\"query\":\"risks\"}</tool_call>"));
-                case 9 -> Mono.just(new ModelResponse("<tool_call name=\"web_fetch\">{\"url\":\"https://example.com/risks\"}</tool_call>"));
+                case 1 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-market-search", "web_search", "{\"query\":\"market-size\"}"))));
+                case 2 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-market-data", "web_fetch", "{\"url\":\"https://example.com/market-data\"}"))));
+                case 3 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-market-forecast", "web_fetch", "{\"url\":\"https://example.com/market-forecast\"}"))));
+                case 4 -> Mono.just(new ModelResponse("Here is an early summary."));
+                case 5 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-case-search", "web_search", "{\"query\":\"case-study\"}"))));
+                case 6 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-case-fetch", "web_fetch", "{\"url\":\"https://example.com/case-study\"}"))));
+                case 7 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-expert-fetch", "web_fetch", "{\"url\":\"https://example.com/expert-view\"}"))));
+                case 8 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-risks-search", "web_search", "{\"query\":\"risks\"}"))));
+                case 9 -> Mono.just(new ModelResponse("", List.of(new ModelToolCall("call-risks-fetch", "web_fetch", "{\"url\":\"https://example.com/risks\"}"))));
                 default -> Mono.just(new ModelResponse(
-                        "<final_answer>The AI chip market is growing quickly [citation:Market Data](https://example.com/market-data)</final_answer>"
+                        "The AI chip market is growing quickly [citation:Market Data](https://example.com/market-data)"
                 ));
             };
         }
     }
 }
+

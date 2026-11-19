@@ -8,8 +8,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class WebSearchProviderTypeTest {
 
     @Test
-    void defaultTypeIsDuckDuckGo() {
-        assertThat(WebSearchProviderType.defaultType()).isEqualTo(WebSearchProviderType.DUCKDUCKGO);
+    void defaultTypeIsAliyun() {
+        assertThat(WebSearchProviderType.defaultType()).isEqualTo(WebSearchProviderType.ALIYUN);
     }
 
     @Test
@@ -37,10 +37,10 @@ class WebSearchProviderTypeTest {
 
     @Test
     void metadataIsCorrect() {
-        ProviderMetadata meta = WebSearchProviderType.DUCKDUCKGO.toMetadata();
-        assertThat(meta.id()).isEqualTo("duckduckgo");
-        assertThat(meta.displayName()).isEqualTo("DuckDuckGo");
-        assertThat(meta.requiresApiKey()).isFalse();
+        ProviderMetadata meta = WebSearchProviderType.ALIYUN.toMetadata();
+        assertThat(meta.id()).isEqualTo("aliyun");
+        assertThat(meta.displayName()).isEqualTo("Aliyun IQS Search");
+        assertThat(meta.requiresApiKey()).isTrue();
         assertThat(meta.defaultEnabled()).isTrue();
         assertThat(meta.supportsSearch()).isTrue();
         assertThat(meta.supportsFetch()).isFalse();

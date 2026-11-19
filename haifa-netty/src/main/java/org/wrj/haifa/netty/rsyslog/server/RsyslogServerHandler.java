@@ -3,7 +3,7 @@ package org.wrj.haifa.netty.rsyslog.server;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.socket.DatagramChannel;
-import org.wrj.haifa.netty.rsyslog.client.RFC5424Message;
+import org.wrj.haifa.netty.rsyslog.model.RFC5424Message;
 
 import java.net.InetSocketAddress;
 import java.util.logging.Level;

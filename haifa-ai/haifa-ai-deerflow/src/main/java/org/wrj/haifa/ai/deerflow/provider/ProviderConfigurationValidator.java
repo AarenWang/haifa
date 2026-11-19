@@ -122,6 +122,7 @@ public class ProviderConfigurationValidator {
             case GROUNDROUTE -> " (env: GROUNDROUTE_API_KEY)";
             case SERPER -> " (env: SERPER_API_KEY)";
             case FASTCRW -> " (env: CRW_API_KEY)";
+            case ALIYUN -> " (env: ALIYUN_API_KEY or DASHSCOPE_API_KEY)";
             default -> "";
         };
     }
@@ -135,6 +136,7 @@ public class ProviderConfigurationValidator {
             case GROUNDROUTE -> " (env: GROUNDROUTE_API_KEY)";
             case BROWSERLESS -> " (env: BROWSERLESS_TOKEN)";
             case FASTCRW -> " (env: CRW_API_KEY)";
+            case ALIYUN -> " (env: ALIYUN_API_KEY or DASHSCOPE_API_KEY)";
             default -> "";
         };
     }

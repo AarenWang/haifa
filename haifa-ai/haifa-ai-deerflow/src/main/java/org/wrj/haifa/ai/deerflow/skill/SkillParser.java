@@ -29,6 +29,7 @@ public final class SkillParser {
         String name = skillDir.getFileName().toString();
         String description = null;
         java.util.Set<String> allowedTools = null;
+        java.util.List<String> activationHints = new java.util.ArrayList<>();
 
         String frontMatter = "";
         String body = content;
@@ -62,16 +63,10 @@ public final class SkillParser {
                             if (allowedTools == null) {
                                 allowedTools = new java.util.HashSet<>();
                             }
-                            if (val.startsWith("[") && val.endsWith("]")) {
-                                val = val.substring(1, val.length() - 1);
-                            }
-                            for (String t : val.split(",")) {
-                                String trimmed = t.trim();
-                                if (!trimmed.isEmpty()) {
-                                    allowedTools.add(trimmed);
-                                }
-                            }
+                            allowedTools.addAll(parseInlineList(val));
                         }
+                    } else if ("activation-hints".equals(key) || "activation_hints".equals(key)) {
+                        activationHints.addAll(parseInlineList(val));
                     }
                 }
             }
@@ -88,7 +83,28 @@ public final class SkillParser {
         }
 
         Map<String, List<String>> directories = scanSubdirectories(skillDir);
-        return new Skill(name, description, source, content, directories, allowedTools);
+        return new Skill(name, description, source, content, directories, allowedTools, activationHints);
+    }
+
+    private static List<String> parseInlineList(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        String val = value.trim();
+        if (val.startsWith("[") && val.endsWith("]")) {
+            val = val.substring(1, val.length() - 1);
+        }
+        List<String> items = new java.util.ArrayList<>();
+        for (String raw : val.split(",")) {
+            String item = raw.trim();
+            if ((item.startsWith("\"") && item.endsWith("\"")) || (item.startsWith("'") && item.endsWith("'"))) {
+                item = item.substring(1, item.length() - 1).trim();
+            }
+            if (!item.isEmpty()) {
+                items.add(item);
+            }
+        }
+        return items;
     }
 
     private static String extractDescription(String content) {

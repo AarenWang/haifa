@@ -14,7 +14,7 @@ import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
 
 @Component
-public class GlobTool implements AgentTool {
+public class GlobTool implements ParallelSafeAgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int MAX_RESULTS = 100;

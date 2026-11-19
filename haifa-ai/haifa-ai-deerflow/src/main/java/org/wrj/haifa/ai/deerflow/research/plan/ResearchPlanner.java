@@ -10,8 +10,8 @@ import org.wrj.haifa.ai.deerflow.agent.ResearchOptions;
 import org.wrj.haifa.ai.deerflow.model.AgentModelClient;
 import org.wrj.haifa.ai.deerflow.model.ModelPrompt;
 import org.wrj.haifa.ai.deerflow.model.ModelResponse;
-import org.wrj.haifa.ai.deerflow.research.InMemoryEvidenceStore;
-import org.wrj.haifa.ai.deerflow.research.InMemorySourceRegistry;
+import org.wrj.haifa.ai.deerflow.research.EvidenceStore;
+import org.wrj.haifa.ai.deerflow.research.SourceRegistry;
 
 /**
  * Generates structured research plans from user queries using the configured model.
@@ -21,10 +21,10 @@ import org.wrj.haifa.ai.deerflow.research.InMemorySourceRegistry;
 public class ResearchPlanner {
 
     private final AgentModelClient modelClient;
-    private final InMemorySourceRegistry sourceRegistry;
-    private final InMemoryEvidenceStore evidenceStore;
+    private final SourceRegistry sourceRegistry;
+    private final EvidenceStore evidenceStore;
 
-    public ResearchPlanner(AgentModelClient modelClient, InMemorySourceRegistry sourceRegistry, InMemoryEvidenceStore evidenceStore) {
+    public ResearchPlanner(AgentModelClient modelClient, SourceRegistry sourceRegistry, EvidenceStore evidenceStore) {
         this.modelClient = modelClient;
         this.sourceRegistry = sourceRegistry;
         this.evidenceStore = evidenceStore;
@@ -54,19 +54,133 @@ public class ResearchPlanner {
     }
 
     private PlanGenerationResult generatePlanWithModel(String threadId, String runId, String topic, ResearchOptions options) {
-        String prompt = buildPlanPrompt(topic, options);
-        ModelPrompt modelPrompt = new ModelPrompt(
-                "You are a research planning assistant. Generate structured research plans in JSON format.",
-                prompt,
-                null
+        String schema = """
+                {
+                  "type": "object",
+                  "properties": {
+                    "topic": {"type": "string"},
+                    "objective": {"type": "string"},
+                    "assumptions": {"type": "string"},
+                    "dimensions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {"type": "string"},
+                          "title": {"type": "string"},
+                          "description": {"type": "string"},
+                          "search_queries": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                          },
+                          "expected_source_count": {"type": "integer"}
+                        },
+                        "required": ["id", "title"]
+                      }
+                    },
+                    "quality_requirements": {"type": "string"},
+                    "output_contract": {"type": "string"}
+                  },
+                  "required": ["topic", "objective", "dimensions"]
+                }
+                """;
+
+        org.wrj.haifa.ai.deerflow.model.ModelToolDefinition createPlanTool = new org.wrj.haifa.ai.deerflow.model.ModelToolDefinition(
+                "create_research_plan",
+                "Call this tool to finalize the generated research plan with topic, objective, and dimensions.",
+                schema
         );
-        ModelResponse response = modelClient.generate(modelPrompt).block();
-        if (response == null || !StringUtils.hasText(response.content())) {
-            return PlanGenerationResult.failure("Model returned empty response");
+
+        String prompt = buildPlanPrompt(topic, options);
+        org.wrj.haifa.ai.deerflow.model.ModelPrompt modelPrompt = new org.wrj.haifa.ai.deerflow.model.ModelPrompt(
+                "You are a research planning assistant. You MUST call the 'create_research_plan' tool to return the structured plan.",
+                prompt,
+                null,
+                List.of(),
+                List.of(createPlanTool)
+        );
+
+        org.wrj.haifa.ai.deerflow.model.ModelResponse response = modelClient.generate(modelPrompt).block();
+        if (response == null || response.toolCalls().isEmpty()) {
+            return PlanGenerationResult.failure("Model failed to call create_research_plan tool or returned empty response");
         }
-        // For now, fallback to heuristic since we don't have a robust JSON parser for plan extraction
-        // In a production system, this would parse the model response into a structured plan
-        return PlanGenerationResult.failure("Model response parsing not yet implemented");
+
+        org.wrj.haifa.ai.deerflow.model.ModelToolCall call = response.toolCalls().get(0);
+        if (!"create_research_plan".equals(call.name())) {
+            return PlanGenerationResult.failure("Model called unexpected tool: " + call.name());
+        }
+
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(call.arguments());
+
+            String planTopic = root.path("topic").asText(topic);
+            String objective = root.path("objective").asText("");
+            String assumptions = root.path("assumptions").asText("");
+            String qualityRequirements = root.path("quality_requirements").asText("");
+            String outputContract = root.path("output_contract").asText("");
+
+            List<String> researchQuestions = new ArrayList<>();
+            if (root.has("researchQuestions")) {
+                for (com.fasterxml.jackson.databind.JsonNode q : root.path("researchQuestions")) {
+                    researchQuestions.add(q.asText());
+                }
+            } else {
+                researchQuestions.add(objective);
+            }
+
+            List<ResearchDimension> dimensions = new ArrayList<>();
+            List<String> allSearchQueries = new ArrayList<>();
+            com.fasterxml.jackson.databind.JsonNode dimsNode = root.path("dimensions");
+            if (dimsNode.isArray()) {
+                for (com.fasterxml.jackson.databind.JsonNode d : dimsNode) {
+                    String dimId = d.path("id").asText(UUID.randomUUID().toString());
+                    String title = d.path("title").asText("Dimension");
+                    String desc = d.path("description").asText("");
+                    int expectedCount = d.path("expected_source_count").asInt(3);
+
+                    List<String> queries = new ArrayList<>();
+                    com.fasterxml.jackson.databind.JsonNode qNode = d.path("search_queries");
+                    if (qNode.isArray()) {
+                        for (com.fasterxml.jackson.databind.JsonNode q : qNode) {
+                            queries.add(q.asText());
+                            allSearchQueries.add(q.asText());
+                        }
+                    }
+                    if (queries.isEmpty()) {
+                        queries.add(planTopic + " " + title);
+                        allSearchQueries.add(planTopic + " " + title);
+                    }
+
+                    dimensions.add(new ResearchDimension(
+                            dimId, title, desc, ResearchTaskStatus.PENDING,
+                            queries, expectedCount, 0, 0, List.of()
+                    ));
+                }
+            }
+
+            if (dimensions.isEmpty()) {
+                return PlanGenerationResult.failure("No dimensions generated in research plan");
+            }
+
+            ResearchPlan plan = new ResearchPlan(
+                    UUID.randomUUID().toString(),
+                    threadId,
+                    runId,
+                    planTopic,
+                    researchQuestions,
+                    dimensions,
+                    allSearchQueries,
+                    qualityRequirements,
+                    outputContract,
+                    "CREATED",
+                    java.time.Instant.now(),
+                    java.time.Instant.now()
+            );
+            return PlanGenerationResult.success(plan);
+        } catch (Exception e) {
+            return PlanGenerationResult.failure("Failed to parse create_research_plan arguments: " + e.getMessage());
+        }
     }
 
     private String buildPlanPrompt(String topic, ResearchOptions options) {

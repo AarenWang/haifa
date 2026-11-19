@@ -25,6 +25,16 @@ public class ModelStepStore {
         modelStepRepository.save(entity);
     }
 
+    @Transactional
+    public void saveGraphStep(int stepIndex, String prompt, String response, long startedAt, long durationMs,
+            org.wrj.haifa.ai.deerflow.model.cache.ModelUsage usage,
+            org.wrj.haifa.ai.deerflow.model.cache.PromptFingerprint fingerprint,
+            org.wrj.haifa.ai.deerflow.model.cache.PromptCacheEligibility eligibility,
+            String runId, String threadId) {
+        save(new ModelStep(stepIndex, prompt, response, List.of(), startedAt, durationMs, usage, fingerprint,
+                org.wrj.haifa.ai.deerflow.model.cache.ModelCallPurpose.AGENT_STEP, eligibility), runId, threadId);
+    }
+
     @Transactional(readOnly = true)
     public List<ModelStepEntity> findByRunId(String runId) {
         return modelStepRepository.findByRunIdOrderByStepIndexAsc(runId);

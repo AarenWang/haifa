@@ -1,6 +1,7 @@
 package org.wrj.haifa.ai.deerflow.agent.loop;
 
 import java.util.Map;
+import org.wrj.haifa.ai.deerflow.tool.ToolResult;
 
 /**
  * Standardized tool call result within the agent loop.
@@ -20,6 +21,10 @@ public record ToolCallResult(
         PENDING,
         SUCCESS,
         FAILED,
+        DENIED,
+        NOT_FOUND,
+        CANCELLED,
+        TIMED_OUT,
         TIMEOUT
     }
 
@@ -45,5 +50,19 @@ public record ToolCallResult(
 
     public static ToolCallResult fromError(ToolCall call, String error, long durationMs) {
         return failed(call.id(), call.toolName(), call.arguments(), error, durationMs);
+    }
+
+    public static ToolCallResult from(ToolCall call, ToolResult result, long durationMs) {
+        Status mapped = switch (result.status()) {
+            case SUCCESS -> Status.SUCCESS;
+            case DENIED -> Status.DENIED;
+            case NOT_FOUND -> Status.NOT_FOUND;
+            case CANCELLED -> Status.CANCELLED;
+            case TIMED_OUT -> Status.TIMED_OUT;
+            case FAILED -> Status.FAILED;
+        };
+        boolean success = mapped == Status.SUCCESS;
+        return new ToolCallResult(call.id(), call.toolName(), call.arguments(), mapped,
+                success ? result.content() : "", success ? "" : result.content(), durationMs, result.metadata());
     }
 }

@@ -59,7 +59,7 @@ public class DeferredToolCatalog {
         }
         return switch (toolName) {
             case "present_files", "ask_clarification", "view_image" -> "builtin";
-            case "web_search", "web_fetch", "image_search", "ls", "read_file", "glob", "grep", "write_file", "str_replace", "bash", "list_workspace_files", "read_workspace_file", "list_uploaded_files", "read_uploaded_file" -> "configured";
+            case "web_search", "web_fetch", "image_search", "ls", "read_file", "glob", "grep", "write_file", "str_replace", "bash", "list_workspace_files", "read_workspace_file", "list_uploaded_files", "read_uploaded_file", "run_script" -> "configured";
             case "task" -> "delegation";
             case "current_time", "tool_search" -> "builtin";
             default -> "configured";
@@ -75,7 +75,7 @@ public class DeferredToolCatalog {
             case "web_search", "web_fetch", "image_search" -> "Web/检索";
             case "ls", "read_file", "glob", "grep", "read_uploaded_file", "list_uploaded_files", "list_workspace_files", "read_workspace_file" -> "文件读取";
             case "write_file", "str_replace" -> "文件写入/编辑";
-            case "bash" -> "Shell 执行";
+            case "bash", "run_script" -> "Shell 执行";
             case "task" -> "子 Agent 委派";
             default -> "展示/人机交互";
         };
@@ -106,10 +106,10 @@ public class DeferredToolCatalog {
     private List<ToolDescriptor> standardDescriptors() {
         return List.of(
                 new ToolDescriptor("present_files", "Present final output files to the user.", "builtin", "展示/人机交互", false),
-                new ToolDescriptor("ask_clarification", "Ask the user for clarification about ambiguous requirements.", "builtin", "展示/人机交互", false),
+                new ToolDescriptor("ask_clarification", "Ask the user for structured clarification about ambiguous requirements.", "builtin", "展示/人机交互", false),
                 new ToolDescriptor("view_image", "View an image file from the workspace.", "builtin", "展示/人机交互", false),
                 new ToolDescriptor("current_time", "Get the current date and time.", "builtin", "展示/人机交互", false),
-                new ToolDescriptor("tool_search", "Search available tools and skills.", "builtin", "展示/人机交互", false),
+                new ToolDescriptor("tool_search", "Search available callable tools.", "builtin", "展示/人机交互", false),
                 
                 new ToolDescriptor("web_search", "Search the web for queries to find relevant sources and snippets.", "configured", "Web/检索", false,
                         buildWebSearchProviderInfo()),
@@ -129,55 +129,39 @@ public class DeferredToolCatalog {
                 new ToolDescriptor("write_file", "Write content to a file in the workspace.", "configured", "文件写入/编辑", false),
                 new ToolDescriptor("str_replace", "Find and replace a string in a workspace file.", "configured", "文件写入/编辑", false),
                 new ToolDescriptor("bash", "Run a shell command inside the workspace sandbox.", "configured", "Shell 执行", false),
+                new ToolDescriptor("run_script", "Generate and execute short scripts (python, powershell, node, bash) for local observation and lightweight tasks.", "configured", "Shell 执行", false),
                 
-                new ToolDescriptor("task", "Delegate a sub-task to a subagent.", "delegation", "子 Agent 委派", false),
-                
-                new ToolDescriptor("mcp__placeholder", "Dynamic MCP tool placeholder. Runs MCP server tools.", "mcp", "MCP 动态工具", false)
+                new ToolDescriptor("task", "Delegate a sub-task to a subagent.", "delegation", "子 Agent 委派", false)
         );
+    }
+
+    private List<ToolDescriptor> mcpDescriptors() {
+        if (toolRegistry == null) return List.of();
+        return toolRegistry.tools().stream()
+                .filter(tool -> tool.name().startsWith("mcp__"))
+                .map(tool -> new ToolDescriptor(tool.name(), tool.description(), "mcp", "MCP 动态工具", false))
+                .toList();
+    }
+
+    private List<ToolDescriptor> allDescriptors() {
+        List<ToolDescriptor> result = new java.util.ArrayList<>(standardDescriptors());
+        result.addAll(mcpDescriptors());
+        return List.copyOf(result);
     }
 
     public List<ToolDescriptor> search(String keyword) {
         String lower = keyword == null ? "" : keyword.toLowerCase();
         List<ToolDescriptor> results = new java.util.ArrayList<>();
-        for (ToolDescriptor td : standardDescriptors()) {
+        for (ToolDescriptor td : allDescriptors()) {
             if (matches(td.name(), td.description(), lower)) {
                 results.add(td);
-            }
-        }
-        for (Skill skill : allSkills()) {
-            if (skill.allowedTools() != null) {
-                for (String toolName : skill.allowedTools()) {
-                    if (toolName.toLowerCase().contains(lower) || skill.name().toLowerCase().contains(lower)) {
-                        results.add(new ToolDescriptor(
-                                toolName,
-                                "Provided by skill: " + skill.name() + " (" + skill.description() + ")",
-                                getSource(toolName),
-                                getCategory(toolName),
-                                true
-                        ));
-                    }
-                }
             }
         }
         return results;
     }
 
     public List<ToolDescriptor> listAll() {
-        List<ToolDescriptor> results = new java.util.ArrayList<>(standardDescriptors());
-        for (Skill skill : allSkills()) {
-            if (skill.allowedTools() != null) {
-                for (String toolName : skill.allowedTools()) {
-                    results.add(new ToolDescriptor(
-                            toolName,
-                            "Provided by skill: " + skill.name(),
-                            getSource(toolName),
-                            getCategory(toolName),
-                            true
-                    ));
-                }
-            }
-        }
-        return results;
+        return allDescriptors();
     }
 
     private static boolean matches(String name, String description, String keyword) {

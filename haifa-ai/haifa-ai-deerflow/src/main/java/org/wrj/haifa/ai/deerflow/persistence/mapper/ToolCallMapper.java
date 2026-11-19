@@ -53,8 +53,7 @@ public class ToolCallMapper {
         return switch (status) {
             case PENDING -> ToolCallEntity.Status.REQUESTED;
             case SUCCESS -> ToolCallEntity.Status.COMPLETED;
-            case FAILED -> ToolCallEntity.Status.FAILED;
-            case TIMEOUT -> ToolCallEntity.Status.FAILED;
+            case FAILED, DENIED, NOT_FOUND, CANCELLED, TIMED_OUT, TIMEOUT -> ToolCallEntity.Status.FAILED;
         };
     }
 }

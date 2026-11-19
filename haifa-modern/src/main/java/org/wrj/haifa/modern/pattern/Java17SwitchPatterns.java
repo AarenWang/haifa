@@ -88,6 +88,7 @@ public class Java17SwitchPatterns {
                 case Double d -> "D: " + d;
                 case Boolean b -> "B: " + b;
                 case null -> "null";
+                default -> "Other: " + obj.getClass().getSimpleName();
                 // 如果移除 default，编译器会报错
             };
             System.out.println(result);

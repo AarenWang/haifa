@@ -14,7 +14,7 @@ import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
 
 @Component
-public class GrepTool implements AgentTool {
+public class GrepTool implements ParallelSafeAgentTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int MAX_RESULTS = 50;
